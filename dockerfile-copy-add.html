@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>COPY, ADD e WORKDIR — arquivos e pastas no Dockerfile | Guia Docker</title>
+<meta name="description" content="As instruções WORKDIR, COPY e ADD do Dockerfile: WORKDIR cria e muda a pasta de trabalho (caminhos relativos passam a valer a partir dela), COPY traz arquivos do contexto do build para dentro da imagem (com globs como package*.json), ADD copia e ainda descompacta tar local ou baixa URL (use só nesses casos), COPY --from copia de outra etapa do multi-stage, a ordem dos COPY e o cache, erros reais (copiar de fora do contexto, barra no destino, COPY de arquivo ignorado pelo .dockerignore) e quiz. Exemplo completo copiando a app Node da Ana. Docker Engine 27.x.">
+<link rel="stylesheet" href="assets/style.css?v=4">
+<script>try{var t=localStorage.getItem("tema");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<meta http-equiv="Cache-Control" content="no-store, must-revalidate">
+<script>try{history.scrollRestoration="manual"}catch(e){}(function(){var n=0;function t(){window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;if(++n<60)setTimeout(t,50)}t();window.addEventListener("pagehide",function(){window.scrollTo(0,0);document.documentElement.scrollTop=0;});window.addEventListener("pageshow",function(){window.scrollTo(0,0)});window.addEventListener("load",function(){window.scrollTo(0,0)});})();document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(a){var h=a.getAttribute("href")||"";if(/[.]html($|[?#])/.test(h)&&a.host===location.host){window.scrollTo(0,0);document.documentElement.scrollTop=0;}}});</script>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" id="sidebar" aria-label="Tópicos"></nav>
+<main class="main">
+<div class="content">
+
+<div class="pager"></div>
+
+<h1><span class="hl">COPY</span>, <span class="hl">ADD</span> e <span class="hl">WORKDIR</span></h1>
+
+<p class="intro">A imagem base vem vazia de código — é você que leva o seu projeto para dentro dela. Quem faz essa mudança de pasta e essa cópia de arquivos são três instruções: <code>WORKDIR</code> (arruma a casa), <code>COPY</code> (traz os arquivos do seu computador) e <code>ADD</code> (o irmão turbinado, que também descompacta e baixa da internet). Nesta aula a Ana vai empacotar a API dela inteira dentro da imagem.</p>
+
+<div class="note">
+<strong>Você vai aprender</strong>
+<ul>
+  <li><code>WORKDIR</code>: criar a pasta de trabalho, mudar para ela e por que caminhos relativos passam a valer a partir dela.</li>
+  <li><code>COPY</code>: copiar arquivos e pastas do contexto do build para a imagem — com glob (<code>package*.json</code>) e vários destinos.</li>
+  <li>Por que a ordem dos <code>COPY</code> deixa o <code>npm install</code> em cache (ponte para a aula de camadas).</li>
+  <li><code>ADD</code>: quando ele é útil (descompactar tar local, baixar URL) e quando evitar.</li>
+  <li><code>COPY --from</code>: copiar de outra etapa do próprio build (multi-stage) ou de qualquer imagem.</li>
+  <li>Erros reais: copiar de fora do contexto, barra no fim do destino, arquivo que o .dockerignore excluiu.</li>
+</ul>
+</div>
+
+<hr>
+
+<h2>A cena: a pasta da Ana antes do build</h2>
+<p>No notebook da Ana, o projeto <code>~/minha-api</code> está assim:</p>
+<pre class="term" data-cwd="~">$ cd ~/minha-api
+$ ls -la
+Dockerfile  package.json  package-lock.json  server.js  src/  test/</pre>
+<p>Ela quer que tudo isso vá para dentro da imagem, numa pasta <code>/app</code>. É exatamente o que <code>WORKDIR</code> + <code>COPY</code> fazem.</p>
+
+<hr>
+
+<h2>WORKDIR: a pasta de trabalho</h2>
+<p>O <code>WORKDIR</code> <strong>cria a pasta se ela não existir e muda para ela</strong>. Tudo que vem depois no Dockerfile (<code>RUN</code>, <code>COPY</code>, <code>CMD</code>…) acontece dentro dela, e caminhos relativos são resolvidos a partir dela:</p>
+<pre class="file">FROM node:22-alpine
+WORKDIR /app
+# a partir daqui, tudo acontece em /app dentro da imagem:
+# COPY . .  vai copiar para /app, e o CMD roda em /app</pre>
+<p>É o equivalente a dar um <code>cd /app</code> permanente no build. Sem <code>WORKDIR</code>, os arquivos cairiam na raiz <code>/</code> da imagem — uma bagunça (e o <code>CMD</code> teria que usar caminhos absolutos).</p>
+
+<dl class="anatomy">
+  <dt>WORKDIR</dt><dd>"a partir de agora, trabalhe nesta pasta".</dd>
+  <dt>/app</dt><dd>caminho <strong>absoluto</strong> dentro da imagem. Se você usar um caminho relativo (<code>WORKDIR app</code>), ele é relativo ao WORKDIR anterior — evite, prefira sempre absoluto.</dd>
+</dl>
+
+<div class="tip"><strong>WORKDIR cria as pastas no meio do caminho:</strong> <code>WORKDIR /app/src</code> cria <code>/app</code> e <code>/app/src</code> se não existirem. E vários WORKDIR vão se acumulando: depois de <code>WORKDIR /app</code>, um <code>WORKDIR src</code> leva para <code>/app/src</code>.</div>
+
+<div class="warn"><strong>Erro comum: WORKDIR relativo.</strong> <code>WORKDIR app</code> depois de <code>WORKDIR /srv</code> leva para <code>/srv/app</code>, não para <code>/app</code>. Muita gente acha que é absoluto. <strong>Regra:</strong> comece a pasta com <code>/</code> para deixar explícito que é absoluto.</div>
+
+<hr>
+
+<h2>COPY: trazer arquivos do seu computador para a imagem</h2>
+<p>O <code>COPY</code> copia arquivos <strong>do contexto do build</strong> (as pastas que você enviou com o <code>.</code> no <code>docker build</code>) para dentro da imagem. A forma mais comum é "copiar tudo para cá":</p>
+<pre class="file">WORKDIR /app
+COPY . .</pre>
+<dl class="anatomy">
+  <dt>COPY</dt><dd>a instrução de cópia.</dd>
+  <dt>. (origem)</dt><dd><strong>tudo da pasta atual do seu computador</strong> (o contexto). Pode ser arquivo, pasta ou glob (<code>*.json</code>, <code>src/</code>).</dd>
+  <dt>. (destino)</dt><dd>a pasta <code>/app</code> dentro da imagem (o WORKDIR atual). O ponto como destino significa "o diretório de trabalho atual".</dd>
+</dl>
+<p>Você também pode ser específico e copiar só alguns arquivos:</p>
+<pre class="file">COPY package.json package-lock.json server.js ./</pre>
+<p>E pode ter vários pares origem-destino, e o destino pode ser uma pasta explícita:</p>
+<pre class="file">COPY package*.json ./          # glob: package.json, package-lock.json…
+COPY src/ /app/src/            # copia o CONTEÚDO de src/ para /app/src/
+COPY README.md /app/README.md  # arquivo único para caminho exato</pre>
+
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Escrita</th><th>O que copia</th></tr>
+<tr><td><code>COPY . .</code></td><td>Tudo do contexto para o WORKDIR</td></tr>
+<tr><td><code>COPY package*.json ./</code></td><td>Todos os arquivos que começam com <code>package</code> e terminam com <code>.json</code></td></tr>
+<tr><td><code>COPY src/ /app/src/</code></td><td>O conteúdo da pasta <code>src/</code> para <code>/app/src/</code> na imagem</td></tr>
+<tr><td><code>COPY a.txt b.txt /pasta/</code></td><td>Vários arquivos de uma vez para a mesma pasta</td></tr>
+<tr><td><code>COPY --chown=node:node . .</code></td><td>Copia mudando o dono dos arquivos (útil quando a imagem roda como usuário não-root — nível 3)</td></tr>
+</table>
+</div>
+
+<div class="warn"><strong>Erro real: barra no fim faz diferença.</strong> <code>COPY src /app</code> (sem barra no destino) copia a pasta <code>src</code> <strong>como</strong> <code>/app</code> (o conteúdo de src vai parar dentro de /app, e se /app já existir como pasta, dá <code>not a directory</code>). Já <code>COPY src/ /app/</code> copia o <strong>conteúdo</strong> de src para dentro de /app. A barra no fim do destino é o que manda: com barra = "dentro dessa pasta"; sem barra = "esse nome". Na dúvida, ponha barra nos dois lados quando copiar pastas.</div>
+
+<div class="warn"><strong>Erro real: copiar de fora do contexto.</strong> Se a Ana roda <code>docker build .</code> dentro de <code>~/minha-api</code> e escreve <code>COPY ../outra-pasta/arquivo.txt .</code>, o build falha: <code>failed to compute cache key: … not found</code> — <strong>tudo que o COPY usa tem que estar dentro do contexto</strong>. O daemon não vê nada fora da pasta enviada. Se precisar de um arquivo de fora, copie ele para dentro do projeto antes (ou mude o contexto do build).</div>
+
+<hr>
+
+<h2>A ordem dos COPY: cache amigo</h2>
+<p>O truque mais importante desta aula: <strong>copie os arquivos que mudam pouco antes, e o código por último</strong>. A Ana separa o <code>COPY</code> em dois:</p>
+<pre class="file">WORKDIR /app
+COPY package*.json ./     # muda só quando as dependências mudam
+RUN npm install           # fica em cache na maioria dos builds
+COPY . .                  # o código muda toda hora — mas está no fim</pre>
+<p>Assim, quando a Ana edita o <code>server.js</code> e rebuilda, só o último <code>COPY</code> é refeito — o <code>npm install</code> continua em cache e o build leva segundos. Se a ordem fosse invertida, cada mudança de código quebraria o cache do <code>npm install</code> e o build demoraria minutos. A aula <a href="camadas-cache.html">Camadas e cache do build</a> detalha por quê.</p>
+
+<div class="tip"><strong>Por que não um COPY só?</strong> Dá para fazer <code>COPY . .</code> uma vez só — funciona. A divisão existe purely pelo cache: dependências mudam raramente, código muda toda hora.</div>
+
+<hr>
+
+<h2>ADD: COPY com superpoderes (use com moderação)</h2>
+<p>O <code>ADD</code> faz tudo o que o <code>COPY</code> faz <strong>mais duas coisas</strong>:</p>
+<ul>
+  <li>se a origem for um <strong>arquivo compactado local</strong> (<code>.tar</code>, <code>.tar.gz</code>, <code>.tar.xz</code>…), ele <strong>descompacta sozinho</strong> no destino;</li>
+  <li>se a origem for uma <strong>URL</strong> (<code>https://…</code>), ele <strong>baixa o arquivo</strong> da internet durante o build.</li>
+</ul>
+<pre class="file">ADD https://github.com/meu-org/meu-app/archive/refs/tags/v1.2.3.tar.gz /tmp/app.tar.gz
+ADD fontes.tar.gz /app/fontes/</pre>
+<p>O primeiro baixa o código da release direto do GitHub; o segundo descompacta o tar local na pasta de fontes.</p>
+<div class="warn"><strong>Regra prática:</strong> use <code>COPY</code> para arquivos do seu projeto. Use <code>ADD</code> <strong>só</strong> quando precisar descompactar um tar local ou baixar uma URL — esses dois recursos invalidam o cache do build com frequência (aula <a href="camadas-cache.html">Camadas e cache</a>) e uma URL que muda de conteúdo pode quebrar builds antigos sem aviso. Se for baixar algo, prefira <code>RUN curl -o … &amp;&amp; …</code> com a URL explícita no comando — aí o cache quebra de forma visível e controlável.</div>
+
+<hr>
+
+<h2>COPY --from: copiar de outra etapa (multi-stage)</h2>
+<p>Em builds com várias etapas (<code>FROM … AS nome</code>, aula <a href="dockerfile-from.html">FROM</a>), o <code>COPY --from</code> copia arquivos <strong>de uma etapa anterior</strong> — ou de qualquer imagem — em vez do contexto:</p>
+<pre class="file">FROM node:22-alpine AS build
+WORKDIR /app
+COPY . .
+RUN npm run build        # gera /app/dist
+
+FROM nginx:alpine
+COPY --from=build /app/dist /usr/share/nginx/html</pre>
+<p>A imagem final recebe só o <code>dist</code> compilado — sem Node, sem dependências de build, bem menor. Também dá para copiar de uma imagem qualquer: <code>COPY --from=nginx:alpine /etc/nginx/nginx.conf /etc/nginx/nginx.conf</code>. É assim que se gera imagens enxutas (aula <a href="multi-stage.html">Multi-stage builds</a>, nível 3).</p>
+
+<hr>
+
+<h2>Exemplo completo: copiando a app Node da Ana</h2>
+<pre class="file"># Dockerfile da ~/minha-api
+FROM node:22-alpine
+WORKDIR /app
+COPY package*.json ./
+RUN npm install
+COPY . .
+EXPOSE 3000
+CMD ["node", "server.js"]</pre>
+<p>O build dela, vendo cada COPY virar um passo:</p>
+<pre class="term" data-cwd="~/minha-api">$ docker build -t minha-api:1.0 .
+Sending build context to Docker daemon  58.37kB
+Step 1/6 : FROM node:22-alpine
+ ---> c3d4e5f6a1b2
+Step 2/6 : WORKDIR /app
+ ---> Running in a1b2c3d4e5f6
+Removing intermediate container a1b2c3d4e5f6
+ ---> b2c3d4e5f6a1
+Step 3/6 : COPY package*.json ./
+ ---> d4e5f6a1b2c3
+Step 4/6 : RUN npm install
+ ---> Running in e5f6a1b2c3d4
+Removing intermediate container e5f6a1b2c3d4
+ ---> f6a1b2c3d4e5
+Step 5/6 : COPY . .
+ ---> 1a2b3c4d5e6f
+Step 6/6 : CMD ["node", "server.js"]
+ ---> Running in 2b3c4d5e6f7a
+Removing intermediate container 2b3c4d5e6f7a
+ ---> 3c4d5e6f7a8b
+Successfully built 3c4d5e6f7a8b
+Successfully tagged minha-api:1.0</pre>
+<p>Dá para conferir que os arquivos foram mesmo para dentro, entrando no container:</p>
+<pre class="term" data-cwd="~/minha-api">$ docker run -d --name api minha-api:1.0
+$ docker exec api ls /app
+Dockerfile  node_modules  package.json  package-lock.json  server.js  src</pre>
+
+<div class="try" data-goal="Successfully tagged minha-app:1.0" data-solucao="docker build -t minha-app:1.0 .">
+<p class="try-task"><strong>Missão:</strong> simule o build do Dockerfile acima: rode <code>docker build -t minha-app:1.0 .</code> no terminal abaixo e acompanhe os passos.</p>
+</div>
+
+<div class="try" data-goal="CONTAINER ID" data-solucao="docker run -d --name api node:22-alpine">
+<p class="try-task"><strong>Missão extra:</strong> depois de buildar, suba um container e liste os arquivos dentro dele: rode <code>docker run -d --name api node:22-alpine</code> e depois <code>docker exec api ls /</code>.</p>
+</div>
+
+<hr>
+
+<h2>Quando dá errado</h2>
+
+<div class="warn"><strong>Arquivo ignorado pelo .dockerignore:</strong> se o <code>.dockerignore</code> exclui <code>node_modules/</code> e o Dockerfile tem <code>COPY node_modules /app/</code>, o build falha com <code>failed to compute cache key: node_modules: not found</code>. O <code>.dockerignore</code> vale para o <code>COPY</code> também — o arquivo nem chega ao daemon (aula <a href="dockerignore.html">.dockerignore</a>).</div>
+
+<div class="warn"><strong>Permissão depois do COPY:</strong> arquivos copiados com <code>COPY</code> mantêm as permissões do host e pertencem ao <code>root</code> dentro da imagem. Se a sua app roda como usuário não-root (boa prática, nível 3) e precisa escrever numa pasta copiada, use <code>COPY --chown=usuario:grupo …</code> ou ajuste com <code>RUN chown</code>.</div>
+
+<div class="warn"><strong>Symlinks que apontam para fora:</strong> se o contexto tem um link simbólico apontando para fora da pasta do projeto, o Docker segue o link e pode acabar enviando (ou quebrando) — o comportamento mudou ao longo das versões; o seguro é não ter symlinks apontando para fora no contexto.</div>
+
+<hr>
+
+<h2>Referência rápida</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Escrita</th><th>O que faz</th></tr>
+<tr><td><code>WORKDIR /app</code></td><td>Cria (se não existe) e muda para <code>/app</code>; próximos caminhos relativos valem a partir dela</td></tr>
+<tr><td><code>COPY origem destino</code></td><td>Copia do contexto para a imagem (origem pode ser glob)</td></tr>
+<tr><td><code>COPY . .</code></td><td>Copia tudo do contexto para o WORKDIR</td></tr>
+<tr><td><code>COPY --from=etapa …</code></td><td>Copia de outra etapa do build (ou de outra imagem), não do contexto</td></tr>
+<tr><td><code>ADD url destino</code></td><td>Baixa a URL durante o build (prefira <code>RUN curl</code>)</td></tr>
+<tr><td><code>ADD arquivo.tar.gz destino/</code></td><td>Descompacta o tar local no destino</td></tr>
+</table>
+</div>
+
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Quero…</th><th>Uso</th></tr>
+<tr><td>Levar o projeto inteiro para a imagem</td><td><code>WORKDIR /app</code> + <code>COPY . .</code></td></tr>
+<tr><td>Build rápido com cache no npm install</td><td><code>COPY package*.json ./</code> → <code>RUN npm install</code> → <code>COPY . .</code></td></tr>
+<tr><td>Imagem final só com o build compilado</td><td>multi-stage + <code>COPY --from=build /app/dist …</code></td></tr>
+<tr><td>Trazer um arquivo de config de outra imagem</td><td><code>COPY --from=nginx:alpine /etc/nginx/nginx.conf …</code></td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>Quiz rápido</h2>
+
+<div class="mc" data-answer="2">
+<p class="mc-q">1. Para que serve o <code>WORKDIR /app</code>?</p>
+<label><input type="radio" name="q1"> Para instalar o pacote <code>app</code></label>
+<label><input type="radio" name="q1"> Para criar a pasta <code>/app</code> (se não existe) e passar a trabalhar nela — os próximos caminhos relativos valem a partir dela</label>
+<label><input type="radio" name="q1"> Para definir a porta 80 do servidor</label>
+<label><input type="radio" name="q1"> Para copiar a pasta app do host</label>
+</div>
+
+<div class="mc" data-answer="3">
+<p class="mc-q">2. O que <code>COPY . .</code> faz?</p>
+<label><input type="radio" name="q2"> Copia o Dockerfile para a raiz da imagem</label>
+<label><input type="radio" name="q2"> Copia um arquivo chamado <code>.</code> do host</label>
+<label><input type="radio" name="q2"> Copia <strong>todo o contexto do build</strong> para o diretório de trabalho atual dentro da imagem</label>
+<label><input type="radio" name="q2"> Copia a imagem inteira para o host</label>
+</div>
+
+<div class="mc" data-answer="4">
+<p class="mc-q">3. Por que a Ana separa <code>COPY package*.json ./</code> + <code>RUN npm install</code> de <code>COPY . .</code>, nessa ordem?</p>
+<label><input type="radio" name="q3"> Porque o npm install precisa do Dockerfile junto</label>
+<label><input type="radio" name="q3"> Por estética: o Dockerfile fica mais bonito</label>
+<label><input type="radio" name="q3"> Não precisa separar; é a mesma coisa</label>
+<label><input type="radio" name="q3"> Porque o código muda toda hora e as dependências não: com o código por último, o <code>npm install</code> fica em cache na maioria dos builds</label>
+</div>
+
+<div class="mc" data-answer="1">
+<p class="mc-q">4. Qual a diferença prática entre <code>COPY</code> e <code>ADD</code>?</p>
+<label><input type="radio" name="q4"> O ADD também descompacta tar local e baixa URLs durante o build; para arquivos do projeto, prefira COPY</label>
+<label><input type="radio" name="q4"> O COPY é mais lento</label>
+<label><input type="radio" name="q4"> O ADD não aceita glob</label>
+<label><input type="radio" name="q4"> Nenhuma, são idênticos</label>
+</div>
+
+<hr>
+
+<h2>Resumo</h2>
+<ul>
+  <li><code>WORKDIR /app</code> cria a pasta e muda para ela; todo <code>RUN</code>/<code>COPY</code>/<code>CMD</code> depois trabalha dali. Prefira caminho absoluto (começando com <code>/</code>).</li>
+  <li><code>COPY origem destino</code> traz arquivos <strong>do contexto do build</strong> para a imagem; <code>COPY . .</code> copia tudo para o WORKDIR; glob (<code>*.json</code>) funciona na origem.</li>
+  <li>Ordem importa pelo cache: copie o que muda pouco (manifests) antes e o código por último — <code>COPY package*.json ./</code> → <code>RUN npm install</code> → <code>COPY . .</code>.</li>
+  <li><code>ADD</code> = <code>COPY</code> + descompactar tar local + baixar URL. Use só nesses dois casos; para o resto, <code>COPY</code> é mais previsível com o cache.</li>
+  <li><code>COPY --from=etapa</code> copia de outra etapa do multi-stage ou de outra imagem — sem tocar no contexto.</li>
+  <li>Erros reais: copiar de fora do contexto (<code>not found</code>), barra no fim do destino mudando o sentido, arquivo excluído pelo <code>.dockerignore</code>, permissão de arquivos copiados (use <code>--chown</code>).</li>
+</ul>
+
+<div class="tip"><strong>Próxima aula:</strong> <a href="dockerfile-expose-env.html">EXPOSE, ENV e ARG</a> — documentar portas e passar variáveis para dentro da imagem.</div>
+
+<div class="pager"></div>
+
+</div>
+</main>
+</div>
+<script src="assets/site.js?v=4"></script>
+</body>
+</html>

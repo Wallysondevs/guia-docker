@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>docker inspect — detalhes de qualquer objeto em JSON | Guia Docker</title>
+<meta name="description" content="O docker inspect a fundo: a saída é um JSON gigante com tudo sobre o objeto (Id, State, NetworkSettings, Mounts, Config, HostConfig), como usar --format com templates Go para extrair só um campo ({{.NetworkSettings.IPAddress}}, {{.State.Status}}, range sobre listas), o que é &lt;no value&gt;, funciona com containers, imagens, volumes e redes (--type), e exemplos práticos em scripts com docker ps -q.">
+<link rel="stylesheet" href="assets/style.css?v=4">
+<script>try{var t=localStorage.getItem("tema");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<meta http-equiv="Cache-Control" content="no-store, must-revalidate">
+<script>try{history.scrollRestoration="manual"}catch(e){}(function(){var n=0;function t(){window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;if(++n<60)setTimeout(t,50)}t();window.addEventListener("pagehide",function(){window.scrollTo(0,0);document.documentElement.scrollTop=0;});window.addEventListener("pageshow",function(){window.scrollTo(0,0)});window.addEventListener("load",function(){window.scrollTo(0,0)});})();document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(a){var h=a.getAttribute("href")||"";if(/[.]html($|[?#])/.test(h)&&a.host===location.host){window.scrollTo(0,0);document.documentElement.scrollTop=0;}}});</script>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" id="sidebar" aria-label="Tópicos"></nav>
+<main class="main">
+<div class="content">
+
+<div class="pager"></div>
+
+<h1><span class="hl">docker inspect</span> — o Raio-X dos objetos</h1>
+
+<p class="intro">Todo objeto do Docker — container, imagem, volume, rede — tem um <strong>JSON gigante</strong> guardado no daemon com todos os seus detalhes. O <code>docker inspect</code> imprime esse JSON na tela. Ele é chato de ler inteiro, mas é a <strong>base para consultar qualquer coisa por script</strong>: com <code>--format</code> você extrai só o campo que precisa.</p>
+
+<div class="note">
+<strong>Você vai aprender</strong>
+<ul>
+  <li>Ler a saída JSON do <code>docker inspect</code> (array de objetos, campos principais).</li>
+  <li>Usar <code>--format</code> com <strong>templates Go</strong> para extrair só um campo: <code>{{.State.Status}}</code>, <code>{{.NetworkSettings.IPAddress}}</code>.</li>
+  <li><code>{{range}}</code> para percorrer listas (ex.: <code>.Mounts</code>) e o que é <code>&lt;no value&gt;</code>.</li>
+  <li>Inspecionar não só containers, mas também imagens, volumes e redes (<code>--type</code>).</li>
+  <li>Casos práticos: pegar IP num script, listar status de todos os containers com <code>docker ps -q | xargs docker inspect</code>.</li>
+</ul>
+</div>
+
+<hr>
+
+<h2>A saída é um JSON enorme</h2>
+<p>A Ana subiu um container <code>web</code> no <code>ana@notebook</code> e foi fuçar:</p>
+<pre class="term">$ docker run -d --name web -p 8080:80 nginx:alpine
+a1b2c3d4e5f6
+$ docker inspect web
+[
+    {
+        "Id": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6",
+        "Created": "2025-11-24T12:00:00.123456789Z",
+        "Name": "/web",
+        "State": {
+            "Status": "running",
+            "Running": true,
+            "StartedAt": "2025-11-24T12:00:01.000000000Z",
+            "ExitCode": 0
+        },
+        "Image": "sha256:b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6…",
+        "Config": {
+            "Image": "nginx:alpine",
+            "Env": ["PATH=/usr/local/sbin:/usr/local/bin:…"],
+            "Cmd": ["nginx", "-g", "daemon off;"],
+            "ExposedPorts": { "80/tcp": {} }
+        },
+        "NetworkSettings": {
+            "IPAddress": "172.17.0.2",
+            "Ports": { "80/tcp": [{ "HostIp": "0.0.0.0", "HostPort": "8080" }] }
+        },
+        "Mounts": []
+    }
+]</pre>
+<p>Cada objeto vira um <strong>elemento de um array JSON</strong> (os colchetes <code>[ ]</code> no começo e no fim). É muita coisa — por isso quase sempre vamos filtrar com <code>--format</code>. Antes, uma visão do mapa:</p>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Seção do JSON</th><th>O que guarda</th></tr>
+<tr><td><code>Id</code>, <code>Name</code>, <code>Created</code></td><td>Identidade do objeto (o <code>Name</code> vem com <code>/</code> na frente: <code>/web</code>)</td></tr>
+<tr><td><code>State</code></td><td>Estado atual: <code>Status</code> (<code>running</code>, <code>exited</code>…), <code>Running</code>, datas, <code>ExitCode</code></td></tr>
+<tr><td><code>Image</code></td><td>O ID (sha256) da imagem usada</td></tr>
+<tr><td><code>Config</code></td><td>A configuração desejada: imagem, comando (<code>Cmd</code>), variáveis (<code>Env</code>), portas expostas</td></tr>
+<tr><td><code>HostConfig</code></td><td>A configuração do host: restart policy, limites de memória/CPU, binds de volumes</td></tr>
+<tr><td><code>NetworkSettings</code></td><td>Rede: <code>IPAddress</code>, portas publicadas (<code>Ports</code>), redes às quais pertence</td></tr>
+<tr><td><code>Mounts</code></td><td>Lista de montagens (volumes/binds): origem, destino, modo</td></tr>
+</table>
+</div>
+
+<div class="try" data-goal="&quot;Id&quot;" data-solucao="docker inspect web">
+<p class="try-task"><strong>Missão:</strong> suba um container com <code>docker run -d --name web nginx:alpine</code> e rode <code>docker inspect web</code>. Você deve ver o campo <code>"Id"</code> no JSON.</p>
+</div>
+
+<hr>
+
+<h2>Anatomia do comando</h2>
+<dl class="anatomy">
+  <dt>docker inspect</dt><dd>mostra os detalhes completos de um ou mais objetos, em JSON (um array).</dd>
+  <dt>--format '{{…}}'</dt><dd>filtra a saída com um <strong>template Go</strong>: cada <code>{{.Campo.Subcampo}}</code> acessa um campo do JSON, com ponto separando os níveis.</dd>
+  <dt>--type=container</dt><dd>força o tipo do objeto (<code>container</code>, <code>image</code>, <code>volume</code>, <code>network</code>) — útil quando nomes coincidem.</dd>
+  <dt>web</dt><dd>o objeto: nome ou ID (os 12 primeiros caracteres do ID bastam). Dá para passar vários de uma vez.</dd>
+</dl>
+
+<hr>
+
+<h2>--format: extrair só o que interessa</h2>
+<p>Em vez de caçar no JSON gigante, peça só o campo — a sintaxe é <code>{{.Campo.Subcampo}}</code>, com <strong>ponto</strong> separando os níveis:</p>
+<pre class="term">$ docker inspect --format '{{.State.Status}}' web
+running
+$ docker inspect --format '{{.NetworkSettings.IPAddress}}' web
+172.17.0.2
+$ docker inspect --format '{{.Name}} está {{.State.Status}} desde {{.State.StartedAt}}' web
+/web está running desde 2025-11-24T12:00:01.000000000Z
+$ docker inspect --format '{{.Config.Image}} | portas: {{.Config.ExposedPorts}}' web
+nginx:alpine | portas: map[80/tcp:{}]</pre>
+<p>Se o campo não existe, o Docker imprime <code>&lt;no value&gt;</code> — sinal de que o nome do campo está errado (ou de que o objeto não tem aquele campo, como <code>.Mounts</code> vazio):</p>
+<pre class="term">$ docker inspect --format '{{.State.Statusss}}' web
+&lt;no value&gt;                                          « errei o nome do campo
+$ docker inspect --format '{{.State.Status}}' web
+running</pre>
+<p>Com <code>table</code> no começo, a saída vira uma tabela com cabeçalho (bom para vários objetos):</p>
+<pre class="term">$ docker inspect --format 'table {{.Name}}\t{{.State.Status}}\t{{.NetworkSettings.IPAddress}}' web
+NAME      STATUS     IP
+/web      running    172.17.0.2</pre>
+
+<hr>
+
+<h2>Campos úteis de um container</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>O que você quer saber</th><th>Exemplo de --format</th><th>Saída típica</th></tr>
+<tr><td>Status</td><td><code>{{.State.Status}}</code></td><td><code>running</code>, <code>exited</code>, <code>created</code>…</td></tr>
+<tr><td>Código de saída (137 = OOM kill)</td><td><code>{{.State.ExitCode}}</code></td><td><code>0</code>, <code>137</code>…</td></tr>
+<tr><td>IP na rede</td><td><code>{{.NetworkSettings.IPAddress}}</code></td><td><code>172.17.0.2</code></td></tr>
+<tr><td>Portas publicadas</td><td><code>{{.NetworkSettings.Ports}}</code></td><td><code>map[80/tcp:[{0.0.0.0 8080}]]</code></td></tr>
+<tr><td>Imagem usada</td><td><code>{{.Config.Image}}</code></td><td><code>nginx:alpine</code></td></tr>
+<tr><td>Comando</td><td><code>{{.Config.Cmd}}</code></td><td><code>[nginx -g daemon off;]</code></td></tr>
+<tr><td>Variáveis de ambiente</td><td><code>{{.Config.Env}}</code></td><td>A lista das variáveis passadas com <code>-e</code></td></tr>
+<tr><td>Volumes montados</td><td><code>{{range .Mounts}}…{{end}}</code></td><td>Origem → destino de cada montagem (ver abaixo)</td></tr>
+<tr><td>Política de restart</td><td><code>{{.HostConfig.RestartPolicy.Name}}</code></td><td><code>always</code>, <code>unless-stopped</code>, <code>no</code>…</td></tr>
+<tr><td>Limite de memória</td><td><code>{{.HostConfig.Memory}}</code></td><td>Em bytes (0 = sem limite)</td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>{{range}}: percorrer listas (ex.: os volumes, um por linha)</h2>
+<p>O <code>Mounts</code> é uma <strong>lista</strong>, então um <code>{{.Mounts}}</code> sozinho imprime a lista inteira de uma vez. Para um item por linha, use <code>{{range …}}{{end}}</code> e o <code>{{"\n"}}</code> para quebrar a linha:</p>
+<pre class="term">$ docker run -d --name banco -v dados-postgres:/var/lib/postgresql/data postgres:16-alpine
+$ docker inspect --format '{{range .Mounts}}{{.Source}} → {{.Destination}} ({{.Mode}}){{"\n"}}{{end}}' banco
+/var/lib/docker/volumes/dados-postgres/_data → /var/lib/postgresql/data (rw)</pre>
+<p>Dentro do <code>range</code>, o ponto vira o item atual: <code>{{.Source}}</code>, <code>{{.Destination}}</code>, <code>{{.Mode}}</code> (rw = leitura e escrita, ro = só leitura).</p>
+
+<hr>
+
+<h2>Vale para imagem, volume e rede também</h2>
+<p>O inspect funciona com qualquer tipo de objeto — indique o tipo com <code>--type</code> (ou deixe o Docker descobrir pelo nome):</p>
+<pre class="term">$ docker inspect --type=image --format 'SO: {{.Os}}/{{.Architecture}}, tamanho: {{.Size}} bytes' nginx:alpine
+SO: linux/amd64, tamanho: 50462720 bytes
+$ docker inspect --type=volume --format 'driver: {{.Driver}}, criado em: {{.CreatedAt}}' dados-postgres
+driver: local, criado em: 2025-11-20T09:12:00Z
+$ docker inspect --type=network --format '{{.Name}}: driver {{.Driver}}, escopo {{.Scope}}' bridge
+bridge: driver bridge, escopo local</pre>
+<p>Dá para inspecionar vários objetos de uma vez — o resultado é um array com todos:</p>
+<pre class="term">$ docker inspect --format '{{.Name}} → {{.State.Status}}' web banco
+/web → running
+/banco → exited</pre>
+
+<div class="try" data-goal="&quot;Id&quot;" data-solucao="docker inspect nginx:alpine">
+<p class="try-task"><strong>Missão:</strong> o inspect também funciona em <strong>imagens</strong>: rode <code>docker inspect nginx:alpine</code> e veja o campo <code>"Id"</code> do JSON da imagem.</p>
+</div>
+
+<hr>
+
+<h2>Exemplo prático 1: pegar o IP num script</h2>
+<pre class="term">$ IP=$(docker inspect --format '{{.NetworkSettings.IPAddress}}' web)
+$ echo "o container web está no IP $IP"
+o container web está no IP 172.17.0.2
+$ curl -s "http://$IP/" | head -1
+&lt;!DOCTYPE html&gt;</pre>
+<p>O <code>$( … )</code> guarda a saída do comando numa variável do shell — a forma clássica de usar o inspect dentro de scripts.</p>
+
+<hr>
+
+<h2>Exemplo prático 2: status de TODOS os containers de uma vez</h2>
+<p>Combine <code>docker ps -q</code> (lista só os IDs) com <code>xargs</code> (roda um comando para cada linha):</p>
+<pre class="term">$ docker ps -aq | xargs docker inspect --format 'table {{.Name}}\t{{.State.Status}}\t{{.State.ExitCode}}'
+NAME                STATUS      EXIT CODE
+/web                running     0
+/banco              exited      137
+/cache              running     0</pre>
+<p>Útil para um diagnóstico rápido: quem está rodando, quem morreu e com que código de saída (137 = morto pelo OOM killer — aula <a href="docker-stats.html">docker stats</a> e <a href="limites-recursos.html">Limites de CPU e memória</a>).</p>
+
+<hr>
+
+<h2>JSON bonito: jq</h2>
+<p>Se tiver o <code>jq</code> instalado, dá para reformatar e filtrar o JSON direto:</p>
+<pre class="term">$ docker inspect web | jq '.[0].NetworkSettings.Ports'
+{
+  "80/tcp": [
+    {
+      "HostIp": "0.0.0.0",
+      "HostPort": "8080"
+    }
+  ]
+}
+$ docker inspect --format '{{json .State}}' web | jq .
+{
+  "Status": "running",
+  "Running": true,
+  "ExitCode": 0
+}</pre>
+<p>O <code>{{json .Campo}}</code> converte o campo para JSON (bom para passar para o <code>jq</code>); o <code>{{pretty .Campo}}</code> imprime o JSON indentado.</p>
+
+<hr>
+
+<h2>Inspecionando serviços do Compose</h2>
+<p>Os containers criados pelo <code>docker compose</code> são containers normais — o inspect funciona igual, só muda o nome (<code>projeto-serviço-1</code>):</p>
+<pre class="term" data-cwd="~/meuapp">$ docker inspect --format '{{.Name}} usa {{.Config.Image}} e está {{.State.Status}}' meuapp-web-1
+/meuapp-web-1 usa nginx:alpine e está running
+$ docker inspect meuapp-banco-1 | jq '.[0].Mounts[0]'
+{
+  "Type": "volume",
+  "Name": "meuapp_dados-db",
+  "Source": "/var/lib/docker/volumes/meuapp_dados-db/_data",
+  "Destination": "/var/lib/postgresql/data"
+}</pre>
+
+<hr>
+
+<h2>Erros comuns</h2>
+<pre class="term">$ docker inspect meubanco
+Error: No such object: meubanco</pre>
+<div class="warn"><strong>Atenção:</strong> <code>Error: No such object: meubanco</code> significa nome digitado errado ou objeto já removido (um <code>docker system prune</code> passa por aqui — aula <a href="docker-system-prune.html">prune</a>). Liste os objetos antes (<code>docker ps -a</code>, <code>docker images</code>, <code>docker volume ls</code>, <code>docker network ls</code>) e tente de novo com o nome ou ID certo.</div>
+<div class="warn"><strong>Nome que existe como imagem E como container:</strong> se você tem uma imagem <code>web</code> e um container <code>web</code>, o inspect pode escolher o errado. Nesse caso, use <code>--type=container</code> (ou o ID completo) para não ter dúvida.</div>
+
+<hr>
+
+<h2>Quiz rápido</h2>
+<div class="mc" data-answer="3">
+<p class="mc-q">1. Qual --format imprime só o status do container <code>web</code>?</p>
+<label><input type="radio" name="q1"> <code>docker inspect --format status web</code></label>
+<label><input type="radio" name="q1"> <code>docker inspect web --format status</code></label>
+<label><input type="radio" name="q1"> <code>docker inspect --format '{{.State.Status}}' web</code></label>
+<label><input type="radio" name="q1"> <code>docker inspect --status web</code></label>
+</div>
+
+<div class="mc" data-answer="2">
+<p class="mc-q">2. O que o Docker imprime quando o campo do --format não existe?</p>
+<label><input type="radio" name="q2"> <code>null</code></label>
+<label><input type="radio" name="q2"> <code>&lt;no value&gt;</code></label>
+<label><input type="radio" name="q2"> <code>Error: no such field</code></label>
+<label><input type="radio" name="q2"> Nada — a linha sai vazia e o comando falha</label>
+</div>
+
+<div class="mc" data-answer="1">
+<p class="mc-q">3. Como listar os destinos dos volumes de um container, um por linha?</p>
+<label><input type="radio" name="q3"> <code>--format '{{range .Mounts}}{{.Destination}}{{"\n"}}{{end}}'</code></label>
+<label><input type="radio" name="q3"> <code>--format '{{.Mounts}}'</code> ( tudo numa linha só )</label>
+<label><input type="radio" name="q3"> <code>--volumes</code></label>
+<label><input type="radio" name="q3"> <code>docker volume ls</code></label>
+</div>
+
+<hr>
+
+<h2>Resumo</h2>
+<ul>
+  <li>O <code>docker inspect NOME</code> imprime um <strong>array JSON</strong> com tudo sobre o objeto: <code>Id</code>, <code>State</code>, <code>Config</code>, <code>HostConfig</code>, <code>NetworkSettings</code>, <code>Mounts</code>.</li>
+  <li><code>--format '{{.Campo.Subcampo}}'</code> usa <strong>templates Go</strong> (ponto = nível) para extrair só um campo; campo inexistente imprime <code>&lt;no value&gt;</code>.</li>
+  <li><code>{{range .Lista}}…{{end}}</code> percorre listas (ex.: <code>.Mounts</code>); <code>{{"\n"}}</code> quebra linha; <code>table …</code> faz tabela com cabeçalho.</li>
+  <li>Campos úteis: <code>{{.State.Status}}</code>, <code>{{.State.ExitCode}}</code>, <code>{{.NetworkSettings.IPAddress}}</code>, <code>{{.Config.Image}}</code>, <code>{{.Config.Env}}</code>, <code>{{.HostConfig.RestartPolicy.Name}}</code>, <code>{{.HostConfig.Memory}}</code>.</li>
+  <li>Funciona com <code>--type=image|volume|network</code> também; vários objetos de uma vez viram um array só.</li>
+  <li>Em scripts: <code>IP=$(docker inspect --format '{{.NetworkSettings.IPAddress}}' web)</code> e <code>docker ps -aq | xargs docker inspect --format …</code>.</li>
+  <li>Erro comum: <code>Error: No such object: …</code> — nome errado ou objeto já removido; liste com <code>ps -a</code>/<code>images</code>/<code>volume ls</code> antes.</li>
+</ul>
+
+<div class="tip"><strong>Próxima aula:</strong> <a href="docker-stats.html">docker stats: uso de recursos em tempo real</a> — CPU, memória, rede e disco dos containers, ao vivo.</div>
+
+</div>
+</main>
+</div>
+<script src="assets/site.js?v=4"></script>
+</body>
+</html>

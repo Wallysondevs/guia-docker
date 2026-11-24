@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Seu Primeiro Container — docker run hello-world | Guia Docker</title>
+<meta name="description" content="Rode seu primeiro container com docker run hello-world: a história da Ana testando o Docker pela primeira vez, o que aconteceu passo a passo (cliente, daemon, pull automático, criação, start, saída), como ler a mensagem de boas-vindas, docker ps -a para ver o container que já saiu, o significado de Exited (0), e docker rm para limpar — tudo conferido no Docker real e no simulador.">
+<link rel="stylesheet" href="assets/style.css?v=4">
+<script>try{var t=localStorage.getItem("tema");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<meta http-equiv="Cache-Control" content="no-store, must-revalidate">
+<script>try{history.scrollRestoration="manual"}catch(e){}(function(){var n=0;function t(){window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;if(++n<60)setTimeout(t,50)}t();window.addEventListener("pagehide",function(){window.scrollTo(0,0);document.documentElement.scrollTop=0;});window.addEventListener("pageshow",function(){window.scrollTo(0,0)});window.addEventListener("load",function(){window.scrollTo(0,0)});})();document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(a){var h=a.getAttribute("href")||"";if(/[.]html($|[?#])/.test(h)&&a.host===location.host){window.scrollTo(0,0);document.documentElement.scrollTop=0;}}});</script>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" id="sidebar" aria-label="Tópicos"></nav>
+<main class="main">
+<div class="content">
+
+<div class="pager"></div>
+
+<h1>Seu Primeiro <span class="hl">Container</span></h1>
+
+<p class="intro">O <code>hello-world</code> é o "Olá, mundo!" do Docker: uma imagem minúscula (18 kB!) que imprime uma mensagem explicando o que acabou de acontecer e sai. É o comando perfeito para saber que tudo está funcionando — e, nesta aula, para entender <strong>cada passo</strong> que o Docker deu nos bastidores.</p>
+
+<div class="note">
+<strong>Você vai aprender</strong>
+<ul>
+  <li>Rodar <code>docker run hello-world</code> e entender a saída linha por linha.</li>
+  <li>O que o Docker fez nos bastidores: cliente → daemon → pull → create → start → attach.</li>
+  <li>Por que o terminal "travou" um instante e depois voltou.</li>
+  <li><code>docker ps -a</code> para ver containers que já terminaram, e o que é <code>Exited (0)</code>.</li>
+  <li><code>docker rm</code> para remover o container (sem apagar a imagem).</li>
+  <li>A opção <code>--rm</code>: rodar e já apagar.</li>
+</ul>
+</div>
+
+<hr>
+
+<h2>A cena: a Ana liga o notebook pela primeira vez</h2>
+<p>A Ana acabou de <a href="instalar.html">instalar o Docker</a> no <code>notebook</code> dela. Para saber se deu certo, ela roda o comando que todo mundo roda primeiro:</p>
+
+<div class="try" data-goal="Hello from Docker" data-solucao="docker run hello-world">
+<p class="try-task"><strong>Missão:</strong> digite <code>docker run hello-world</code> e aperte <kbd>Enter</kbd>.</p>
+</div>
+
+<pre class="term">$ docker run hello-world
+
+Hello from Docker!
+This message shows that your installation appears to be working correctly.
+
+To generate this message, Docker took the following steps:
+ 1. The Docker client contacted the Docker daemon.
+ 2. The Docker daemon pulled the "hello-world" image from the Docker Hub.
+ 3. The Docker daemon created a new container from that image.
+ 4. The Docker daemon streamed that output to the Docker client.</pre>
+
+<h3>Lendo a mensagem</h3>
+<dl class="anatomy">
+  <dt>Hello from Docker!</dt><dd>O "olá" — essa linha é impressa pelo programa dentro do container.</dd>
+  <dt>This message shows that your installation appears to be working correctly.</dt><dd>A frase de teste: se ela chegou até a sua tela, a instalação funciona.</dd>
+  <dt>Os 4 passos</dt><dd>A própria imagem explica o que o Docker fez (vamos destrinchar já já).</dd>
+</dl>
+
+<hr>
+
+<h2>O que aconteceu nos bastidores</h2>
+<p>O <code>docker run hello-world</code> parece um comando só, mas dispara uma conversa entre duas peças — o <strong>cliente</strong> (o comando <code>docker</code> que você digitou) e o <strong>daemon</strong> (<code>dockerd</code>, o serviço rodando em segundo plano):</p>
+
+<ol class="passo">
+  <li>O <strong>cliente</strong> (<code>docker</code>) mandou o pedido para o <strong>daemon</strong> (<code>dockerd</code>) pelo socket <code>/var/run/docker.sock</code>.</li>
+  <li>O daemon viu que a imagem <code>hello-world</code> <strong>não estava na máquina</strong> e fez o <strong>pull</strong> automático do Docker Hub (se já tivesse, pulava esse passo).</li>
+  <li>O daemon <strong>criou</strong> um container a partir da imagem: uma camada gravável em cima das camadas somente leitura da imagem.</li>
+  <li>O daemon <strong>iniciou</strong> o container, que imprimiu a mensagem no terminal e terminou (código de saída 0).</li>
+  <li>O cliente mostrou a saída na sua tela e devolveu o terminal (por isso parece que "travou um instante": era o download + criação).</li>
+</ol>
+
+<pre class="term">cliente (docker)  ──pedido──▶  daemon (dockerd)
+                                   │  imagem não existe localmente?
+                                   ▼
+                              pull do Docker Hub
+                                   │
+                                   ▼
+                              create (camada gravável) ──▶ start ──▶ saída no seu terminal</pre>
+
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Palavra do comando</th><th>Significado</th></tr>
+<tr><td><code>docker</code></td><td>O programa cliente (CLI). Sempre começa com ele.</td></tr>
+<tr><td><code>run</code></td><td>O subcomando: "crie um container novo a partir dessa imagem <strong>e</strong> inicie ele agora".</td></tr>
+<tr><td><code>hello-world</code></td><td>A imagem usada (nome = <code>REPOSITORY</code>; sem <code>:tag</code>, vale <code>:latest</code>).</td></tr>
+</table>
+</div>
+
+<p>O detalhe importante: <code>run</code> = <strong>create + start + attach</strong>. Existe o <code>docker create</code> (só cria, parado) e o <code>docker start</code> (liga um já criado) — dá para separar os passos, mas no dia a dia o <code>run</code> faz tudo de uma vez.</p>
+
+<hr>
+
+<h2>Vendo o container que já saiu</h2>
+<p>Por padrão, <code>docker ps</code> mostra só os containers <strong>rodando</strong>. O hello-world já terminou (ele só imprime a mensagem e sai), então ele não aparece:</p>
+<pre class="term">$ docker ps
+CONTAINER ID   IMAGE   COMMAND   CREATED   STATUS   PORTS   NAMES</pre>
+<p>Lista vazia — mas o container <strong>existe</strong>, só está parado. Para ver todos, use <code>-a</code> (de <em>all</em>):</p>
+
+<div class="try" data-goal="hello-world" data-solucao="docker ps -a">
+<p class="try-task"><strong>Missão:</strong> rode <code>docker ps -a</code> para listar todos os containers, inclusive os que já pararam.</p>
+</div>
+
+<pre class="term">$ docker ps -a
+CONTAINER ID   IMAGE         COMMAND    CREATED          STATUS                      PORTS   NAMES
+7d3a1b9c2e4f   hello-world   "/hello"   20 seconds ago   Exited (0) 18 seconds ago           clever_curie-42</pre>
+
+<p>Na coluna <strong>STATUS</strong>, <code>Exited (0)</code> quer dizer: o container rodou, terminou, e devolveu o código <strong>0</strong> = sucesso. O <code>NAMES</code> é o nome aleatório que o Docker inventou (<code>clever_curie-42</code> — cientista + número).</p>
+
+<h3>Os códigos de saída (exit codes)</h3>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Status</th><th>Significado</th></tr>
+<tr><td><code>Up …</code></td><td>Está rodando agora.</td></tr>
+<tr><td><code>Exited (0) …</code></td><td>Terminou com sucesso (código 0).</td></tr>
+<tr><td><code>Exited (1) …</code></td><td>Terminou com erro (código 1 — olhe <code>docker logs</code>).</td></tr>
+<tr><td><code>Exited (137) …</code></td><td>Foi morto à força (SIGKILL — típico de <code>docker kill</code>).</td></tr>
+<tr><td><code>Created</code></td><td>Foi criado mas nunca iniciou (<code>docker create</code>).</td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>Limpando: docker rm</h2>
+<p>O container parado continua ocupando um espacinho e enchendo a lista do <code>ps -a</code>. Para apagar de vez:</p>
+<pre class="term">$ docker rm clever_curie-42
+clever_curie-42
+$ docker ps -a
+CONTAINER ID   IMAGE   COMMAND   CREATED   STATUS   PORTS   NAMES</pre>
+<p>O comando imprime o <strong>nome do container removido</strong> (é a confirmação). A lista ficou vazia de novo.</p>
+
+<p>O container sumiu da lista. A <strong>imagem</strong> <code>hello-world</code> continua na máquina — confirme com <code>docker images</code>. Apagar o "bolo" não apaga a "receita" (aula <a href="conceitos.html">conceitos</a>). Quem apaga imagem é o <code>docker rmi</code> (<a href="docker-rmi.html">aula própria</a>).</p>
+
+<div class="try" data-goal="No such container" data-solucao="docker rm container-que-nao-existe">
+<p class="try-task"><strong>Missão:</strong> tente remover um container que não existe: <code>docker rm container-que-nao-existe</code>. Veja a mensagem de erro real.</p>
+</div>
+
+<pre class="term">$ docker rm container-que-nao-existe
+Error: No such container: container-que-nao-existe</pre>
+
+<hr>
+
+<h2>--rm: rodar e já apagar</h2>
+<p>Para testes rápidos, existe a opção <code>--rm</code>: o container roda, imprime a saída e <strong>é apagado automaticamente</strong> quando termina — não fica nem na lista do <code>ps -a</code>:</p>
+<pre class="term">$ docker run --rm hello-world
+
+Hello from Docker!
+…
+$ docker ps -a
+CONTAINER ID   IMAGE   COMMAND   CREATED   STATUS   PORTS   NAMES   « vazio: o --rm já limpou</pre>
+
+<div class="tip"><strong>Dica:</strong> para rodar e já apagar o container ao sair, use <code>docker run --rm hello-world</code>. É o padrão para testes rápidos.</div>
+
+<hr>
+
+<h2>Dois jeitos de fazer a mesma coisa</h2>
+<p>O <code>docker run</code> é um atalho para três operações que existem separadas:</p>
+
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Forma em 1 comando</th><th>Forma em 3 comandos</th><th>Quando usar a segunda</th></tr>
+<tr><td><code>docker run hello-world</code></td><td><code>docker create --name teste hello-world</code> → <code>docker start -a teste</code></td><td>Quando você quer criar o container antes, inspecionar (<code>docker inspect</code>) e só depois ligar</td></tr>
+</table>
+</div>
+
+<pre class="term">$ docker create --name teste hello-world
+7d3a1b9c2e4f…
+$ docker ps -a
+… STATUS      NAMES
+… Created     teste          « criou mas NÃO rodou
+$ docker start -a teste      « -a = attach: mostra a saída no terminal
+
+Hello from Docker!
+…
+$ docker ps -a
+… Exited (0) 2 seconds ago   teste</pre>
+
+<p>Repare: entre o <code>create</code> e o <code>start</code>, o status era <code>Created</code> — o container existia, parado. O <code>start -a</code> ligou e grudou a saída na tela (o <code>-a</code> é o "attach").</p>
+
+<h3>E se a imagem já estiver na máquina?</h3>
+<p>Na segunda vez que a Ana roda <code>docker run hello-world</code>, a saída muda um pouco: como a imagem já está no disco, o Docker <strong>pula o download</strong> e cria direto:</p>
+<pre class="term">$ docker run hello-world
+9f8e7d6c5b4a
+
+Hello from Docker!
+…</pre>
+<p>No Docker de verdade, a primeira vez mostra várias linhas de <code>Pulling from library/hello-world</code> (uma por camada baixada); da segunda em diante, aparece só <code>Using default tag: latest</code> / a imagem local é usada na hora. É por isso que o segundo <code>run</code> é instantâneo.</p>
+
+<hr>
+
+<h2>Erros comuns nesta primeira aula</h2>
+
+<div class="warning">
+<strong><code>Cannot connect to the Docker daemon</code></strong>
+<p>O serviço do Docker não está rodando. No Linux: <code>sudo systemctl start docker</code>. No Docker Desktop: abra o app. Detalhes na aula <a href="instalar.html">Instalar o Docker</a>.</p>
+</div>
+
+<div class="warning">
+<strong><code>permission denied while trying to connect to the Docker daemon socket</code></strong>
+<p>Seu usuário não está no grupo <code>docker</code>: <code>sudo usermod -aG docker $USER</code> e depois <code>newgrp docker</code> (ou saia e entre de novo). Também na aula de <a href="instalar.html">instalação</a>.</p>
+</div>
+
+<div class="warning">
+<strong>A saída mostra "pull access denied" para outra imagem</strong>
+<p>Se você trocar <code>hello-world</code> por um nome que não existe no Hub, o Docker responde <code>pull access denied … repository does not exist or may require 'docker login'</code>. A imagem <code>hello-world</code> existe e é pública — é por isso que ela é o teste padrão.</p>
+</div>
+
+<div class="mc" data-answer="2">
+<p class="mc-q">Depois de <code>docker run hello-world</code>, por que <code>docker ps</code> (sem <code>-a</code>) mostra a lista vazia?</p>
+<label><input type="radio" name="q1"> Porque o container foi apagado sozinho</label>
+<label><input type="radio" name="q1"> Porque o hello-world já terminou e <code>ps</code> só mostra containers rodando</label>
+<label><input type="radio" name="q1"> Porque deu erro no comando</label>
+<label><input type="radio" name="q1"> Porque a imagem hello-world é muito pequena</label>
+</div>
+
+<div class="mc" data-answer="3">
+<p class="mc-q">O que significa <code>Exited (0)</code> na coluna STATUS?</p>
+<label><input type="radio" name="q2"> O container está rodando há 0 segundos</label>
+<label><input type="radio" name="q2"> O container está pausado</label>
+<label><input type="radio" name="q2"> O container terminou e devolveu o código 0 (sucesso)</label>
+<label><input type="radio" name="q2"> O container tem 0 portas abertas e por isso parou</label>
+</div>
+
+<div class="mc" data-answer="1">
+<p class="mc-q">A Ana apagou o container do hello-world com <code>docker rm</code>. A imagem <code>hello-world</code>…</p>
+<label><input type="radio" name="q3"> continua na máquina (confira com <code>docker images</code>)</label>
+<label><input type="radio" name="q3"> foi apagada junto</label>
+<label><input type="radio" name="q3"> foi enviada de volta ao Docker Hub</label>
+<label><input type="radio" name="q3"> virou uma imagem <code>&lt;none&gt;</code></label>
+</div>
+
+<hr>
+
+<h2>Resumo</h2>
+<ul>
+  <li><code>docker run hello-world</code> é o teste de fumaça: baixa a imagem (se precisar), cria o container, inicia e mostra a saída.</li>
+  <li>Nos bastidores: <strong>cliente → daemon → pull → create → start → attach</strong> — a mensagem da imagem explica os 4 passos.</li>
+  <li><code>docker ps</code> = só os rodando; <code>docker ps -a</code> = todos, inclusive parados (<code>Exited (0)</code> = terminou com sucesso).</li>
+  <li><code>docker rm NOME</code> apaga o container e imprime o nome como confirmação; a <strong>imagem não é apagada</strong>.</li>
+  <li><code>docker run --rm …</code> roda e apaga sozinho ao terminar — ótimo para testes.</li>
+  <li>Erros de "primeira vez": daemon parado (<code>Cannot connect…</code>) e permissão no socket (<code>permission denied</code>) — os dois resolvidos na aula de <a href="instalar.html">instalação</a>.</li>
+</ul>
+
+<div class="tip"><strong>Próxima aula:</strong> <a href="docker-run.html">docker run: anatomia do comando</a> — agora que o primeiro container rodou, vamos aprender cada opção do <code>run</code> (<code>-d</code>, <code>--name</code>, <code>-p</code>, <code>-e</code>, <code>-v</code>, <code>--rm</code>…).</div>
+
+</div>
+</main>
+</div>
+<script src="assets/site.js?v=4"></script>
+</body>
+</html>

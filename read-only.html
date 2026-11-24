@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sistema de arquivos somente leitura (--read-only) | Guia Docker</title>
+<meta name="description" content="A flag --read-only do docker run: o sistema de arquivos inteiro do container vira somente leitura, ideal para apps stateless; como liberar pastas específicas com --tmpfs (tmpfs vive na RAM, com opções size/noexec/nosuid); o erro real 'Read-only file system' (Errno 30) quando a app tenta gravar; volumes continuam graváveis; exemplo completo com nginx liberando exatamente as pastas que ele precisa; tabela do que pode e do que não pode escrever e cenário de produção.">
+<link rel="stylesheet" href="assets/style.css?v=4">
+<script>try{var t=localStorage.getItem("tema");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<meta http-equiv="Cache-Control" content="no-store, must-revalidate">
+<script>try{history.scrollRestoration="manual"}catch(e){}(function(){var n=0;function t(){window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;if(++n<60)setTimeout(t,50)}t();window.addEventListener("pagehide",function(){window.scrollTo(0,0);document.documentElement.scrollTop=0;});window.addEventListener("pageshow",function(){window.scrollTo(0,0)});window.addEventListener("load",function(){window.scrollTo(0,0)});})();document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(a){var h=a.getAttribute("href")||"";if(/[.]html($|[?#])/.test(h)&&a.host===location.host){window.scrollTo(0,0);document.documentElement.scrollTop=0;}}});</script>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" id="sidebar" aria-label="Tópicos"></nav>
+<main class="main">
+<div class="content">
+
+<div class="pager"></div>
+
+<h1><span class="hl">--read-only</span> — sistema de arquivos somente leitura</h1>
+
+<p class="intro">A Ana já deixou a API da Loja Aurora rodando como usuário comum (aula <a href="usuario-nao-root.html">USER</a>). Ótimo. Mas ela reparou numa coisa: mesmo como usuário comum, o processo dentro do container ainda consegue <strong>escrever em qualquer lugar</strong> do sistema de arquivos — inclusive em cima de binários importantes, como o <code>/usr/bin/node</code>. Se um atacante entrar no container, ele pode trocar esse binário por uma versão adulterada e, da próxima vez que a app reiniciar, o código malicioso roda no lugar do dela. Com <code>--read-only</code>, o sistema de arquivos inteiro do container é montado como <strong>somente leitura</strong>, e o que a app precisar gravar vai para lugares explícitos que você libera.</p>
+
+<div class="note">
+<strong>Você vai aprender</strong>
+<ul>
+  <li>O que muda na prática com <code>docker run --read-only</code>.</li>
+  <li><code>--tmpfs /tmp</code>: uma pasta na memória RAM para arquivos temporários, com opções <code>size</code>, <code>noexec</code>, <code>nosuid</code>.</li>
+  <li>Apps <strong>stateless</strong>: dados persistentes vão para volumes, não para dentro do container.</li>
+  <li>O erro real <code>Read-only file system</code> (Errno 30) quando a app tenta gravar — e como ler o caminho que ela tentou gravar.</li>
+  <li>Exemplo completo com Nginx, liberando exatamente as pastas que ele precisa.</li>
+  <li>Tabela resumo: o que fica gravável e o que fica bloqueado.</li>
+</ul>
+</div>
+
+<hr>
+
+<h2>A ideia: o apartamento vira museu</h2>
+<p>Sem <code>--read-only</code>, o container ganha uma <strong>camada gravável</strong> no topo da imagem: o processo pode escrever em qualquer lugar, como se o apartamento fosse dele para reformar. Com <code>--read-only</code>, o sistema de arquivos inteiro vira <strong>somente leitura</strong> — como um museu: dá para olhar, não dá para riscar a parede.</p>
+<p>E onde a app vai gravar o que precisa? Em dois lugares, que você controla:</p>
+<ul>
+  <li><strong>Volumes</strong> (<code>-v</code>): pastas persistentes, o lugar certo para dados de verdade (banco, uploads, logs em arquivo).</li>
+  <li><strong>tmpfs</strong> (<code>--tmpfs</code>): pastas temporárias que vivem na memória RAM — rápidas, graváveis e descartáveis quando o container para.</li>
+</ul>
+<p>A regra de ouro fica sendo: <strong>container é descartável, dado não é</strong>.</p>
+
+<hr>
+
+<h2>--read-only na prática</h2>
+<p>No notebook da Ana, o site estático da loja sobe assim:</p>
+<pre class="term">$ docker run -d --name site --read-only --tmpfs /tmp -p 8080:80 nginx:alpine
+f3a1b2c3d4e5…
+
+$ docker ps
+CONTAINER ID   IMAGE          STATUS         PORTS                  NAMES
+f3a1b2c3d4e5   nginx:alpine   Up 3 seconds   0.0.0.0:8080-&gt;80/tcp   site</pre>
+<p>O Nginx sobe normal porque o pouco que ele precisa gravar vai para <code>/tmp</code> — que liberamos com <code>--tmpfs</code>.</p>
+<dl class="anatomy">
+  <dt>--read-only</dt><dd>Monta o sistema de arquivos inteiro do container (a imagem + a camada gravável) como somente leitura.</dd>
+  <dt>--tmpfs /tmp</dt><dd>Cria <code>/tmp</code> como tmpfs: gravável, rápido (RAM) e descartável — o conteúdo some quando o container para ou é apagado.</dd>
+  <dt>-p 8080:80</dt><dd>Publica a porta 80 do container na 8080 da máquina. Portas de rede não envolvem o sistema de arquivos, então seguem funcionando.</dd>
+  <dt>-d --name site</dt><dd>Roda em segundo plano com nome fixo, para o <code>docker ps</code> e o <code>docker logs</code> ficarem fáceis (aula <a href="docker-run.html">docker run</a>).</dd>
+</dl>
+
+<hr>
+
+<h2>O erro quando a app tenta gravar</h2>
+<p>Sem tmpfs em lugar nenhum, qualquer tentativa de escrita falha na hora com o erro que vem lá do kernel:</p>
+<pre class="term">$ docker run --rm --read-only python:3.12-slim python -c "open('/tmp/x','w')"
+Traceback (most recent call last):
+  File "&lt;string&gt;", line 1, in &lt;module&gt;
+OSError: [Errno 30] Read-only file system: '/tmp/x'</pre>
+<p>E dá para confirmar de fora, entrando no container:</p>
+<pre class="term">$ docker exec site touch /novo-arquivo
+touch: /novo-arquivo: Read-only file system</pre>
+<div class="warning"><strong>Se a sua aplicação quebrar com <code>Errno 30</code> depois de ligar <code>--read-only</code>, é sinal de que ela grava em algum lugar do sistema de arquivos.</strong> A cura <em>não</em> é desligar o <code>--read-only</code>: é ler o caminho no próprio erro (no exemplo, <code>/tmp/x</code>) e liberar exatamente essa pasta com <code>--tmpfs</code> — ou, se o dado precisa persistir, jogá-lo num volume (<code>-v</code>). Cada pasta liberada é uma porta a mais; libere só o necessário.</div>
+
+<div class="cenario">
+<strong>Cenário real: a API que gravava em /tmp e "funcionava"</strong>
+<p>A Ana ligou <code>--read-only</code> na API da Loja Aurora e, na primeira subida, o container caía na hora com <code>OSError: [Errno 30] Read-only file system: '/app/cache/sessao-123'</code>. Acontece que a biblioteca de sessões gravava arquivos numa pasta <code>cache/</code> dentro do próprio app — um cache que nem precisava persistir. A solução foi apontar o cache para <code>/tmp</code> (variável de ambiente <code>SESSION_DIR=/tmp/sess</code>) e adicionar <code>--tmpfs /tmp</code> no <code>docker run</code>. Em dez minutos a API subiu travada contra escrita. Se o dado fosse importante (um upload de cliente, por exemplo), aí sim teria ido para um volume nomeado.</p>
+</div>
+
+<hr>
+
+<h2>--tmpfs: pastas temporárias na RAM</h2>
+<p>O <code>--tmpfs</code> cria uma pasta que vive na <strong>memória RAM</strong>: é gravável, muito rápida e <strong>não persiste</strong> — quando o container para ou é apagado, o conteúdo some. Use para <code>/tmp</code>, <code>/run</code>, caches e qualquer coisa descartável:</p>
+<pre class="term">$ docker run -d --name api --read-only \
+>     --tmpfs /tmp \
+>     --tmpfs /run \
+>     --tmpfs /var/cache:size=64m,noexec \
+>     -p 3000:3000 minha-api:segura
+b2c3d4e5f6a1…</pre>
+<p>Depois dos dois pontos dá para passar opções, separadas por vírgula:</p>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Opção do --tmpfs</th><th>O que faz</th><th>Exemplo</th></tr>
+<tr><td><code>size=64m</code></td><td>Limita o tamanho da pasta na RAM (padrão: metade da RAM do host).</td><td><code>--tmpfs /var/cache:size=64m</code></td></tr>
+<tr><td><code>noexec</code></td><td>Não deixa executar binários dali — um atacante não consegue rodar um programa que ele tenha conseguido gravar.</td><td><code>--tmpfs /tmp:noexec</code></td></tr>
+<tr><td><code>nosuid</code></td><td>Binários dali não ganham privilégios (bloqueia executáveis setuid).</td><td><code>--tmpfs /run:nosuid</code></td></tr>
+<tr><td><code>rw</code> / <code>ro</code></td><td>Força gravável ou somente leitura (padrão é <code>rw</code>).</td><td><code>--tmpfs /tmp:rw,noexec,nosuid</code></td></tr>
+</table>
+</div>
+<p>Combine as três proteções nos lugares de escrita temporária: <code>size=…</code> para não estourar a RAM, <code>noexec</code> e <code>nosuid</code> para o que for gravado lá não virar executável privilegiado.</p>
+
+<hr>
+
+<h2>Apps stateless: dados persistentes vão para volumes</h2>
+<p>Com o sistema de arquivos fechado, a regra é: <strong>tudo que precisa sobreviver vai para um volume</strong>, que é montado <em>depois</em> do <code>--read-only</code> e continua gravável normalmente:</p>
+<pre class="term">$ docker volume create api-dados
+api-dados
+
+$ docker run -d --name api --read-only \
+>     --tmpfs /tmp \
+>     -v api-dados:/app/dados \
+>     -p 3000:3000 minha-api:segura
+c3d4e5f6a1b2…</pre>
+<p>Assim a app grava em <code>/app/dados</code> (o volume, que sobrevive ao container) normalmente, mas não consegue tocar em mais nada — nem sobrescrever o próprio código. Volumes nomeados são criados com <code>docker volume create</code> (aula <a href="docker-volume.html">docker volume</a>); bind mounts (<code>-v ~/pasta:/caminho</code>) também funcionam e seguem graváveis.</p>
+
+<hr>
+
+<h2>Exemplo completo: Nginx só de leitura</h2>
+<p>A imagem oficial do Nginx grava em algumas pastas na inicialização (cache, pid, templates de configuração). A receita é liberar <strong>exatamente</strong> essas pastas com tmpfs, nada mais:</p>
+<pre class="term">$ docker run -d --name site --read-only \
+>     --tmpfs /tmp \
+>     --tmpfs /var/cache/nginx \
+>     --tmpfs /var/run \
+>     --tmpfs /etc/nginx/conf.d \
+>     -p 8080:80 nginx:alpine
+d4e5f6a1b2c3…
+
+$ docker logs site
+/docker-entrypoint.sh: Configuration complete; ready for start up   « subiu normal</pre>
+<p>Repare no padrão: cada pasta que a imagem precisa escrever vira um <code>--tmpfs</code> explícito. Nada de "liberar tudo" — cada exceção é um lugar a mais onde um atacante poderia gravar.</p>
+
+<hr>
+
+<h2>Resumo: onde dá para gravar com --read-only</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Local</th><th>Gravável?</th><th>Como</th></tr>
+<tr><td>Sistema de arquivos da imagem (<code>/</code>, <code>/usr</code>, <code>/etc</code>, <code>/app</code>…)</td><td><strong>Não</strong></td><td>Bloqueado pelo <code>--read-only</code> — nem o próprio código da app pode ser alterado.</td></tr>
+<tr><td><code>/tmp</code> e outras pastas com <code>--tmpfs</code></td><td>Sim</td><td>Vivem na RAM; somem ao parar o container. Use <code>noexec,nosuid</code> para endurecer.</td></tr>
+<tr><td>Volumes montados (<code>-v nome:/caminho</code>)</td><td>Sim</td><td>Persistem no host; o lugar certo para dados de verdade.</td></tr>
+<tr><td>Portas de rede (<code>-p</code>) e variáveis (<code>-e</code>)</td><td>Sim</td><td>Não envolvem o sistema de arquivos.</td></tr>
+</table>
+</div>
+
+<div class="warning"><strong>Erro comum: app que grava no próprio diretório e "funcionava no teste".</strong> Em desenvolvimento a Ana rodava o container sem <code>--read-only</code> e a app gravava relatórios em <code>/app/relatorios/</code> sem ninguém notar. Em produção, com <code>--read-only</code>, o primeiro pedido que gera relatório derruba a requisição com <code>Errno 30</code>. Regra: teste sempre com <code>--read-only</code> <em>antes</em> de subir em produção, e procure no código por caminhos de escrita (grep por <code>writeFile</code>, <code>open(...,'w')</code>, <code>fs.createWriteStream</code>).</div>
+
+<div class="try" data-goal="--read-only" data-solucao="docker run -d --name site --read-only --tmpfs=/tmp -p 8080:80 nginx:alpine">
+<p class="try-task"><strong>Missão:</strong> suba um Nginx somente leitura com tmpfs em <code>/tmp</code>: <code>docker run -d --name site --read-only --tmpfs /tmp -p 8080:80 nginx:alpine</code> (no simulador, use <code>--tmpfs=/tmp</code>) — e depois confira com <code>docker ps</code>.</p>
+</div>
+
+<div class="try" data-goal="Configuration complete" data-solucao="docker logs site">
+<p class="try-task"><strong>Missão extra:</strong> com o container <code>site</code> no ar, rode <code>docker logs site</code> e encontre a linha <code>Configuration complete</code> — prova de que o Nginx inicializou mesmo com o sistema de arquivos fechado.</p>
+</div>
+
+<hr>
+
+<h2>Quiz rápido</h2>
+<div class="mc" data-answer="3">
+<p class="mc-q">1. O que o <code>--read-only</code> faz no container?</p>
+<label><input type="radio" name="q1"> Impede o container de ler arquivos</label>
+<label><input type="radio" name="q1"> Bloqueia todas as portas de rede</label>
+<label><input type="radio" name="q1"> Monta o sistema de arquivos inteiro como somente leitura</label>
+<label><input type="radio" name="q1"> Apaga a camada gravável da imagem</label>
+</div>
+
+<div class="mc" data-answer="2">
+<p class="mc-q">2. A app quebrou com <code>OSError: [Errno 30] Read-only file system: '/tmp/x'</code>. Qual é a cura certa?</p>
+<label><input type="radio" name="q2"> Desligar o --read-only para sempre</label>
+<label><input type="radio" name="q2"> Liberar exatamente essa pasta com --tmpfs (ou jogá-la num volume, se precisar persistir)</label>
+<label><input type="radio" name="q2"> Rodar o container como root</label>
+<label><input type="radio" name="q2"> Rebuildar a imagem do zero</label>
+</div>
+
+<div class="mc" data-answer="4">
+<p class="mc-q">3. Onde ficam os arquivos de um <code>--tmpfs /tmp</code>?</p>
+<label><input type="radio" name="q3"> No disco, dentro da pasta /tmp do host</label>
+<label><input type="radio" name="q3"> No registro do Windows</label>
+<label><input type="radio" name="q3"> Dentro da imagem, na camada gravável</label>
+<label><input type="radio" name="q3"> Na memória RAM — e somem quando o container para</label>
+</div>
+
+<div class="mc" data-answer="1">
+<p class="mc-q">4. Com <code>--read-only</code> ligado, um volume montado com <code>-v dados:/app/dados</code> continua gravável?</p>
+<label><input type="radio" name="q4"> Sim — volumes são montados depois do read-only e seguem graváveis</label>
+<label><input type="radio" name="q4"> Não, o --read-only bloqueia tudo</label>
+<label><input type="radio" name="q4"> Só se o volume for tmpfs</label>
+<label><input type="radio" name="q4"> Só como root</label>
+</div>
+
+<hr>
+
+<h2>Resumo</h2>
+<ul>
+  <li><code>--read-only</code> monta o sistema de arquivos inteiro do container como somente leitura: o código da app não pode ser alterado por dentro.</li>
+  <li>O que a app precisa gravar vai para lugares explícitos: <code>--tmpfs</code> (RAM, descartável) ou volumes <code>-v</code> (persistentes).</li>
+  <li>Opções do tmpfs: <code>size=64m</code>, <code>noexec</code>, <code>nosuid</code> — use as três nos diretórios temporários.</li>
+  <li>Erro real de app gravando no lugar errado: <code>OSError: [Errno 30] Read-only file system: '/caminho'</code> — o caminho no erro diz o que liberar.</li>
+  <li>Regra de produção: container descartável, dado em volume; teste com <code>--read-only</code> antes de subir.</li>
+  <li>Combina com a aula anterior: <code>USER</code> não-root + <code>--read-only</code> = mesmo se o atacante entrar, ele não é root e não consegue alterar nada.</li>
+</ul>
+
+<div class="tip"><strong>Próxima aula:</strong> <a href="cap-drop.html">Remover capabilities (--cap-drop)</a> — tirar os superpoderes do root, um por um.</div>
+
+<div class="pager"></div>
+
+</div>
+</main>
+</div>
+<script src="assets/site.js?v=4"></script>
+</body>
+</html>

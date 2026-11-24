@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Redes no Docker: bridge, host e none — isolamento de rede | Guia Docker</title>
+<meta name="description" content="Como funciona a rede no Docker: isolamento por container (cada um ganha um IP próprio numa rede virtual interna), a rede bridge padrão (NAT para a internet e portas publicadas só com -p), a rede host (o container usa a rede da máquina direto, sem isolamento — e o -p é descartado com aviso) e a rede none (sem rede nenhuma, só loopback). Analogia do prédio com apartamentos, tabela comparativa, comandos reais da Ana no notebook (docker network ls, inspect para achar o IP, curl falhando sem -p), erros reais e quiz. Docker Engine 27.x.">
+<link rel="stylesheet" href="assets/style.css?v=4">
+<script>try{var t=localStorage.getItem("tema");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<meta http-equiv="Cache-Control" content="no-store, must-revalidate">
+<script>try{history.scrollRestoration="manual"}catch(e){}(function(){var n=0;function t(){window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;if(++n<60)setTimeout(t,50)}t();window.addEventListener("pagehide",function(){window.scrollTo(0,0);document.documentElement.scrollTop=0;});window.addEventListener("pageshow",function(){window.scrollTo(0,0)});window.addEventListener("load",function(){window.scrollTo(0,0)});})();document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(a){var h=a.getAttribute("href")||"";if(/[.]html($|[?#])/.test(h)&&a.host===location.host){window.scrollTo(0,0);document.documentElement.scrollTop=0;}}});</script>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" id="sidebar" aria-label="Tópicos"></nav>
+<main class="main">
+<div class="content">
+
+<div class="pager"></div>
+
+<h1><span class="hl">Redes no Docker</span> — bridge, host e none</h1>
+
+<p class="intro">Assim como o sistema de arquivos, a <strong>rede também é isolada</strong> por container: cada container nasce com um IP próprio numa rede interna virtual e só fala com o mundo de fora pelas portas que você publicar com <code>-p</code>. O Docker já vem com três redes prontas para usar: <code>bridge</code>, <code>host</code> e <code>none</code>. Nesta aula a Ana vai ver o isolamento funcionando no notebook dela.</p>
+
+<div class="note">
+<strong>Você vai aprender</strong>
+<ul>
+  <li>O que é o isolamento de rede e por que cada container tem um IP próprio.</li>
+  <li>A rede <code>bridge</code> padrão: NAT para a internet, IPs internos (172.17.x.x) e publicação de portas com <code>-p</code>.</li>
+  <li>As redes <code>host</code> (sem isolamento: o container usa a rede da máquina) e <code>none</code> (sem rede nenhuma).</li>
+  <li>Quando usar cada uma — e por que <code>-p</code> é descartado no modo host (com o aviso real).</li>
+  <li>Como descobrir o IP de um container com <code>docker inspect --format</code>.</li>
+  <li>Erros reais: porta não publicada, conflito de porta no host.</li>
+</ul>
+</div>
+
+<hr>
+
+<h2>A analogia: um prédio de apartamentos</h2>
+<p>Pense na sua máquina (o host) como um <strong>prédio</strong>. Cada container é um <strong>apartamento</strong> com a sua própria rede interna: ele tem um interfone interno (o IP próprio, tipo <code>172.17.0.2</code>), conversa com os outros apartamentos pelo interfone, e só fala com a rua (a internet) pela portaria — que é controlada: só o que o síndico (você, com <code>-p</code>) abrir passa.</p>
+<p>O Docker cria essa "rede do prédio" automaticamente: a rede <code>bridge</code> (bridge = ponte, porque faz a ponte entre os containers e o mundo de fora, com NAT).</p>
+
+<hr>
+
+<h2>O diagrama da bridge padrão</h2>
+<p>Resumindo a topologia que o Docker cria sozinho na máquina da Ana (dá para desenhar num papel — ajuda muito):</p>
+<pre class="file"># diagrama da rede bridge padrão (criada sozinha pelo Docker)
+
+sua máquina (host) ......... 192.168.1.10 na rede de casa
+  └── interface docker0 .... 172.17.0.1  (é o GATEWAY dos containers)
+        ├── container "web" ........ 172.17.0.2   porta 80 → publicada na 8080 do host (-p 8080:80)
+        └── container "meu-banco" .. 172.17.0.3   porta 5432 → só interna (sem -p)
+
+internet ← NAT pela máquina (os containers saem para fora pelo IP do host)</pre>
+<p>Todo container novo na bridge ganha o próximo IP da faixa (172.17.0.4, .5, …). O <code>docker0</code> é a "ponte" que liga os containers ao host — e o host faz NAT para a internet.</p>
+
+<hr>
+
+<h2>O isolamento na prática</h2>
+<p>A Ana sobe dois containers no notebook dela e pergunta o IP de cada um:</p>
+<pre class="term" data-cwd="~">$ docker run -d --name web nginx:alpine
+$ docker run -d --name meu-banco -e POSTGRES_PASSWORD=segredo postgres:16-alpine
+$ docker inspect web --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}'
+172.17.0.2
+$ docker inspect meu-banco --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}'
+172.17.0.3</pre>
+<p>Cada container está num mundo separado: o <code>web</code> é o <code>172.17.0.2</code> e o <code>meu-banco</code> é o <code>172.17.0.3</code>. Eles conseguem se falar <strong>dentro dessa rede interna</strong> (pelo IP), e o mundo de fora só alcança o que você liberar com <code>-p</code>. É por isso que o banco pode ficar sem porta publicada e mesmo assim ser usado pela aplicação — a aula <a href="containers-conversando.html">Containers se comunicando por nome</a> mostra como.</p>
+
+<div class="tip"><strong>O truque do --format:</strong> o <code>docker inspect</code> cuspe um JSONzão; o <code>--format '{{…}}'</code> extrai só o campo que você quer. O comando acima é o canivete suíço para pegar IP de container em scripts.</div>
+
+<hr>
+
+<h2>As três redes que já vêm de fábrica</h2>
+<pre class="term" data-cwd="~">$ docker network ls
+NETWORK ID     NAME      DRIVER    SCOPE
+a1b2c3d4e5f6   bridge    bridge    local
+b2c3d4e5f6a1   host      host      local
+c3d4e5f6a1b2   none      null      local</pre>
+<p>Todo container nasce na rede <code>bridge</code>, a menos que você diga o contrário com <code>--network</code>:</p>
+<dl class="anatomy">
+  <dt>bridge</dt><dd>a padrão. O container ganha um IP próprio (172.17.x.x), com NAT para a internet, e as portas só aparecem do lado de fora com <code>-p</code>. É a rede dos seus apps.</dd>
+  <dt>host</dt><dd>o container <strong>usa a rede da máquina diretamente</strong> — mesmo IP, mesmas portas. Não existe isolamento de rede nem precisa de <code>-p</code>.</dd>
+  <dt>none</dt><dd>sem rede nenhuma: só o loopback (127.0.0.1). Para jobs que não precisam falar com ninguém.</dd>
+</dl>
+
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Nome</th><th>Driver</th><th>O que acontece com o container</th></tr>
+<tr><td><code>bridge</code></td><td><code>bridge</code></td><td>IP próprio numa rede virtual interna + NAT para fora; portas precisam de <code>-p</code></td></tr>
+<tr><td><code>host</code></td><td><code>host</code></td><td>Usa a placa de rede da máquina direto; portas já são do host; <code>-p</code> é ignorado</td></tr>
+<tr><td><code>none</code></td><td><code>null</code></td><td>Sem rede: só 127.0.0.1 dentro do container</td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>bridge (a padrão): NAT e portas publicadas</h2>
+<p>Na bridge, o container fala com a internet passando por um NAT (o Docker reescreve os endereços, como um roteador de casa faz). E o caminho inverso — da internet para o container — só existe nas portas que você publica com <code>-p</code> (aula <a href="portas.html">Publicando portas</a>). A Ana testa dos dois lados:</p>
+<pre class="term" data-cwd="~">$ docker run -d --name site -p 8080:80 nginx:alpine
+$ curl http://localhost:8080 | head -1
+&lt;!DOCTYPE html&gt;   « de fora, pela porta publicada 8080 do host
+$ docker exec site sh -c "wget -qO- http://ifconfig.me" 2>/dev/null || true
+189.x.x.x   « de dentro, o container alcança a internet pelo NAT (IP público do host)</pre>
+
+<div class="warn"><strong>Erro comum: subir sem -p e tentar acessar.</strong> O container está no ar, mas sem porta publicada ele é invisível para o host:
+<pre class="term" data-cwd="~">$ docker run -d --name site2 nginx:alpine   « sem -p!
+$ curl http://localhost
+curl: (7) Failed to connect to localhost port 80   « nada publicado
+$ docker ps
+…  site2  nginx:alpine  Up 5 seconds  80/tcp   « repare: 80/tcp sem "0.0.0.0:…->" — não tem porta no host</pre>
+Na coluna PORTS do <code>docker ps</code>, <code>80/tcp</code> sozinho significa "só dentro da rede do Docker"; <code>0.0.0.0:8080->80/tcp</code> significa "publicada na 8080 do host".</div>
+
+<hr>
+
+<h2>Tabela comparativa completa</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th></th><th>bridge (padrão)</th><th>host</th><th>none</th></tr>
+<tr><td><strong>Driver</strong></td><td><code>bridge</code></td><td><code>host</code></td><td><code>null</code></td></tr>
+<tr><td><strong>IP do container</strong></td><td>próprio (172.17.x.x)</td><td>o mesmo da máquina</td><td>nenhum (só 127.0.0.1)</td></tr>
+<tr><td><strong>Isolamento</strong></td><td>sim</td><td><strong>não</strong></td><td>máximo</td></tr>
+<tr><td><strong>Acesso de fora</strong></td><td>com <code>-p 8080:80</code></td><td>direto (porta já é do host)</td><td>nenhum</td></tr>
+<tr><td><strong>Performance de rede</strong></td><td>boa (com NAT)</td><td>máxima (sem NAT)</td><td>—</td></tr>
+<tr><td><strong>Quando usar</strong></td><td>apps web, APIs, bancos — o padrão</td><td>performance de rede, portas baixas (&lt;1024), ferramentas de rede</td><td>processamento batch, containers que não precisam de rede</td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>host: sem isolamento de rede</h2>
+<p>Com <code>--network host</code>, o container divide a rede com a sua máquina. Um Nginx assim responde direto na porta 80 do host — sem <code>-p</code>:</p>
+<pre class="term" data-cwd="~">$ docker run -d --network host --name site-rapido nginx:alpine
+$ curl http://localhost | head -1
+&lt;!DOCTYPE html&gt;   « o Nginx está na porta 80 da máquina inteira
+$ docker inspect site-rapido --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}'
+« vazio — no modo host não existe IP próprio de container</pre>
+<p>É mais rápido (sem NAT) e útil para ferramentas de rede e portas baixas (80, 443), mas <strong>qualquer porta que o container abrir está aberta na máquina</strong> — e pode conflitar com um serviço que já esteja na máquina. Use com cuidado, só quando confiar na imagem.</p>
+<div class="warn"><strong>Portas descartadas no modo host:</strong> se você passar <code>-p</code> junto com <code>--network host</code>, o Docker avisa e ignora:
+<pre class="term" data-cwd="~">$ docker run -d --network host -p 8080:80 --name site3 nginx:alpine
+WARNING: Published ports are discarded when using host network mode</pre>
+Nesse modo, a porta do container já é a porta do host — não existe tradução. O aviso é barulhento de propósito: se você não esperava por ele, o <code>-p</code> provavelmente estava errado.</div>
+
+<div class="warn"><strong>Conflito de porta no host:</strong> se a máquina já tem algo na porta 8080 e a Ana tenta publicar <code>-p 8080:80</code>, o run falha:
+<pre class="term" data-cwd="~">$ docker run -d -p 8080:80 --name site4 nginx:alpine
+docker: Error response from daemon: driver failed programming external connectivity on endpoint site4: Bind for 0.0.0.0:8080 failed: port is already allocated.</pre>
+<strong>Como consertar:</strong> escolha outra porta do host (<code>-p 8081:80</code>) ou mate o processo que está usando a 8080.</div>
+
+<hr>
+
+<h2>none: container sem rede</h2>
+<p>Com <code>--network none</code>, o container fica isolado total: só o loopback (127.0.0.1) funciona dentro dele. A Ana testa:</p>
+<pre class="term" data-cwd="~">$ docker run -d --network none --name processamento alpine sleep 1d
+$ docker exec processamento ping -c 1 8.8.8.8
+ping: bad address '8.8.8.8'   « não alcança ninguém: nem a internet, nem outros containers</pre>
+<p>Perfeito para jobs de processamento que só precisam de CPU e disco (converter vídeo, rodar modelo de ML, backup local), e para aumentar a segurança de containers que <strong>não devem</strong> ter acesso à rede (um worker que processa dados sensíveis, por exemplo).</p>
+
+<hr>
+
+<h2>Resumo</h2>
+<p>Quase sempre você vai usar a <code>bridge</code> (é o padrão) ou uma rede criada por você (próxima aula). Guarde <code>host</code> e <code>none</code> para casos específicos: <code>host</code> quando precisar de performance máxima de rede e confiar na imagem; <code>none</code> quando o container <strong>não deve</strong> falar com rede nenhuma.</p>
+
+<hr>
+
+<h2>Referência rápida</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Comando</th><th>O que faz</th></tr>
+<tr><td><code>docker network ls</code></td><td>Lista as redes (bridge, host, none + as que você criar)</td></tr>
+<tr><td><code>docker run -d …</code> (sem --network)</td><td>Container nasce na <code>bridge</code> padrão</td></tr>
+<tr><td><code>docker run --network host …</code></td><td>Container usa a rede do host direto (sem -p; -p dá warning e é descartado)</td></tr>
+<tr><td><code>docker run --network none …</code></td><td>Container sem rede (só 127.0.0.1)</td></tr>
+<tr><td><code>docker inspect web --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}'</code></td><td>Mostra o IP interno do container</td></tr>
+</table>
+</div>
+
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Sintoma</th><th>Causa</th></tr>
+<tr><td><code>curl: (7) Failed to connect</code> num container que está Up</td><td>Sem <code>-p</code>: a porta não está publicada no host (veja <code>80/tcp</code> sem <code>-></code> no <code>docker ps</code>)</td></tr>
+<tr><td><code>WARNING: Published ports are discarded when using host network mode</code></td><td>Você passou <code>-p</code> junto com <code>--network host</code> — no modo host não precisa de <code>-p</code></td></tr>
+<tr><td><code>Bind for 0.0.0.0:8080 failed: port is already allocated</code></td><td>Já existe algo usando a 8080 no host — troque a porta do host (<code>-p 8081:80</code>)</td></tr>
+<tr><td><code>ping: bad address</code> dentro de <code>--network none</code></td><td>Esperado: nesse modo não existe rede nenhuma</td></tr>
+</table>
+</div>
+
+<div class="try" data-goal="NETWORK ID" data-solucao="docker network ls">
+<p class="try-task"><strong>Missão:</strong> liste as redes da sua máquina: rode <code>docker network ls</code> e encontre na saída as três redes de fábrica — <code>bridge</code>, <code>host</code> e <code>none</code>.</p>
+</div>
+
+<div class="try" data-goal="CONTAINER ID" data-solucao="docker run -d --name web nginx:alpine">
+<p class="try-task"><strong>Missão extra:</strong> suba um container na bridge padrão: rode <code>docker run -d --name web nginx:alpine</code> e depois <code>docker ps</code> — veja o container na lista com a imagem <code>nginx:alpine</code>.</p>
+</div>
+
+<hr>
+
+<h2>Quiz rápido</h2>
+
+<div class="mc" data-answer="2">
+<p class="mc-q">1. Em qual rede o container nasce por padrão?</p>
+<label><input type="radio" name="q1"> <code>host</code></label>
+<label><input type="radio" name="q1"> <code>bridge</code></label>
+<label><input type="radio" name="q1"> <code>none</code></label>
+<label><input type="radio" name="q1"> Em nenhuma — você precisa criar uma</label>
+</div>
+
+<div class="mc" data-answer="3">
+<p class="mc-q">2. A Ana rodou <code>docker run -d --network host -p 8080:80 nginx:alpine</code> e viu <code>WARNING: Published ports are discarded when using host network mode</code>. O que isso quer dizer?</p>
+<label><input type="radio" name="q2"> O build falhou</label>
+<label><input type="radio" name="q2"> A imagem está corrompida</label>
+<label><input type="radio" name="q2"> No modo host o -p é ignorado: o container já usa as portas da máquina direto, sem tradução</label>
+<label><input type="radio" name="q2"> A porta 8080 foi apagada do sistema</label>
+</div>
+
+<div class="mc" data-answer="4">
+<p class="mc-q">3. Para que serve o <code>--network none</code>?</p>
+<label><input type="radio" name="q3"> Para deixar o container mais rápido</label>
+<label><input type="radio" name="q3"> Para dar um IP fixo ao container</label>
+<label><input type="radio" name="q3"> Para publicar todas as portas</label>
+<label><input type="radio" name="q3"> Para deixar o container sem rede nenhuma (só 127.0.0.1) — bom para jobs batch e segurança</label>
+</div>
+
+<div class="mc" data-answer="1">
+<p class="mc-q">4. O <code>docker ps</code> mostra <code>80/tcp</code> (sem <code>0.0.0.0:…-&gt;</code>) no container do Nginx. O que isso significa?</p>
+<label><input type="radio" name="q4"> A porta 80 está publicada no host</label>
+<label><input type="radio" name="q4"> O Nginx está quebrado</label>
+<label><input type="radio" name="q4"> O container está sem imagem</label>
+<label><input type="radio" name="q4"> A porta 80 existe só dentro da rede do Docker — não está publicada no host (faltou o <code>-p</code>)</label>
+</div>
+
+<hr>
+
+<h2>Resumo</h2>
+<ul>
+  <li>A rede é isolada por container: cada um ganha um IP próprio na rede virtual interna (172.17.x.x na bridge) e só fala com o mundo de fora pelas portas publicadas com <code>-p</code>.</li>
+  <li>O Docker vem com três redes prontas: <code>bridge</code> (padrão, com NAT), <code>host</code> (usa a rede da máquina, sem isolamento) e <code>none</code> (sem rede).</li>
+  <li>Na bridge, sem <code>-p</code> o container é invisível para o host (<code>curl: (7) Failed to connect</code>; no <code>docker ps</code>, <code>80/tcp</code> sem <code>-></code>).</li>
+  <li>No modo <code>host</code>, o <code>-p</code> é descartado com warning — a porta do container já é a do host. Conflito de porta dá <code>port is already allocated</code>.</li>
+  <li><code>docker inspect web --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}'</code> mostra o IP interno do container.</li>
+  <li>Use <code>none</code> para jobs que não precisam de rede; use <code>host</code> só com imagem de confiança e necessidade real de performance.</li>
+</ul>
+
+<div class="tip"><strong>Próxima aula:</strong> <a href="docker-network.html">docker network: criar, conectar e remover</a> — e se você criasse a sua própria rede?</div>
+
+<div class="pager"></div>
+
+</div>
+</main>
+</div>
+<script src="assets/site.js?v=4"></script>
+</body>
+</html>

@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RUN e CMD — build time vs. runtime no Dockerfile | Guia Docker</title>
+<meta name="description" content="As instruções RUN e CMD do Dockerfile: RUN executa na hora do build e vira camada da imagem (instalar pacotes com apk/apt, encadear com && numa camada só); CMD é o comando padrão na hora de rodar o container. Linha do tempo build vs runtime, forma shell vs forma exec (JSON) e por que o processo principal (PID 1) importa para sinais, como sobrescrever o CMD no docker run, ENTRYPOINT como programa fixo, exemplo completo de API Node pela Ana no notebook, erros reais (CMD no build, aspas no JSON, vários CMD) e quiz. Docker Engine 27.x.">
+<link rel="stylesheet" href="assets/style.css?v=4">
+<script>try{var t=localStorage.getItem("tema");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<meta http-equiv="Cache-Control" content="no-store, must-revalidate">
+<script>try{history.scrollRestoration="manual"}catch(e){}(function(){var n=0;function t(){window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;if(++n<60)setTimeout(t,50)}t();window.addEventListener("pagehide",function(){window.scrollTo(0,0);document.documentElement.scrollTop=0;});window.addEventListener("pageshow",function(){window.scrollTo(0,0)});window.addEventListener("load",function(){window.scrollTo(0,0)});})();document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(a){var h=a.getAttribute("href")||"";if(/[.]html($|[?#])/.test(h)&&a.host===location.host){window.scrollTo(0,0);document.documentElement.scrollTop=0;}}});</script>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" id="sidebar" aria-label="Tópicos"></nav>
+<main class="main">
+<div class="content">
+
+<div class="pager"></div>
+
+<h1><span class="hl">RUN</span> e <span class="hl">CMD</span> — duas horas diferentes</h1>
+
+<p class="intro">Essas são as duas instruções que mais confundem quem está começando no Dockerfile. A diferença é <strong>quando</strong> cada uma executa: o <code>RUN</code> roda <strong>agora, durante o build</strong> (é o preparo do bolo, que fica gravado para sempre), e o <code>CMD</code> roda <strong>depois, toda vez que um container inicia</strong> (é o modo de servir a fatia). Nesta aula a Ana vai montar a API dela passo a passo no notebook e ver essa diferença na prática.</p>
+
+<div class="note">
+<strong>Você vai aprender</strong>
+<ul>
+  <li>A linha do tempo: <code>docker build</code> (build time) vs. <code>docker run</code> (runtime) — o que acontece em cada um.</li>
+  <li><code>RUN</code>: executar comandos no build (instalar pacotes) e virar camada da imagem; encadear com <code>&amp;&amp;</code> para gerar uma camada só.</li>
+  <li><code>CMD</code>: definir o comando padrão do container.</li>
+  <li>Forma shell vs. forma exec (JSON) — e por que na exec o processo vira PID 1 e recebe sinais na hora certa.</li>
+  <li>Como sobrescrever o CMD na linha de comando do <code>docker run</code> (útil para debug).</li>
+  <li>O que é o <code>ENTRYPOINT</code> (o programa fixo) e como ele se combina com o CMD (os argumentos).</li>
+  <li>Erros reais: instalação no CMD, aspas no JSON, vários CMD no mesmo arquivo.</li>
+</ul>
+</div>
+
+<hr>
+
+<h2>A linha do tempo: build vs. runtime</h2>
+<p>Antes de olhar para as instruções, imagine a linha do tempo do seu projeto. Existe um momento em que a imagem é <strong>construída</strong> (uma vez, ou a cada mudança de código) e um momento em que o container <strong>roda</strong> (toda vez que alguém dá <code>docker run</code>, possivelmente em outra máquina):</p>
+<div class="table-wrap">
+<table class="ref">
+<tr><th></th><th>Build time (agora, no <code>docker build</code>)</th><th>Runtime (depois, no <code>docker run</code>)</th></tr>
+<tr><td><strong>Quem executa</strong></td><td>O Docker daemon, lendo o Dockerfile linha a linha</td><td>O próprio container, ao iniciar</td></tr>
+<tr><td><strong>Instruções típicas</strong></td><td><code>FROM</code>, <code>RUN</code>, <code>COPY</code>, <code>ENV</code>, <code>WORKDIR</code></td><td><code>CMD</code>, <code>ENTRYPOINT</code></td></tr>
+<tr><td><strong>O resultado</strong></td><td>Camadas gravadas na imagem (só leitura)</td><td>Um processo rodando num container</td></tr>
+<tr><td><strong>Quanto tempo dura</strong></td><td>Segundos a minutos, uma vez por build</td><td>Enquanto o container estiver no ar</td></tr>
+<tr><td><strong>Exemplo da Ana</strong></td><td><code>RUN npm install</code> — instala as dependências e grava na imagem</td><td><code>CMD ["node", "server.js"]</code> — sobe o servidor toda vez</td></tr>
+</table>
+</div>
+<p>Regra de bolso: <strong>se a instrução prepara a imagem, ela roda no build (<code>RUN</code>)</strong>; se define o que o container faz quando nasce, ela é de runtime (<code>CMD</code>).</p>
+
+<hr>
+
+<h2>RUN: o preparo, que fica gravado na imagem</h2>
+<p>Cada <code>RUN</code> executa um comando <strong>durante o build</strong>, dentro de um container temporário, e o resultado vira uma <strong>camada permanente</strong> da imagem. É com ele que você instala pacotes. A Ana, na base Alpine, usa o <code>apk</code>:</p>
+<pre class="file">FROM node:22-alpine
+RUN apk add --no-cache curl</pre>
+<p>Na base Alpine o gerenciador de pacotes é o <code>apk</code> (em imagens Debian/Ubuntu seria <code>apt</code>; em imagens completas tipo <code>ubuntu</code>, <code>apt</code> também). O <code>--no-cache</code> evita guardar o índice de pacotes na camada, deixando a imagem menor.</p>
+<p>Você pode encadear vários comandos com <code>&amp;&amp;</code> para gerar <strong>uma única camada</strong> — cada <code>RUN</code> vira uma camada, então juntar os comandos economiza camadas (aula <a href="camadas-cache.html">Camadas e cache</a>):</p>
+<pre class="file">RUN apk add --no-cache curl git \
+ && npm install -g serve</pre>
+<p>A barra invertida <code>\</code> no fim da linha continua o comando na linha de baixo — o Dockerfile aceita isso para deixar o <code>RUN</code> comprido legível.</p>
+
+<dl class="anatomy">
+  <dt>RUN</dt><dd>"rode isso durante o build". O comando é executado com <code>/bin/sh -c</code> por padrão.</dd>
+  <dt>apk add --no-cache curl</dt><dd>no Alpine, instala o pacote <code>curl</code> sem guardar o cache do índice.</dd>
+  <dt>&amp;&amp;</dt><dd>"e também": só roda o próximo comando se o anterior deu certo. Se o <code>apk</code> falhar, o build inteiro falha — o que é bom: você não gera imagem quebrada.</dd>
+  <dt>\</dt><dd>continuação de linha: o Docker junta as linhas antes de executar.</dd>
+</dl>
+
+<div class="tip"><strong>Por que o &amp;&amp; importa:</strong> sem ele, cada comando vira parte de uma mesma linha de shell, mas se um falhar no meio, o <code>RUN</code> ainda pode terminar com sucesso (dependendo do último comando). Com <code>&amp;&amp;</code>, qualquer falha para o build na hora — imagem quebrada não passa despercebida.</div>
+
+<hr>
+
+<h2>CMD: o comando padrão na hora de rodar</h2>
+<p>O <code>CMD</code> <strong>não executa nada no build</strong> — ele só registra qual comando o container deve rodar quando iniciar. A Ana termina o Dockerfile da API dela assim:</p>
+<pre class="file">FROM node:22-alpine
+WORKDIR /app
+COPY server.js .
+CMD ["node", "server.js"]</pre>
+<p>Quando alguém rodar <code>docker run minha-api:1.0</code>, o container nasce executando <code>node server.js</code>. O <code>CMD</code> é um <strong>padrão</strong>, não uma ordem fixa — dá para trocar na hora (veja abaixo).</p>
+
+<hr>
+
+<h2>Forma shell vs. forma exec</h2>
+<p>Toda instrução que roda comando (<code>RUN</code>, <code>CMD</code>, <code>ENTRYPOINT</code>) aceita duas sintaxes:</p>
+<pre class="file">CMD node server.js          # forma shell
+CMD ["node", "server.js"]   # forma exec (JSON)</pre>
+<dl class="anatomy">
+  <dt>CMD node server.js</dt><dd><strong>forma shell</strong>: o Docker roda <code>/bin/sh -c "node server.js"</code>. O processo principal do container vira o <strong>shell</strong>, e o Node fica como filho dele. Sinais como Ctrl+C (SIGINT) nem sempre chegam no Node na hora certa.</dd>
+  <dt>CMD ["node", "server.js"]</dt><dd><strong>forma exec</strong> (JSON): o <code>node</code> vira o processo principal (<strong>PID 1</strong>) direto, sem shell no meio. Sinais chegam na hora, e o <code>docker stop</code> mata o processo certo.</dd>
+</dl>
+<p><strong>Regra prática:</strong> use a forma exec (entre colchetes, com aspas duplas em cada elemento) no <code>CMD</code> e no <code>ENTRYPOINT</code>. A forma shell é aceitável dentro do <code>RUN</code>, onde o shell já vai existir de qualquer jeito (o <code>RUN</code> sempre roda via shell).</p>
+
+<div class="table-wrap">
+<table class="ref">
+<tr><th></th><th>Forma shell</th><th>Forma exec (JSON)</th></tr>
+<tr><td>Escrita</td><td><code>CMD node server.js</code></td><td><code>CMD ["node", "server.js"]</code></td></tr>
+<tr><td>Comando real executado</td><td><code>/bin/sh -c "node server.js"</code></td><td><code>node server.js</code> direto</td></tr>
+<tr><td>PID 1 do container</td><td>o shell</td><td>o próprio programa</td></tr>
+<tr><td>Variáveis de ambiente no comando</td><td>expansadas pelo shell (<code>$HOME</code> funciona)</td><td>não são expansadas (vá direto ao ponto)</td></tr>
+<tr><td>Usa no</td><td><code>RUN</code> (OK) e CMD/ENTRYPOINT (evite)</td><td><code>CMD</code> e <code>ENTRYPOINT</code> (recomendado)</td></tr>
+</table>
+</div>
+
+<div class="warn"><strong>Erro real: aspas simples no JSON.</strong> A forma exec exige <strong>aspas duplas</strong>: <code>CMD ['node', 'server.js']</code> dá erro de parse no build (<code>invalid character</code> — JSON não aceita aspas simples). E <code>CMD [node, server.js]</code> (sem aspas nenhuma) também quebra. Sempre: <code>["node", "server.js"]</code>.</div>
+
+<hr>
+
+<h2>O CMD é sobrescrevível na linha de comando</h2>
+<p>Como o <code>CMD</code> só vale como <em>padrão</em>, você pode trocá-lo na hora de rodar, colocando outro comando depois do nome da imagem no <code>docker run</code>. A Ana testa a imagem <code>ola:1.0</code> dela assim:</p>
+<pre class="term" data-cwd="~/ola-docker">$ docker run --rm ola:1.0 echo "rodei outro comando!"
+rodei outro comando!</pre>
+<p>O <code>echo "Olá! Eu fui assado por um Dockerfile."</code> do Dockerfile foi substituído pelo <code>echo</code> novo. Isso é útil demais para debug: <code>docker run -it minha-api:1.0 sh</code> abre um shell dentro do container no lugar de subir o servidor — você entra na "cozinha" para fuçar.</p>
+
+<div class="tip"><strong>Truque de debug da Ana:</strong> se a API não sobe, ela roda <code>docker run -it --rm minha-api:1.0 sh</code> e testa dentro do container: <code>node --version</code>, <code>ls /app</code>, <code>node server.js</code> na mão para ver o erro. O CMD padrão é só um atalho.</div>
+
+<div class="try" data-goal="Hello from Docker" data-solucao="docker run hello-world">
+<p class="try-task"><strong>Missão:</strong> rode <code>docker run hello-world</code> no terminal abaixo. A mensagem que aparece é o <code>CMD</code> padrão da imagem <code>hello-world</code> executando.</p>
+</div>
+
+<div class="try" data-goal="rodei outro comando" data-solucao="docker run --rm hello-world echo rodei outro comando">
+<p class="try-task"><strong>Missão extra:</strong> sobrescreva o CMD na hora do run: rode <code>docker run --rm hello-world echo "rodei outro comando"</code> e veja que o texto do Dockerfile foi trocado pelo seu.</p>
+</div>
+
+<hr>
+
+<h2>ENTRYPOINT: o programa fixo</h2>
+<p>Se o <code>CMD</code> é fácil de trocar, o <code>ENTRYPOINT</code> é o programa <strong>fixo</strong> do container — e o <code>CMD</code> passa a ser os <strong>argumentos</strong> dele:</p>
+<pre class="file">FROM node:22-alpine
+WORKDIR /app
+COPY . .
+ENTRYPOINT ["node"]
+CMD ["server.js"]</pre>
+<p>Nesse exemplo, <code>docker run minha-api:1.0</code> roda <code>node server.js</code>, e <code>docker run minha-api:1.0 outro.js</code> roda <code>node outro.js</code> — só os argumentos mudam, o programa não. É a combinação clássica para CLIs empacotadas em imagem (tipo <code>docker run minha-cli --help</code>).</p>
+
+<div class="table-wrap">
+<table class="ref">
+<tr><th></th><th>Só CMD</th><th>ENTRYPOINT + CMD</th></tr>
+<tr><td>Dockerfile</td><td><code>CMD ["node", "server.js"]</code></td><td><code>ENTRYPOINT ["node"]</code> + <code>CMD ["server.js"]</code></td></tr>
+<tr><td><code>docker run imagem</code></td><td>roda <code>node server.js</code></td><td>roda <code>node server.js</code></td></tr>
+<tr><td><code>docker run imagem outro.js</code></td><td>roda <code>outro.js</code> (trocou tudo)</td><td>roda <code>node outro.js</code> (só os argumentos)</td></tr>
+<tr><td>Uso típico</td><td>Serviço único (API, banco)</td><td>Ferramenta/CLI com subcomandos</td></tr>
+</table>
+</div>
+<p>Também dá para trocar o ENTRYPOINT inteiro no run com <code>--entrypoint</code>: <code>docker run --entrypoint sh minha-api:1.0</code>.</p>
+
+<hr>
+
+<h2>Exemplo completo: a API Node da Ana</h2>
+<p>Juntando tudo que vimos nesta aula e na anterior, este é o Dockerfile da <code>minha-api</code> que a Ana escreveu no <code>~/minha-api</code> do notebook dela:</p>
+<pre class="file"># Dockerfile da minha-api (projeto da Ana no ~/minha-api)
+
+# 1. Base: Node 22 enxuto
+FROM node:22-alpine
+
+# 2. Pasta de trabalho dentro da imagem
+WORKDIR /app
+
+# 3. Copia só os manifests primeiro (cache amigo — aula de camadas)
+COPY package*.json ./
+
+# 4. Instala as dependências NO BUILD (RUN, não CMD!)
+RUN npm install --omit=dev
+
+# 5. Agora sim copia o código
+COPY . .
+
+# 6. Documenta a porta (só documentação — aula EXPOSE)
+EXPOSE 3000
+
+# 7. Comando padrão na hora de rodar, em forma exec
+CMD ["node", "server.js"]</pre>
+<p>E o build dela, com a saída passo a passo:</p>
+<pre class="term" data-cwd="~/minha-api">$ docker build -t minha-api:1.0 .
+Sending build context to Docker daemon  58.37kB
+Step 1/6 : FROM node:22-alpine
+ ---> c3d4e5f6a1b2
+Step 2/6 : WORKDIR /app
+ ---> b2c3d4e5f6a1
+Step 3/6 : COPY package*.json ./
+ ---> d4e5f6a1b2c3
+Step 4/6 : RUN npm install --omit=dev
+ ---> Running in e5f6a1b2c3d4
+ ---> f6a1b2c3d4e5
+Step 5/6 : COPY . .
+ ---> 1a2b3c4d5e6f
+Step 6/6 : CMD ["node", "server.js"]
+ ---> 2b3c4d5e6f7a
+Successfully built 2b3c4d5e6f7a
+Successfully tagged minha-api:1.0</pre>
+<p>E rodando de verdade:</p>
+<pre class="term" data-cwd="~/minha-api">$ docker run -d -p 3000:3000 --name api minha-api:1.0
+9f8e7d6c5b4a
+$ curl http://localhost:3000
+{"mensagem":"olá do container!"}</pre>
+
+<hr>
+
+<h2>RUN vs. CMD em uma tabela</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th></th><th>RUN</th><th>CMD</th></tr>
+<tr><td><strong>Quando executa</strong></td><td>Durante o <code>docker build</code></td><td>Quando o container inicia (<code>docker run</code>)</td></tr>
+<tr><td><strong>Vira camada da imagem?</strong></td><td>Sim — cada RUN gera uma camada</td><td>Não — só registra o comando padrão</td></tr>
+<tr><td><strong>Para que serve</strong></td><td>Instalar pacotes, compilar, configurar</td><td>Dizer o que o container vai rodar</td></tr>
+<tr><td><strong>Pode ser sobrescrito?</strong></td><td>Não (mude o Dockerfile e rebuild)</td><td>Sim — passe outro comando no <code>docker run</code></td></tr>
+<tr><td><strong>Quantos pode haver</strong></td><td>Vários (cada um vira uma camada)</td><td>Vários, mas só o último conta (um por etapa)</td></tr>
+<tr><td><strong>Falha no comando</strong></td><td>Para o build inteiro na hora</td><td>Só aparece no runtime, no container</td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>Quando dá errado</h2>
+
+<div class="warn"><strong>Erro clássico: colocar instalação de dependências no CMD.</strong>
+<pre class="file"># ERRADO — o CMD não roda no build!
+FROM node:22-alpine
+CMD npm install &amp;&amp; node server.js</pre>
+O build gera a imagem "magra" e o <code>npm install</code> só tenta rodar quando o container inicia — cada container repetiria a instalação, nada ficaria gravado na imagem, e o processo principal seria o shell. <strong>Como consertar:</strong> instalação é <code>RUN</code>: <code>RUN npm install</code>, e o <code>CMD</code> fica só com <code>["node", "server.js"]</code>.</div>
+
+<div class="warn"><strong>Vários CMD: só o último vale.</strong> Se o Dockerfile tem dois <code>CMD</code>, o build não reclama — ele usa o último e ignora o primeiro. É fonte de confusão ("por que meu comando não rodou?"). <strong>Como consertar:</strong> um <code>CMD</code> por etapa; se quiser mudar o padrão, edite o Dockerfile e rebuild.</div>
+
+<div class="warn"><strong>Forma exec sem aspas duplas:</strong> <code>CMD ["node", 'server.js']</code> (aspas simples no segundo) quebra o parse do JSON no build. Em forma exec, sempre aspas duplas em todos os elementos.</div>
+
+<div class="warn"><strong>Esquecer que o CMD roda em toda réplica:</strong> se você usa <code>CMD ["npm", "start"]</code> e sobe 10 containers da mesma imagem, os 10 rodam <code>npm start</code>. Se o que você queria era rodar algo uma vez só no build, de novo: era caso para <code>RUN</code>.</div>
+
+<hr>
+
+<h2>Referência rápida</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Escrita</th><th>O que faz</th></tr>
+<tr><td><code>RUN comando</code></td><td>Executa no build e grava o resultado numa camada</td></tr>
+<tr><td><code>RUN a &amp;&amp; b</code></td><td>Encadeia na mesma camada; falha no meio para o build</td></tr>
+<tr><td><code>CMD ["cmd", "arg"]</code></td><td>Comando padrão do container, em forma exec (recomendada)</td></tr>
+<tr><td><code>CMD comando arg</code></td><td>Forma shell: roda via <code>/bin/sh -c</code></td></tr>
+<tr><td><code>ENTRYPOINT ["cmd"]</code></td><td>Programa fixo do container; o CMD vira argumento dele</td></tr>
+<tr><td><code>docker run img outro-comando</code></td><td>Sobrescreve o CMD pelo comando dado</td></tr>
+<tr><td><code>docker run --entrypoint sh img</code></td><td>Sobrescreve o ENTRYPOINT (abre shell para debug)</td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>Quiz rápido</h2>
+
+<div class="mc" data-answer="2">
+<p class="mc-q">1. A Ana quer instalar o <code>curl</code> dentro da imagem. Em qual instrução ela coloca isso?</p>
+<label><input type="radio" name="q1"> <code>CMD apk add curl</code></label>
+<label><input type="radio" name="q1"> <code>RUN apk add curl</code></label>
+<label><input type="radio" name="q1"> <code>FROM curl</code></label>
+<label><input type="radio" name="q1"> <code>ENV apk add curl</code></label>
+</div>
+
+<div class="mc" data-answer="3">
+<p class="mc-q">2. Qual é a forma recomendada de escrever o CMD, e por quê?</p>
+<label><input type="radio" name="q2"> <code>CMD node server.js</code>, porque é mais curto</label>
+<label><input type="radio" name="q2"> <code>CMD ["node", "server.js"]</code> em shell</label>
+<label><input type="radio" name="q2"> <code>CMD ["node", "server.js"]</code> (forma exec), porque o programa vira PID 1 e recebe sinais na hora certa</label>
+<label><input type="radio" name="q2"> <code>CMD ["node", 'server.js']</code>, misturando aspas</label>
+</div>
+
+<div class="mc" data-answer="4">
+<p class="mc-q">3. A Ana rodou <code>docker run --rm minha-api:1.0 echo oi</code> e imprimiu "oi", sem subir a API. O que aconteceu?</p>
+<label><input type="radio" name="q3"> A imagem está corrompida</label>
+<label><input type="radio" name="q3"> O <code>echo oi</code> no fim do run sobrescreveu o CMD padrão</label>
+<label><input type="radio" name="q3"> O build falhou</label>
+<label><input type="radio" name="q3"> O Node não está instalado na imagem</label>
+</div>
+
+<div class="mc" data-answer="1">
+<p class="mc-q">4. No Dockerfile abaixo, o que acontece?
+<pre class="file">FROM alpine:3.20
+CMD ["echo", "primeiro"]
+CMD ["echo", "segundo"]</pre></p>
+<label><input type="radio" name="q4"> Só o último CMD vale: o container imprime "segundo"</label>
+<label><input type="radio" name="q4"> O build dá erro porque tem dois CMD</label>
+<label><input type="radio" name="q4"> Os dois rodam, um depois do outro</label>
+<label><input type="radio" name="q4"> O primeiro CMD vira ENTRYPOINT sozinho</label>
+</div>
+
+<hr>
+
+<h2>Resumo</h2>
+<ul>
+  <li>Há dois momentos: o <strong>build</strong> (<code>docker build</code>, instruções <code>RUN</code>/<code>COPY</code>/<code>ENV</code>) e o <strong>runtime</strong> (<code>docker run</code>, instruções <code>CMD</code>/<code>ENTRYPOINT</code>).</li>
+  <li><code>RUN</code> executa no build e cada um vira uma camada; encadeie com <code>&amp;&amp;</code> para uma camada só e para o build falhar se algo der errado.</li>
+  <li><code>CMD</code> só registra o comando padrão do container; na hora do <code>docker run</code> dá para sobrescrever passando outro comando depois da imagem.</li>
+  <li>Prefira a <strong>forma exec</strong> <code>CMD ["node", "server.js"]</code>: o programa vira PID 1, sem shell no meio, e recebe sinais (Ctrl+C, <code>docker stop</code>) na hora certa. No JSON só valem aspas duplas.</li>
+  <li><code>ENTRYPOINT</code> é o programa fixo; <code>CMD</code> vira os argumentos dele — combinação clássica para CLIs.</li>
+  <li>Erro clássico: por instalação no <code>CMD</code> — o lugar é o <code>RUN</code>. E vários <code>CMD</code> no arquivo: só o último vale, sem aviso.</li>
+</ul>
+
+<div class="tip"><strong>Próxima aula:</strong> <a href="dockerfile-copy-add.html">COPY, ADD e WORKDIR</a> — como trazer os arquivos do seu projeto para dentro da imagem.</div>
+
+<div class="pager"></div>
+
+</div>
+</main>
+</div>
+<script src="assets/site.js?v=4"></script>
+</body>
+</html>

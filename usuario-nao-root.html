@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rodar como usuário não-root (USER) | Guia Docker</title>
+<meta name="description" content="Por que rodar containers como root é perigoso (escape de container, o socket do Docker montado e o cenário real de ataque), como criar um usuário dedicado no Dockerfile com adduser (Alpine) e useradd (Debian/Ubuntu) e a instrução USER, verificar com docker exec whoami, USER com UID/GID explícito para volumes, tabela do usuário padrão de cada imagem oficial, Dockerfile seguro completo da API da Loja Aurora e erros comuns.">
+<link rel="stylesheet" href="assets/style.css?v=4">
+<script>try{var t=localStorage.getItem("tema");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<meta http-equiv="Cache-Control" content="no-store, must-revalidate">
+<script>try{history.scrollRestoration="manual"}catch(e){}(function(){var n=0;function t(){window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;if(++n<60)setTimeout(t,50)}t();window.addEventListener("pagehide",function(){window.scrollTo(0,0);document.documentElement.scrollTop=0;});window.addEventListener("pageshow",function(){window.scrollTo(0,0)});window.addEventListener("load",function(){window.scrollTo(0,0)});})();document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(a){var h=a.getAttribute("href")||"";if(/[.]html($|[?#])/.test(h)&&a.host===location.host){window.scrollTo(0,0);document.documentElement.scrollTop=0;}}});</script>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" id="sidebar" aria-label="Tópicos"></nav>
+<main class="main">
+<div class="content">
+
+<div class="pager"></div>
+
+<h1><span class="hl">USER</span> — rodar como usuário não-root</h1>
+
+<p class="intro">A Ana finalmente colocou a API da Loja Aurora num container para testar em produção. Funcionou de primeira — até ela rodar um comando inocente para inspecionar o container e reparar que o processo lá dentro respondia <code>root</code>. "Ué", pensou ela, "eu criei o container, por que ele é root?". Acontece que, por padrão, <strong>todo processo dentro de um container roda como root (UID 0)</strong> — o mesmo número que o kernel da máquina enxerga. Nesta aula você vai entender por que isso é perigoso e como trocar o usuário padrão da sua imagem com a instrução <code>USER</code> do Dockerfile.</p>
+
+<div class="note">
+<strong>Você vai aprender</strong>
+<ul>
+  <li>Por que root dentro do container não é "faz de conta" — e o que acontece num escape de container.</li>
+  <li>O atalho perigoso: montar <code>/var/run/docker.sock</code> dentro do container.</li>
+  <li>Criar usuário no Dockerfile: <code>adduser -D</code> (Alpine) e <code>useradd -m</code> (Debian/Ubuntu).</li>
+  <li>A instrução <code>USER ana</code> — e <code>USER 1000:1000</code> com UID/GID explícito para volumes.</li>
+  <li>Auditar qualquer imagem com <code>docker exec … whoami</code>.</li>
+  <li>Quem é o usuário padrão de cada imagem oficial (tabela).</li>
+  <li>Um Dockerfile seguro completo, de cabo a rabo.</li>
+</ul>
+</div>
+
+<hr>
+
+<h2>A ideia: quem manda no processo manda na máquina</h2>
+<p>Pense no container como um apartamento no térreo de um prédio. O porteiro (o kernel do Linux, lá fora) não deixa o morador mexer na estrutura do prédio — paredes, encanamento, quadro de luz. Essa é a barreira dos <strong>namespaces</strong>: o processo dentro do container acha que é dono de tudo, mas só enxerga o próprio apartamento.</p>
+<p>O problema é a identidade do morador. Se o processo roda como <code>root</code> (UID 0), ele carrega um "crachá mestre" dentro do apartamento. Normalmente a barreira contém o estrago. Mas se algum dia a barreira tiver uma fresta — um bug no kernel, um <strong>escape de container</strong> — quem tem o crachá mestre atravessa e vira root <em>no prédio inteiro</em>, ou seja, na máquina real (o host).</p>
+<p>É a mesma lógica de não deixar a chave reserva debaixo do capacho: mesmo que a porta esteja trancada, você não deixa a chave no lado de fora. Rodar como usuário comum é tirar o crachá mestre: se o atacante entrar, ele entra como "visitante", com pouquíssimos poderes.</p>
+
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Dentro do container</th><th>Se houver escape de container</th></tr>
+<tr><td>Processo roda como <code>root</code> (UID 0)</td><td>Atacante vira <strong>root no host</strong> — troca binários, lê senhas, abre backdoor.</td></tr>
+<tr><td>Processo roda como usuário comum (UID 1000)</td><td>Atacante fica preso como usuário comum — quase sem poder mexer em nada do host.</td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>O perigo do root no container</h2>
+<p>Toda imagem que não define <code>USER</code> inicia como root. No notebook da Ana (<code>ana@notebook</code>, Ubuntu 24.04 com Docker Engine 27.3.1), a imagem oficial do Nginx responde assim:</p>
+<pre class="term">$ docker run --rm nginx:alpine whoami
+root</pre>
+<p>Repare: o comando <code>whoami</code> ("quem sou eu?") foi executado <em>dentro</em> do container e a resposta foi <code>root</code>. A barreira entre o container e a máquina existe (namespaces, capabilities, seccomp — próximas aulas), mas se ela falhar, o atacante já está com o crachá mestre na mão.</p>
+
+<h3>O atalho ainda pior: o socket do Docker</h3>
+<p>Existe um arquivo especial, <code>/var/run/docker.sock</code>, que é o "telefone direto" com o daemon do Docker. Quem consegue falar com ele consegue criar containers — inclusive um container privilegiado que monta a raiz do host inteiro. Montar esse socket dentro de um container é entregar a chave do prédio:</p>
+<pre class="term">$ docker run -v /var/run/docker.sock:/var/run/docker.sock nginx:alpine …   « NÃO faça isso em produção</pre>
+<div class="warning"><strong>Nunca monte <code>/var/run/docker.sock</code> num container de produção.</strong> Quem controla o socket controla o daemon — e com o daemon dá para subir um container privilegiado que monta <code>/</code> do host: root na máquina inteira, sem precisar de nenhum bug. Ferramentas de CI às vezes usam esse socket, mas em produção a regra é outra: nada de socket. A primeira linha de defesa continua sendo não ser root: rode seus apps como usuário comum.</div>
+
+<div class="cenario">
+<strong>Cenário real: o ataque que começa num container esquecido</strong>
+<p>Numa empresa hipotética, um estagiário subiu um container de debug com <code>-v /var/run/docker.sock:/var/run/docker.sock</code> "só para testar". Semanas depois, um atacante explorou uma vulnerabilidade antiga nesse container de debug (que ninguém atualizava porque "era só teste"). Como o socket estava montado, ele criou um container privilegiado com <code>-v /:/host</code> e leu o arquivo <code>/host/etc/shadow</code> — as senhas de todos os usuários da máquina. O estrago não foi o bug antigo; foi a combinação bug + root + socket. Tirar qualquer uma dessas três pernas derruba a ataque.</p>
+</div>
+
+<hr>
+
+<h2>Criando um usuário no Dockerfile</h2>
+<p>A instrução <code>RUN</code> roda como root <strong>durante o build</strong> — é a hora certa de criar o usuário e entregar a posse dos arquivos para ele. Depois, a instrução <code>USER</code> troca o usuário padrão da imagem: tudo que vier depois (e o processo final do container) roda como esse usuário. Veja o Dockerfile da API da Loja Aurora, que a Ana escreveu em <code>~/minha-api</code>:</p>
+<pre class="file" data-file="Dockerfile">FROM node:22-alpine
+WORKDIR /app
+
+COPY package*.json ./
+RUN npm install --omit=dev
+
+COPY . .
+
+# cria a usuária "ana" (Alpine) e entrega a pasta do app para ela
+RUN adduser -D -s /bin/sh ana \
+ && chown -R ana:ana /app
+
+# tudo abaixo roda como ana, não como root
+USER ana
+
+EXPOSE 3000
+CMD ["node", "server.js"]</pre>
+
+<dl class="anatomy">
+  <dt>RUN adduser -D -s /bin/sh ana</dt><dd>Cria a usuária <code>ana</code> durante o build. O <code>RUN</code> roda como root, por isso pode criar usuários. No Alpine, <code>adduser -D</code> cria usuário sem senha e sem pasta home (-D = "don't assign a password"); o <code>-s /bin/sh</code> define o shell dela.</dd>
+  <dt>chown -R ana:ana /app</dt><dd>Entrega a pasta da aplicação para ela ("change owner" recursivo). Sem isso, a <code>ana</code> não conseguiria nem ler os arquivos do app, quanto menos gravar logs ou caches.</dd>
+  <dt>USER ana</dt><dd>Define o usuário padrão da imagem: o <code>CMD</code> e qualquer <code>docker run</code> dessa imagem passam a rodar como <code>ana</code>. É a instrução mais importante desta aula — e a mais esquecida.</dd>
+  <dt>EXPOSE 3000</dt><dd>Documenta a porta que a app usa (não publica nada sozinha; a aula <a href="dockerfile-expose-env.html">EXPOSE, ENV e ARG</a> detalha).</dd>
+  <dt>CMD ["node", "server.js"]</dt><dd>O processo final — agora rodando como <code>ana</code>, não como root.</dd>
+</dl>
+
+<h3>Em imagens Debian/Ubuntu</h3>
+<p>O comando equivalente é o <code>useradd</code>. A Ana testou a mesma API numa base <code>node:22-slim</code> (Debian) e usou:</p>
+<pre class="term" data-cwd="~/minha-api">$ grep -n "useradd\|USER" Dockerfile
+8:RUN useradd -m -s /bin/bash ana &amp;&amp; chown -R ana:ana /app
+10:USER ana</pre>
+<p>O <code>-m</code> cria a pasta home (<code>/home/ana</code>) — no Alpine o <code>adduser -D</code> não cria home por padrão, e algumas aplicações precisam dela (é só tirar o <code>-D</code> ou usar <code>adduser -D -H</code>… na prática, se a app reclamar de home faltando, crie com <code>mkdir -p /home/ana &amp;&amp; chown ana:ana /home/ana</code>).</p>
+
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Base da imagem</th><th>Comando para criar usuário</th><th>Exemplo</th></tr>
+<tr><td>Alpine (<code>*-alpine</code>)</td><td><code>adduser</code> (do pacote <code>shadow</code>, já vem na base)</td><td><code>RUN adduser -D -s /bin/sh ana</code></td></tr>
+<tr><td>Debian / Ubuntu (<code>*-slim</code>, <code>node:22</code>)</td><td><code>useradd</code></td><td><code>RUN useradd -m -s /bin/bash ana</code></td></tr>
+<tr><td>Distroless (<code>gcr.io/distroless/*</code>)</td><td>Já existe usuário sem privilégios (UID 65532); use a tag <code>:nonroot</code></td><td><code>FROM gcr.io/distroless/nodejs:nonroot</code></td></tr>
+<tr><td>Imagens Windows</td><td><code>net user</code> / Powershell</td><td>Raro em produção Linux; consulte a doc da imagem</td></tr>
+</table>
+</div>
+<p>Em imagens <strong>distroless</strong>, você não cria usuário nenhum: já existe um usuário sem privilégios (UID 65532) e a tag <code>:nonroot</code> faz o <code>USER</code> por você — veja a aula <a href="distroless.html">Distroless e Alpine</a>.</p>
+
+<hr>
+
+<h2>Verificando com docker exec whoami</h2>
+<p>Depois de buildar a imagem segura, a Ana subiu o container e perguntou para ele quem estava no comando:</p>
+<pre class="term" data-cwd="~/minha-api">$ docker build -t minha-api:segura .
+…
+Successfully tagged minha-api:segura
+
+$ docker run -d --name api -p 3000:3000 minha-api:segura
+9f8e7d6c5b4a…
+
+$ docker exec api whoami
+ana</pre>
+<p>Agora a resposta é <code>ana</code>. Compare com a imagem oficial, que continua respondendo <code>root</code>:</p>
+<pre class="term">$ docker run --rm nginx:alpine whoami
+root</pre>
+<p>Esse <code>docker exec … whoami</code> é o truque para <strong>auditar qualquer imagem</strong> — inclusive imagens de terceiros que você vai usar: suba um container dela com <code>--rm</code> e pergunte quem está rodando. A regra de bolso para produção: <strong>só use imagens que não sejam root</strong>, ou imagens suas terminando com <code>USER</code> no Dockerfile. (O <code>docker exec</code> em si tem aula própria: <a href="docker-exec.html">Entrando num container rodando</a>.)</p>
+
+<div class="try" data-goal="whoami" data-solucao="docker run --rm nginx:alpine whoami">
+<p class="try-task"><strong>Missão:</strong> rode <code>docker run --rm nginx:alpine whoami</code> no terminal abaixo e confirme que a imagem oficial do Nginx responde <code>root</code>. Depois imagine a sua imagem própria, com <code>USER ana</code> no Dockerfile, respondendo <code>ana</code>.</p>
+</div>
+
+<div class="try" data-goal="CONTAINER ID" data-solucao="docker run -d --name api nginx:alpine">
+<p class="try-task"><strong>Missão extra:</strong> suba um container em segundo plano com <code>docker run -d --name api nginx:alpine</code>, depois rode <code>docker ps</code> e veja a coluna <code>CONTAINER ID</code> — é esse ID que você usaria num <code>docker exec api whoami</code>.</p>
+</div>
+
+<hr>
+
+<h2>USER com UID/GID explícito: o truque dos volumes</h2>
+<p>Quando você monta um volume (<code>-v</code>, aula <a href="volumes-intro.html">Volumes</a>), as permissões valem pelo <strong>UID numérico</strong>, não pelo nome. O notebook da Ana usa UID 1000 (o primeiro usuário criado numa distro Linux comum). Se o container roda com <code>USER 1000:1000</code>, os arquivos que ele gravar no volume ficam no nome da própria Ana na máquina — sem "arquivo fantasma" pertencente a um número que não existe:</p>
+<pre class="term">$ docker run --rm -v ~/dados:/app/dados --user 1000:1000 minha-api:segura whoami
+ana</pre>
+<pre class="term">$ ls -l ~/dados
+-rw-r--r-- 1 ana ana 4096 jan 15 10:00 pedido-123.json   « dueño certo: ana, não "1000"</pre>
+<dl class="anatomy">
+  <dt>--user 1000:1000</dt><dd>Roda o container com UID 1000 e GID 1000 — vale o mesmo que <code>USER 1000:1000</code> no Dockerfile, mas na hora do <code>docker run</code> (útil para imagens de terceiros que você não quer rebuildar).</dd>
+  <dt>-v ~/dados:/app/dados</dt><dd>O volume continua gravável para o usuário comum, desde que o UID tenha permissão na pasta do host.</dd>
+</dl>
+<p>Por que isso importa: se o container rodasse como UID 65532 (um número alto, comum em imagens nonroot) e gravasse no volume, o arquivo ficaria <code>65532:65532</code> no host — e a Ana não conseguiria apagar o próprio arquivo sem <code>sudo</code>. Casar o UID do container com o UID do dono do volume evita essa dor de cabeça. Esse detalhe combina direto com a próxima aula: com <code>--read-only</code> o sistema de arquivos fecha para escrita e o volume vira o único lugar gravável.</p>
+
+<div class="warning"><strong>Erro comum: esqueceu o <code>chown</code> e a app não sobe.</strong> Se o seu Dockerfile cria o usuário mas não entrega a pasta do app (<code>chown -R</code>), a aplicação quebra na inicialização com <code>Error: EACCES: permission denied</code> ao tentar escrever em <code>/app</code> — e como o processo já é o usuário comum, o erro aparece na hora, não depois. A ordem certa no Dockerfile é sempre: <code>COPY</code> os arquivos → <code>RUN</code> criar usuário + <code>chown</code> → <code>USER</code>.</div>
+
+<hr>
+
+<h2>Quem é o usuário padrão das imagens oficiais?</h2>
+<p>Antes de confiar numa imagem de terceiro, rode o <code>whoami</code> nela. Estas são as respostas mais comuns hoje:</p>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Imagem</th><th>Usuário padrão</th><th>O que fazer</th></tr>
+<tr><td><code>nginx:alpine</code></td><td><code>root</code></td><td>Adicione <code>USER</code> no seu Dockerfile derivado ou rode com <code>--user</code>.</td></tr>
+<tr><td><code>node:22-alpine</code></td><td><code>root</code> (mas já existe o usuário <code>node</code>, UID 1000)</td><td>Use <code>USER node</code> no Dockerfile — não precisa criar usuário novo.</td></tr>
+<tr><td><code>postgres:16-alpine</code></td><td><code>postgres</code></td><td>Já é não-root — basta não sobrescrever com <code>--user root</code>.</td></tr>
+<tr><td><code>redis:7-alpine</code></td><td><code>redis</code></td><td>Já é não-root.</td></tr>
+<tr><td><code>python:3.12-slim</code></td><td><code>root</code></td><td>Crie um usuário com <code>useradd</code> e finalize com <code>USER</code>.</td></tr>
+<tr><td><code>mysql:8</code></td><td><code>mysql</code></td><td>Já é não-root.</td></tr>
+<tr><td><code>gcr.io/distroless/*</code></td><td>UID 65532 na tag <code>:nonroot</code></td><td>Prefira sempre a tag <code>:nonroot</code>.</td></tr>
+</table>
+</div>
+<p>Repare no padrão: imagens de <strong>aplicação</strong> (nginx, node, python) costumam vir como root porque o build pode precisar instalar pacotes; imagens de <strong>banco de dados</strong> (postgres, redis, mysql) já vêm com usuário dedicado, porque o próprio software exige não ser root. Para as de aplicação, o <code>USER</code> final é responsabilidade sua.</p>
+
+<hr>
+
+<h2>Dockerfile seguro completo: a API da Loja Aurora</h2>
+<p>Juntando tudo desta aula (e um pouco da <a href="multi-stage.html">aula de multi-stage</a>, para a imagem ficar enxuta), este é o Dockerfile que a Ana usa de verdade para a API da loja:</p>
+<pre class="file" data-file="~/minha-api/Dockerfile"># ---- estágio de build ----
+FROM node:22-alpine AS build
+WORKDIR /app
+COPY package*.json ./
+RUN npm install
+COPY . .
+RUN npm run build
+
+# ---- estágio final (runtime) ----
+FROM node:22-alpine AS runtime
+WORKDIR /app
+ENV NODE_ENV=production
+
+# usuário dedicado, sem privilégios
+RUN adduser -D -s /bin/sh appuser \
+ && mkdir -p /app/logs \
+ && chown -R appuser:appuser /app
+USER appuser
+
+COPY --from=build /app/dist ./dist
+COPY --from=build /app/node_modules ./node_modules
+COPY package*.json ./
+
+EXPOSE 3000
+# o processo roda como appuser: mesmo se o código tiver uma falha,
+# o atacante não vira root dentro do container
+CMD ["node", "dist/server.js"]</pre>
+<p>Três camadas de proteção só nesse arquivo: imagem <strong>Alpine</strong> (pequena), usuário <strong>não-root</strong> (esta aula) e build separado (multi-stage). Some ainda <code>--cap-drop</code> e <code>--read-only</code> na hora de subir — próximas aulas.</p>
+
+<hr>
+
+<h2>Erros comuns</h2>
+<div class="cenario">
+<strong>Esqueci o USER no fim — e o build "limpou" depois</strong>
+<p>Um erro clássico de iniciante: colocar <code>USER ana</code> no <em>meio</em> do Dockerfile e depois um <code>RUN</code> que precisa de root (instalar pacote, por exemplo) — o build quebra com <code>permission denied</code>. Outro clássico oposto: criar o usuário, dar <code>chown</code>, mas <strong>esquecer o <code>USER</code> no fim</strong>, e o container continua root mesmo com usuário criado. A regra visual: o <code>USER</code> deve ser uma das <strong>últimas instruções</strong> do Dockerfile, depois de todos os <code>RUN</code>.</p>
+</div>
+<div class="warning"><strong><code>USER</code> não existe na imagem → o container nem sobe.</strong> Se você escreve <code>USER ana</code> numa imagem que não tem a usuária <code>ana</code> (esqueceu o <code>RUN adduser</code>), o <code>docker run</code> falha na hora com <code>Error response from daemon: unable to find user ana: no matching entries in passwd file</code>. Crie primeiro, troque depois.</div>
+<div class="warning"><strong><code>--user</code> com nome errado dá a mesma mensagem.</strong> <code>docker run --user anaa …</code> (com erro de digitação) devolve o mesmo erro de "no matching entries in passwd file". Para imagens de terceiro, prefira o número: <code>--user 1000:1000</code> sempre funciona, porque UID não precisa existir no <code>/etc/passwd</code>.</div>
+
+<hr>
+
+<h2>Quiz rápido</h2>
+<div class="mc" data-answer="2">
+<p class="mc-q">1. Por que rodar o processo do container como usuário comum é mais seguro?</p>
+<label><input type="radio" name="q1"> Porque o container fica mais rápido</label>
+<label><input type="radio" name="q1"> Porque, se houver um escape de container, o atacante não vira root no host</label>
+<label><input type="radio" name="q1"> Porque economiza memória RAM</label>
+<label><input type="radio" name="q1"> Porque o Docker obriga</label>
+</div>
+
+<div class="mc" data-answer="4">
+<p class="mc-q">2. Numa imagem <code>node:22-alpine</code>, qual destas linhas deixa o container rodando como usuário comum?</p>
+<label><input type="radio" name="q2"> <code>RUN adduser -D ana</code> (sozinho, no fim do Dockerfile)</label>
+<label><input type="radio" name="q2"> <code>EXPOSE 3000</code></label>
+<label><input type="radio" name="q2"> <code>CMD ["node", "server.js"]</code></label>
+<label><input type="radio" name="q2"> <code>RUN adduser -D ana</code> seguido de <code>USER ana</code></label>
+</div>
+
+<div class="mc" data-answer="3">
+<p class="mc-q">3. A Ana rodou <code>docker run --rm nginx:alpine whoami</code> e recebeu <code>root</code>. O que isso significa?</p>
+<label><input type="radio" name="q3"> A imagem do Nginx está quebrada</label>
+<label><input type="radio" name="q3"> O Docker instalou errado no notebook dela</label>
+<label><input type="radio" name="q3"> O processo dentro dessa imagem roda como root por padrão — convém trocar com USER numa imagem derivada</label>
+<label><input type="radio" name="q3"> O comando whoami está errado</label>
+</div>
+
+<div class="mc" data-answer="1">
+<p class="mc-q">4. Por que faz sentido usar <code>USER 1000:1000</code> (números) em vez de <code>USER ana</code> quando o container grava num volume?</p>
+<label><input type="radio" name="q4"> Porque as permissões de volume valem pelo UID numérico; casando com o UID da dona do arquivo no host, os arquivos não ficam com dono estranho</label>
+<label><input type="radio" name="q4"> Porque o nome "ana" é grande demais</label>
+<label><input type="radio" name="q4"> Porque UID numérico deixa o container mais rápido</label>
+<label><input type="radio" name="q4"> Não faz sentido; só nome de usuário funciona</label>
+</div>
+
+<hr>
+
+<h2>Resumo</h2>
+<ul>
+  <li>Por padrão, o processo do container roda como <strong>root (UID 0)</strong> — o mesmo UID que o kernel do host enxerga. Num escape de container, root dentro vira root fora.</li>
+  <li>Nunca monte <code>/var/run/docker.sock</code> num container de produção: quem fala com o socket controla o daemon e vira root no host.</li>
+  <li>Crie o usuário no build (<code>RUN adduser -D …</code> no Alpine, <code>RUN useradd -m …</code> no Debian), entregue a pasta com <code>chown -R</code> e finalize com <code>USER</code>.</li>
+  <li>Verifique qualquer imagem com <code>docker run --rm IMAGEM whoami</code> ou <code>docker exec … whoami</code>.</li>
+  <li>Para volumes, prefira UID/GID explícitos (<code>USER 1000:1000</code> / <code>--user 1000:1000</code>) casando com o dono da pasta no host.</li>
+  <li>Imagens de banco (postgres, redis, mysql) já vêm não-root; imagens de app (nginx, node, python) geralmente vêm root e pedem <code>USER</code> seu.</li>
+  <li>Erros reais: <code>unable to find user …: no matching entries in passwd file</code> (USER antes de criar) e <code>EACCES: permission denied</code> (esqueceu o chown).</li>
+</ul>
+
+<div class="tip"><strong>Próxima aula:</strong> <a href="read-only.html">Sistema de arquivos somente leitura (--read-only)</a> — fechar o sistema de arquivos do container contra escrita.</div>
+
+<div class="pager"></div>
+
+</div>
+</main>
+</div>
+<script src="assets/site.js?v=4"></script>
+</body>
+</html>

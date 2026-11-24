@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Terminal Simulado — como usar o terminal Docker do guia | Guia Docker</title>
+<meta name="description" content="Como usar o terminal Docker simulado do Guia Docker: a máquina fictícia ana@notebook, o prompt, o que cada tecla faz (Enter, setas, Ctrl+L, Ctrl+C), os botões Reiniciar e Ver comando, como as missões são verificadas (selo ✔ Missão cumprida!), uma sessão completa de exemplo, o que o simulador sabe e o que não sabe em relação ao Docker real.">
+<link rel="stylesheet" href="assets/style.css?v=4">
+<script>try{var t=localStorage.getItem("tema");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<meta http-equiv="Cache-Control" content="no-store, must-revalidate">
+<script>try{history.scrollRestoration="manual"}catch(e){}(function(){var n=0;function t(){window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;if(++n<60)setTimeout(t,50)}t();window.addEventListener("pagehide",function(){window.scrollTo(0,0);document.documentElement.scrollTop=0;});window.addEventListener("pageshow",function(){window.scrollTo(0,0)});window.addEventListener("load",function(){window.scrollTo(0,0)});})();document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(a){var h=a.getAttribute("href")||"";if(/[.]html($|[?#])/.test(h)&&a.host===location.host){window.scrollTo(0,0);document.documentElement.scrollTop=0;}}});</script>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" id="sidebar" aria-label="Tópicos"></nav>
+<main class="main">
+<div class="content">
+
+<div class="pager"></div>
+
+<h1>Terminal <span class="hl">Simulado</span></h1>
+
+<p class="intro">Este guia tem um <strong>terminal Docker simulado</strong> que roda dentro da própria página: uma máquina fictícia <code>ana@notebook</code> com imagens e containers de mentira. Nada do que você digitar sai do navegador — pode errar à vontade. Um clique em <strong>Reiniciar</strong> e tudo volta ao estado inicial.</p>
+
+<div class="note">
+<strong>Você vai aprender</strong>
+<ul>
+  <li>Como usar a caixa "Experimente": clicar, digitar, <kbd>Enter</kbd>.</li>
+  <li>O que é cada parte da janela: prompt <code>ana@notebook:~$</code>, linhas de comando, saída, mensagem de boas-vindas.</li>
+  <li>Teclas úteis: <kbd>↑</kbd>/<kbd>↓</kbd> (histórico), <kbd>Ctrl</kbd>+<kbd>L</kbd> (limpar), <kbd>Ctrl</kbd>+<kbd>C</kbd> (cancelar).</li>
+  <li>O botão <strong>Reiniciar</strong> e o botão <strong>Ver comando</strong> (quando há missão).</li>
+  <li>Como as missões são verificadas (selo verde "✔ Missão cumprida!").</li>
+  <li>O que o simulador sabe fazer e o que ele <strong>não</strong> sabe (para não confiar cegamente).</li>
+</ul>
+</div>
+
+<hr>
+
+<h2>Por que um terminal simulado?</h2>
+<p>O medo de "quebrar alguma coisa" é o que mais trava quem está começando. No seu computador de verdade, um comando errado pode travar um serviço ou encher o disco; aqui esse medo não existe: o simulador é um programa dentro da página da web, não o seu Docker. Você pode apagar imagens, parar containers, rodar comandos errados, digitar cualquier coisa. Ao clicar em <strong>Reiniciar</strong>, a máquina volta ao estado inicial.</p>
+
+<p>O objetivo é você <strong>perder o medo do terminal</strong> e ganhar memória muscular: depois de rodar <code>docker run</code>, <code>docker ps</code> e <code>docker rm</code> dez vezes aqui, na hora de usar o Docker de verdade (<a href="instalar.html">instalado na sua máquina</a>) os comandos já saem sozinhos.</p>
+
+<hr>
+
+<h2>Anatomia da janela do terminal</h2>
+<p>Toda caixa escura de "Experimente" tem as mesmas peças:</p>
+
+<pre class="term">┌─────────────────────────────────────────────┐
+│ [Reiniciar] [Ver comando]        ← botões   │
+│ ─────────────────────────────────────────── │
+│ Máquina fictícia ana@notebook — Docker …   │  ← boas-vindas
+│                                             │
+│ ana@notebook:~$ docker images        ← comando digitado (com prompt)
+│ REPOSITORY   TAG   IMAGE ID   …      ← saída do comando
+│ ana@notebook:~$ _                    ← prompt esperando
+└─────────────────────────────────────────────┘</pre>
+
+<dl class="anatomy">
+  <dt>ana@notebook:~$</dt><dd>O <strong>prompt</strong>: usuária <code>ana</code>, máquina <code>notebook</code>, pasta atual <code>~</code> (a casa da Ana). Tudo depois do <code>$</code> é o que você digita.</dd>
+  <dt>linha verde/azul de comando</dt><dd>O comando que você digitou, repetido com o prompt na frente (para você ler o histórico da sessão).</dd>
+  <dt>linhas de saída</dt><dd>A resposta do comando. Linhas que começam com <code>Error</code>, <code>Unable</code>, <code>No such</code> etc. aparecem em destaque vermelho.</dd>
+  <dt>✔ Missão cumprida!</dt><dd>O selo verde que aparece quando a saída da sua caixa contém o trecho esperado da missão.</dd>
+</dl>
+
+<hr>
+
+<h2>Usando a caixa "Experimente"</h2>
+<ol class="passo">
+  <li>Clique dentro da janela escura do terminal (o cursor passa a piscar).</li>
+  <li>Digite um comando, por exemplo <code>docker ps</code>, e aperte <kbd>Enter</kbd>.</li>
+  <li>Leia a resposta. Um prompt novo aparece quando o comando termina.</li>
+  <li>Se a caixa tiver uma <strong>missão</strong> (texto "Missão:" em cima), um selo verde aparece quando você acerta.</li>
+</ol>
+
+<div class="try" data-goal="CONTAINER ID" data-solucao="docker ps -a">
+<p class="try-task"><strong>Missão:</strong> digite <code>docker ps -a</code> e aperte <kbd>Enter</kbd> para listar <em>todos</em> os containers (inclusive os parados).</p>
+</div>
+
+<h3>Teclas que funcionam</h3>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Tecla</th><th>No simulador</th></tr>
+<tr><td><kbd>Enter</kbd></td><td>Executa a linha digitada.</td></tr>
+<tr><td><kbd>↑</kbd> / <kbd>↓</kbd></td><td>Navega pelo histórico de comandos daquela caixa (igual ao terminal de verdade).</td></tr>
+<tr><td><kbd>Ctrl</kbd>+<kbd>L</kbd></td><td>Limpa a tela.</td></tr>
+<tr><td><kbd>Ctrl</kbd>+<kbd>C</kbd></td><td>Desiste da linha atual (mostra <code>^C</code> e devolve o prompt).</td></tr>
+<tr><td>Clique na janela</td><td>Volta o foco para o campo de digitação.</td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>Botões da janela</h2>
+<dl class="anatomy">
+  <dt>Reiniciar</dt><dd>Apaga todo o histórico e devolve a máquina ao estado inicial: as 6 imagens pré-carregadas (<code>hello-world</code>, <code>nginx:alpine</code>, <code>node:22-alpine</code>, <code>postgres:16-alpine</code>, <code>redis:7-alpine</code>, <code>python:3.12-slim</code>) e nenhum container. Use quando quiser recomeçar a misión do zero.</dd>
+  <dt>Ver comando</dt><dd>Preenche o campo de entrada com o comando da missão (aparece só nas caixas com <code>data-solucao</code>). Útil quando você travou: é só apertar <kbd>Enter</kbd> depois.</dd>
+</dl>
+
+<hr>
+
+<h2>Uma sessão completa de exemplo</h2>
+<p>Assim fica uma Sessão típica no simulador — rode você também:</p>
+
+<pre class="term">$ docker run hello-world
+7d3a1b9c2e4f
+
+Hello from Docker!
+This message shows that your installation appears to be working correctly.
+…
+$ docker ps -a
+CONTAINER ID   IMAGE         COMMAND    CREATED          STATUS                      PORTS   NAMES
+7d3a1b9c2e4f   hello-world   "/hello"   20 seconds ago   Exited (0) 18 seconds ago           clever_curie-42
+$ docker rm clever_curie-42
+clever_curie-42
+$ docker ps -a
+CONTAINER ID   IMAGE   COMMAND   CREATED   STATUS   PORTS   NAMES</pre>
+
+<p>Repare no fluxo: <code>run</code> criou e rodou; o container terminou sozinho (a imagem hello-world só imprime a mensagem e sai); <code>ps -a</code> mostrou ele parado (<code>Exited (0)</code>); <code>rm</code> apagou; a lista ficou vazia de novo.</p>
+
+<hr>
+
+<h2>O que o simulador sabe</h2>
+<p>Os principais comandos do Docker CLI, com estado fictício de imagens, containers, redes e volumes na máquina da Ana:</p>
+<ul>
+  <li><code>docker run</code> (com <code>-d</code>, <code>-it</code>, <code>--name</code>, <code>-p</code>, <code>-e</code>, <code>-v</code>, <code>--rm</code>, <code>--network</code>)</li>
+  <li><code>docker ps</code> (<code>-a</code>), <code>docker images</code>, <code>docker pull</code>, <code>docker stop/start/restart</code>, <code>docker rm</code>, <code>docker rmi</code></li>
+  <li><code>docker logs</code>, <code>docker exec</code>, <code>docker inspect</code>, <code>docker stats</code></li>
+  <li><code>docker build</code>, <code>docker tag</code>, <code>docker network</code>, <code>docker volume</code>, <code>docker system df/prune</code>, <code>docker compose</code>, <code>docker info</code>, <code>docker version</code>, <code>docker --version</code>, <code>docker --help</code>, <code>docker CMD --help</code></li>
+  <li>Comandos de shell básicos: <code>clear</code>, <code>echo</code>, <code>help</code>, <code>exit</code>, <code>history</code>, <code>sudo docker …</code></li>
+</ul>
+
+<div class="try" data-goal="Comandos disponíveis" data-solucao="help">
+<p class="try-task"><strong>Missão:</strong> digite <code>help</code> dentro da caixa para ver a lista de comandos que o simulador aceita.</p>
+</div>
+
+<pre class="term">$ help
+Comandos disponíveis: docker (run, ps, images, pull, stop, rm, rmi, logs, exec, build, network, volume, compose, system, ...), clear, echo, help, exit, history</pre>
+
+<hr>
+
+<h2>O que ele NÃO sabe (leia antes de confiar)</h2>
+<ul>
+  <li>Não fala com a internet: <code>docker push</code> e <code>docker login</code> são simulados (sempre dão certo, sem enviar nada).</li>
+  <li>Não baixa imagens de verdade: <code>docker pull</code> de imagens novas cria uma entrada fictícia (~100MB); a saída imita o formato real ("Pulling from library/…", "Status: Downloaded newer image").</li>
+  <li>Não roda containers de verdade: <code>docker exec -it … sh</code> mostra uma mensagem em vez de abrir um shell; <code>docker run -p …</code> não abre porta de verdade (não dá para acessar no navegador).</li>
+  <li>Dados de <code>docker stats</code>, <code>docker system df</code> e os IDs/nomes aleatórios são fictícios (mas no formato real).</li>
+  <li>Erros de digitação de comandodeaqui são limitados: um subcomando desconhecido responde <code>docker: '…' is not a docker command</code>.</li>
+</ul>
+
+<div class="warning">
+<strong>Use o simulador para aprender a forma dos comandos — e o Docker de verdade para o resto</strong>
+<p>Tudo o que aparece nas caixas <code>pre.term</code> (fora do simulador) foi conferido no Docker Engine 27 real. Quando quiser ir além do simulador — subir um site de verdade, conectar no banco — instale o Docker na sua máquina (<a href="instalar.html">aula de instalação</a>) e rode os mesmos comandos no terminal dela.</p>
+</div>
+
+<hr>
+
+<h2>O estado inicial da máquina da Ana</h2>
+<p>Toda caixa começa (e volta, com <strong>Reiniciar</strong>) com essa cara: 6 imagens e nenhum container. É o "dia zero" do notebook dela:</p>
+
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Imagem</th><th>Para que serve</th><th>Tamanho</th></tr>
+<tr><td><code>hello-world:latest</code></td><td>O "Olá, mundo!" — imprime uma mensagem e sai (teste de instalação)</td><td>18.2kB</td></tr>
+<tr><td><code>nginx:alpine</code></td><td>Servidor web estático (sites HTML)</td><td>48.2MB</td></tr>
+<tr><td><code>node:22-alpine</code></td><td>Node.js 22 para rodar apps JavaScript</td><td>189MB</td></tr>
+<tr><td><code>postgres:16-alpine</code></td><td>Banco de dados PostgreSQL 16</td><td>245MB</td></tr>
+<tr><td><code>redis:7-alpine</code></td><td>Banco em memória (cache, filas) Redis 7</td><td>42.8MB</td></tr>
+<tr><td><code>python:3.12-slim</code></td><td>Python 3.12 enxuto (slim) para scripts e APIs</td><td>132MB</td></tr>
+</table>
+</div>
+
+<p>Essas seis imagens são as que o guia usa nos exemplos — por isso você vai vê-las o tempo todo. No Docker de verdade da sua máquina, a lista começa vazia e vai enchendo conforme você dá <code>docker pull</code>.</p>
+
+<h3>Erros que o simulador mostra de propósito</h3>
+<p>Parte de aprender é errar. Estes são os erros mais comuns que você vai ver (todos no formato real do Docker):</p>
+<pre class="term">$ docker stop nao-existe
+Error response from daemon: No such container: nao-existe
+$ docker rm meu-site        « se meu-site estiver rodando…
+Error response from daemon: cannot remove container "meu-site": container is running: stop the container before removing or force remove
+$ docker run              « esqueceu a imagem
+docker: 'docker run' requires at least 1 argument.
+See 'docker run --help'.
+$ docker abracadabra
+docker: 'abracadabra' is not a docker command.
+See 'docker --help'.</pre>
+
+<p>Na dúvida, <code>docker --help</code> lista todos os comandos e <code>docker COMANDO --help</code> mostra as opções de um comando específico — a aula <a href="ajuda.html">Obtendo ajuda</a> detalha.</p>
+
+<h3>Dicas de uso</h3>
+<ul>
+  <li>Cada página tem suas próprias caixas — o estado (imagens e containers) é <strong>compartilhado</strong> entre as caixas da mesma página, então o que você rodou numa caixa aparece na outra (por isso dá para dar <code>run</code> numa caixa e <code>ps</code> na seguinte).</li>
+  <li>Se travar numa missão, clique em <strong>Ver comando</strong> e aperte <kbd>Enter</kbd>.</li>
+  <li>Se a máquina ficou uma bagunça, <strong>Reiniciar</strong> devolve tudo ao estado inicial na hora.</li>
+  <li>Os IDs e nomes aleatórios (tipo <code>clever_curie-42</code>) mudam a cada vez — no Docker de verdade é a mesma coisa.</li>
+</ul>
+
+<hr>
+
+<h2>Pratique</h2>
+<div class="try" data-goal="Hello from Docker" data-solucao="docker run hello-world">
+<p class="try-task"><strong>Missão:</strong> rode <code>docker run hello-world</code>. É o "Olá, mundo!" do Docker — um container que imprime uma mensagem e sai.</p>
+</div>
+
+<hr>
+
+<h2>Perguntas rápidas sobre o simulador</h2>
+
+<h3>Posso quebrar o simulador?</h3>
+<p>Pode. A pior coisa que acontece é a página recarregar e você perder o histórico da caixa — clique em <strong>Reiniciar</strong> e volta tudo. Nada afeta seu computador.</p>
+
+<h3>Os comandos que eu digitar aqui funcionam no Docker de verdade?</h3>
+<p>Sim — a sintaxe é a mesma do CLI real (<code>docker run -d -p 8080:80 nginx:alpine</code> aqui é idêntico no seu terminal). O que muda é a saída: aqui ela é simulada; lá, é o Docker Engine de verdade respondendo.</p>
+
+<h3>Por que o simulador diz "(simulado)" em algumas respostas?</h3>
+<p>Para você não confundir: comandos que exigiriam internet ou um sistema real (push, login, pull de verdade, shell interativo) são avisados como simulados em vez de fingir que funcionaram.</p>
+
+<h3>Consigo ver o estado atual (imagens/containers) sem rodar comando?</h3>
+<p>Dentro da caixa, rode <code>docker images</code>, <code>docker ps -a</code>, <code>docker volume ls</code> e <code>docker network ls</code> — é o quarteto que resume o estado da máquina.</p>
+
+<hr>
+
+<h2>Resumo</h2>
+<ul>
+  <li>O simulador é uma máquina fictícia <code>ana@notebook</code> dentro da página — nada do que você digita sai do navegador.</li>
+  <li>Use: clique na janela, digite o comando, <kbd>Enter</kbd>. <kbd>↑</kbd>/<kbd>↓</kbd> pegam comandos antigos; <kbd>Ctrl</kbd>+<kbd>L</kbd> limpa; <kbd>Ctrl</kbd>+<kbd>C</kbd> cancela a linha.</li>
+  <li><strong>Reiniciar</strong> volta tudo ao estado inicial (6 imagens, 0 containers). <strong>Ver comando</strong> preenche a missão no campo de entrada.</li>
+  <li>Missão cumprida = a saída da caixa contém o trecho esperado → selo verde "✔ Missão cumprida!".</li>
+  <li>Ele entende os principais comandos do CLI com estado fictício; <strong>não</strong> baixa imagens de verdade, não abre portas, não abre shell interativo de verdade.</li>
+  <li>As saídas mostradas nas caixas <code>pre.term</code> do guia foram conferidas no Docker real.</li>
+</ul>
+
+<div class="tip"><strong>Próxima aula:</strong> <a href="primeiro-container.html">Seu Primeiro Container (hello-world)</a> — agora que você sabe usar o terminal, rode o "Olá, mundo!" do Docker e entenda o que aconteceu nos bastidores.</div>
+
+</div>
+</main>
+</div>
+<script src="assets/site.js?v=4"></script>
+</body>
+</html>

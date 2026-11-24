@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>O arquivo docker-compose.yml — anatomia do YAML do Compose | Guia Docker</title>
+<meta name="description" content="A anatomia completa do docker-compose.yml: o que é YAML e por que a indentação manda (2 espaços, nunca tab), services, image, build, ports, environment, volumes, depends_on e networks, aspas obrigatórias em portas como \"8080:80\", de onde vem o nome do projeto, como validar com docker compose config e os erros reais de YAML mais comuns.">
+<link rel="stylesheet" href="assets/style.css?v=4">
+<script>try{var t=localStorage.getItem("tema");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<meta http-equiv="Cache-Control" content="no-store, must-revalidate">
+<script>try{history.scrollRestoration="manual"}catch(e){}(function(){var n=0;function t(){window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;if(++n<60)setTimeout(t,50)}t();window.addEventListener("pagehide",function(){window.scrollTo(0,0);document.documentElement.scrollTop=0;});window.addEventListener("pageshow",function(){window.scrollTo(0,0)});window.addEventListener("load",function(){window.scrollTo(0,0)});})();document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(a){var h=a.getAttribute("href")||"";if(/[.]html($|[?#])/.test(h)&&a.host===location.host){window.scrollTo(0,0);document.documentElement.scrollTop=0;}}});</script>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" id="sidebar" aria-label="Tópicos"></nav>
+<main class="main">
+<div class="content">
+
+<div class="pager"></div>
+
+<h1>O arquivo <span class="hl">docker-compose.yml</span></h1>
+
+<p class="intro">Todo projeto Compose vive num arquivo <strong>YAML</strong> na raiz da pasta do projeto — o <code>docker-compose.yml</code> (o Compose v2 também aceita <code>compose.yaml</code>, <code>compose.yml</code>, <code>docker-compose.yaml</code>, nessa ordem de preferência). É nesse arquivo que você declara os serviços, e cada serviço vira um container quando você dá o <code>up</code>.</p>
+
+<div class="note">
+<strong>Você vai aprender</strong>
+<ul>
+  <li>O que é YAML e por que a <strong>indentação</strong> manda no arquivo (2 espaços, nunca tab).</li>
+  <li>Onde o arquivo fica, de onde vem o nome do projeto (nome da pasta) e a flag <code>-f</code>.</li>
+  <li>As chaves principais: <code>services</code>, <code>image</code>, <code>build</code>, <code>ports</code>, <code>environment</code>, <code>volumes</code>, <code>depends_on</code> e <code>networks</code>.</li>
+  <li>Por que portas como <code>"8080:80"</code> precisam de aspas.</li>
+  <li>Um exemplo completo e comentado, como validar com <code>docker compose config</code> e os erros reais de YAML.</li>
+</ul>
+</div>
+
+<hr>
+
+<h2>O que é YAML (e por que ele existe)</h2>
+<p><strong>YAML</strong> é um formato de arquivo feito para <strong>ser lido por pessoas</strong> — o slogan do projeto é "YAML Ain't Markup Language". Ele descreve dados com pares <code>chave: valor</code> e <strong>listas com traço</strong>, e a hierarquia vem do <strong>recuo</strong> das linhas. Pense numa lista de compras escrita assim:</p>
+<pre class="file" data-file="lista-de-compras.yaml">frutas:
+  - maçã
+  - banana
+legumes:
+  - cenoura
+  - batata</pre>
+<p>O recuo de dois espaços diz que <code>maçã</code> está <em>dentro</em> de <code>frutas</code>. Se você acertar o recuo errado, a lista muda de sentido — e no YAML do Compose, recuo errado quebra o arquivo inteiro. É por isso que a indentação é a primeira coisa que esta aula ensina.</p>
+
+<hr>
+
+<h2>Onde o arquivo fica e quem dá o nome do projeto</h2>
+<p>Por padrão, o <code>docker compose</code> procura o arquivo na <strong>pasta atual</strong> (onde você rodou o comando). O <strong>nome do projeto</strong> é o nome dessa pasta, normalizado para minúsculas e sem caracteres estranhos — e é ele que vira o prefixo de tudo que o Compose cria: numa pasta <code>minhaloja</code>, os containers viram <code>minhaloja-web-1</code>, <code>minhaloja-banco-1</code>, o volume <code>minhaloja_dados-db</code> e a rede <code>minhaloja_default</code>.</p>
+<pre class="term" data-cwd="~/minhaloja">$ pwd
+/home/ana/minhaloja
+$ ls
+docker-compose.yml  site/
+$ docker compose ps
+NAME              IMAGE         STATUS         PORTS
+minhaloja-web-1   nginx:alpine  Up 2 minutes   0.0.0.0:8080->80/tcp</pre>
+<p>Para usar outro arquivo ou outra pasta, existe a flag <code>-f</code> (pode ser usada várias vezes) e a variável de ambiente <code>COMPOSE_FILE</code>:</p>
+<pre class="term">$ docker compose -f ~/projetos/api/compose.yml ps     « arquivo em outro lugar
+$ docker compose -p minhaapi up -d                      « ou outro nome de projeto (-p)</pre>
+<p>Se nada disso for dito, vale o padrão: arquivo na pasta atual, projeto = nome da pasta. Dica: mantenha o <code>docker-compose.yml</code> sempre na raiz do projeto, versionado no git junto com o código.</p>
+
+<hr>
+
+<h2>Anatomia das chaves</h2>
+<p>O arquivo é um <strong>mapa YAML</strong>. No primeiro nível quase sempre existirão <code>services:</code> (a única chave obrigatória) e, quando usados, <code>volumes:</code> e <code>networks:</code>. Dentro de cada serviço, as chaves mais comuns são estas — e quase todas têm um equivalente direto nas flags do <code>docker run</code>:</p>
+<dl class="anatomy">
+  <dt>services:</dt><dd>Obrigatória. Cada entrada é um serviço — e cada serviço vira <strong>um container</strong>.</dd>
+  <dt>image:</dt><dd>A imagem pronta que o serviço usa (ex.: <code>nginx:alpine</code>, <code>postgres:16-alpine</code>). Equivale a não passar <code>-t</code> no build: é o <code>docker run &lt;imagem&gt;</code>.</dd>
+  <dt>build:</dt><dd>Em vez de <code>image</code>, constrói a imagem na hora a partir de um Dockerfile (aula <a href="compose-build.html">Build no Compose</a>).</dd>
+  <dt>ports:</dt><dd>Publica portas, no mesmo formato do <code>-p</code>: <code>"8080:80"</code> (host → container).</dd>
+  <dt>environment:</dt><dd>Variáveis de ambiente, em lista (<code>- NOME=valor</code>) ou em mapa (<code>NOME: valor</code>) — o mesmo do <code>-e</code>.</dd>
+  <dt>volumes:</dt><dd>Monta volumes nomeados ou pastas da máquina (bind), no mesmo formato do <code>-v</code>.</dd>
+  <dt>depends_on:</dt><dd>Ordem de subida: o serviço só inicia depois dos serviços listados.</dd>
+  <dt>networks:</dt><dd>Redes das quais o serviço participa. Se não declarar nada, todos os serviços entram numa rede <code>default</code> criada para o projeto.</dd>
+  <dt>restart:</dt><dd>Política de reinício (<code>no</code>, <code>always</code>, <code>unless-stopped</code>, <code>on-failure</code>) — como o <code>--restart</code>.</dd>
+  <dt>command:</dt><dd>Sobrescreve o comando padrão da imagem (o <code>CMD</code>).</dd>
+</dl>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Chave no YAML</th><th>Flag equivalente do docker run</th></tr>
+<tr><td><code>image: nginx:alpine</code></td><td><code>docker run nginx:alpine</code></td></tr>
+<tr><td><code>ports: - "8080:80"</code></td><td><code>-p 8080:80</code> (aula <a href="portas.html">Portas</a>)</td></tr>
+<tr><td><code>environment: - NOME=valor</code></td><td><code>-e NOME=valor</code> (aula <a href="variaveis-ambiente.html">Variáveis de ambiente</a>)</td></tr>
+<tr><td><code>volumes: - dados:/caminho</code></td><td><code>-v dados:/caminho</code> (aula <a href="volumes-intro.html">Volumes</a>)</td></tr>
+<tr><td><code>build: .</code></td><td><code>docker build</code> + <code>docker run</code> juntos</td></tr>
+<tr><td><code>restart: always</code></td><td><code>--restart always</code></td></tr>
+<tr><td><code>command: node app.js</code></td><td><code>docker run imagem node app.js</code></td></tr>
+</table>
+</div>
+<p>Se você já sabe <code>docker run</code>, o YAML do Compose é só transcrever as flags para dentro do serviço — a aula <a href="compose-servicos.html">Serviços, portas, variáveis e volumes no Compose</a> mostra cada uma na prática.</p>
+
+<hr>
+
+<h2>Indentação: 2 espaços, nunca tab</h2>
+<p>YAML é <strong>sensível à indentação</strong>: a posição das linhas diz a hierarquia. A convenção no Compose (e no YAML em geral) é <strong>2 espaços</strong> por nível — e a tecla <kbd>Tab</kbd> é <strong>proibida</strong>:</p>
+<pre class="file" data-file="docker-compose.yml (ERRADO — linha 5 tem tab)">services:
+  web:
+    image: nginx:alpine
+    ports:
+→     - "8080:80"        « essa linha começou com TAB em vez de espaços</pre>
+<div class="warn"><strong>Erro real ao usar tab no YAML:</strong>
+<pre class="term">$ docker compose config
+minhaloja/docker-compose.yml: yaml: line 5: found character '\t' that cannot start any token</pre>
+Um tab no começo da linha faz o parser inteiro desistir. Se o seu editor insere tab, configure-o para inserir espaços em arquivos <code>.yml</code> (VS Code, gedit e a maioria dos editores já fazem isso sozinhos ao detectar a extensão).</div>
+<div class="warn"><strong>Outro erro clássico de recuo — o serviço "sumiu":</strong> se você recua um serviço um nível a menos, ele vira filho da chave errada e o Compose reclama:
+<pre class="term">$ docker compose config
+services.web must be a mapping     « "web:" ficou solto, sem o "image:" dentro dele</pre>
+Ou, pior, o serviço é interpretado como texto e o comando lista um projeto vazio. Se o <code>up</code> disser que não há serviços, olhe o recuo.</div>
+<p>Para validar o arquivo <strong>sem subir nada</strong>, use <code>docker compose config</code>: ele lê o YAML, imprime a configuração normalizada (já com valores padrão preenchidos e variáveis resolvidas) e avisa se algo está errado:</p>
+<pre class="term" data-cwd="~/minhaloja">$ docker compose config
+services:
+  web:
+    image: nginx:alpine
+    ports:
+    - mode: ingress
+      target: 80
+      published: "8080"
+      protocol: tcp
+    depends_on:
+      banco:
+        condition: service_started
+  banco:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_PASSWORD: segredo
+    volumes:
+    - type: volume
+      source: dados-db
+      target: /var/lib/postgresql/data
+volumes:
+  dados-db: {}</pre>
+<p>Repare como o <code>"8080:80"</code> virou um objeto estruturado (<code>published: "8080"</code>, <code>target: 80</code>) — o Compose já interpretou a string. É essa a prova de que o arquivo está válido.</p>
+
+<hr>
+
+<h2>Por que as portas vão entre aspas: <code>"8080:80"</code></h2>
+<p>O par <code>8080:80</code> tem um <code>:</code> no meio. Em YAML 1.1 (que muita gente ainda associa a arquivos de configuração), <code>8080:80</code> pode ser lido como um número na <strong>base 60</strong> (sexagesimal) — igual horas e minutos: <code>8080:80</code> viraria o número 484880. Resultado:</p>
+<div class="warn"><strong>Erro real de porta sem aspas:</strong>
+<pre class="term">$ docker compose up -d
+services.web.ports must be a string     « ou o YAML quebra na hora de ler a linha</pre>
+<strong>Regra de ouro: sempre coloque aspas em portas no Compose</strong> — <code>"8080:80"</code>, nunca <code>8080:80</code>. O mesmo vale para qualquer valor com <code>:</code> (horários, URLs).</div>
+
+<hr>
+
+<h2>Exemplo completo e comentado</h2>
+<p>Este é o arquivo que a Ana usa na <code>~/minhaloja</code> — cada linha comentada:</p>
+<pre class="file" data-file="~/minhaloja/docker-compose.yml"># docker-compose.yml — projeto "minhaloja"
+# Rode nesta pasta: docker compose up -d
+
+services:                     # cada entrada aqui vira UM container
+
+  web:                        # nome do serviço (vai parar no nome do container: minhaloja-web-1)
+    image: nginx:alpine       # imagem pronta do Docker Hub
+    ports:
+      - "8080:80"             # host 8080 -> container 80 (as aspas são obrigatórias!)
+    volumes:
+      - ./site:/usr/share/nginx/html:ro   # pasta da máquina dentro do container (ro = somente leitura)
+    depends_on:
+      - banco                 # o web só sobe depois do banco
+    restart: unless-stopped   # se o container cair, o Docker reinicia sozinho
+
+  banco:
+    image: postgres:16-alpine
+    environment:              # variáveis de ambiente (formato mapa)
+      POSTGRES_USER: ana
+      POSTGRES_PASSWORD: segredo
+    volumes:
+      - dados-db:/var/lib/postgresql/data   # volume nomeado: os dados persistem ao "down"
+
+volumes:                      # declara os volumes nomeados usados acima
+  dados-db:</pre>
+<p>Três detalhes para notar: <code>./site</code> é um <strong>bind mount</strong> — a pasta do projeto entra no container (ótimo para desenvolvimento: editou o HTML na máquina, recarregou a página); <code>:ro</code> deixa o container só ler; e o serviço <code>banco</code> <strong>não tem porta publicada</strong> — só os outros containers alcançam ele pela rede interna, o que deixa o banco mais seguro.</p>
+
+<hr>
+
+<h2>Erros reais de YAML que todo mundo comete uma vez</h2>
+<div class="warn"><strong>Faltou os dois pontos depois da chave:</strong>
+<pre class="file" data-file="docker-compose.yml (errado)">services
+  web:
+    image: nginx:alpine</pre>
+<pre class="term">$ docker compose config
+yaml: line 1: mapping values are not allowed in this context</pre>
+Todo <code>chave:</code> precisa do dois pontos. Sem ele, o parser acha que você está escrevendo uma frase no meio de um mapa.</div>
+<div class="warn"><strong>Chave duplicada (copiou o serviço e esqueceu de trocar o nome):</strong>
+<pre class="term">$ docker compose config
+yaml: mapping key "web" already defined at line 4</pre>
+Cada serviço aparece uma vez só. Para rodar várias réplicas do mesmo serviço, não duplique a chave — use <code>docker compose up -d --scale web=3</code> (aula <a href="compose-up-down.html">up e down</a>).</div>
+<div class="warn"><strong>Lista onde devia ser mapa (ou o contrário):</strong> escrever
+<pre class="file" data-file="errado">services:
+  - web
+  - banco</pre>
+faz o Compose reclamar que <code>services</code> precisa ser um mapa de nomes para configurações, não uma lista. A lista (<code>- item</code>) aparece <em>dentro</em> das chaves: <code>ports:</code>, <code>environment:</code> (forma lista), <code>volumes:</code>, <code>depends_on:</code>.</div>
+
+<hr>
+
+<h2>Conferindo a versão do Compose</h2>
+<p>Antes de seguir, confirme que a sua máquina está com o Compose v2 (o plugin, com espaço) — a aula anterior (<a href="compose-intro.html">O que é Docker Compose</a>) explica a diferença:</p>
+<div class="try" data-goal="Docker Compose version" data-solucao="docker compose version">
+<p class="try-task"><strong>Missão:</strong> rode <code>docker compose version</code> e veja a versão do Compose v2 instalada.</p>
+</div>
+
+<pre class="term">$ docker compose version
+Docker Compose version v2.29.7</pre>
+
+<div class="try" data-goal="projeto iniciado" data-solucao="docker compose up -d">
+<p class="try-task"><strong>Missão:</strong> com um <code>docker-compose.yml</code> na pasta, suba o projeto no simulador com <code>docker compose up -d</code> e veja "projeto iniciado" na saída.</p>
+</div>
+
+<hr>
+
+<h2>Quiz rápido</h2>
+<div class="mc" data-answer="3">
+<p class="mc-q">1. Por que a indentação é tão importante no YAML?</p>
+<label><input type="radio" name="q1"> Porque deixa o arquivo mais bonito</label>
+<label><input type="radio" name="q1"> Porque o YAML é case-sensitive nas chaves</label>
+<label><input type="radio" name="q1"> Porque a posição das linhas define a hierarquia (quem está dentro de quem)</label>
+<label><input type="radio" name="q1"> Porque o Compose conta os espaços para dar nome aos containers</label>
+</div>
+
+<div class="mc" data-answer="2">
+<p class="mc-q">2. O que acontece se você escrever a porta sem aspas: <code>- 8080:80</code>?</p>
+<label><input type="radio" name="q2"> Nada — o Compose adivinha que é porta</label>
+<label><input type="radio" name="q2"> O YAML pode ler <code>8080:80</code> como número (base 60) e o Compose reclama que a porta deve ser string</label>
+<label><input type="radio" name="q2"> A porta vira 80 no host e 8080 no container</label>
+<label><input type="radio" name="q2"> O arquivo vira inválido e o git apaga ele</label>
+</div>
+
+<div class="mc" data-answer="4">
+<p class="mc-q">3. De onde vem, por padrão, o nome do projeto (<code>minhaloja</code> em <code>minhaloja-web-1</code>)?</p>
+<label><input type="radio" name="q3"> Do campo <code>name:</code> dentro do YAML</label>
+<label><input type="radio" name="q3"> Da imagem usada no primeiro serviço</label>
+<label><input type="radio" name="q3"> Da variável de ambiente <code>USER</code></label>
+<label><input type="radio" name="q3"> Do nome da pasta onde o comando foi rodado</label>
+</div>
+
+<hr>
+
+<h2>Resumo</h2>
+<ul>
+  <li>O projeto Compose é um arquivo YAML na raiz da pasta (por padrão <code>docker-compose.yml</code>); <strong>services:</strong> é a única chave obrigatória e cada serviço vira um container.</li>
+  <li>YAML é sensível à indentação: <strong>2 espaços por nível, tab nunca</strong> — tab dá <code>found character '\t' that cannot start any token</code>.</li>
+  <li>O nome do projeto vem do nome da pasta e vira o prefixo dos containers, volumes e rede (<code>minhaloja-web-1</code>).</li>
+  <li>Chaves ↔ flags do <code>docker run</code>: <code>ports</code>=<code>-p</code>, <code>environment</code>=<code>-e</code>, <code>volumes</code>=<code>-v</code>, <code>build</code>=build+run, <code>restart</code>=<code>--restart</code>.</li>
+  <li>Portas sempre entre aspas (<code>"8080:80"</code>) — sem aspas o YAML pode interpretar como número base 60.</li>
+  <li>Valide o arquivo sem subir nada com <code>docker compose config</code> — ele imprime a configuração normalizada e acusa erros de sintaxe.</li>
+</ul>
+
+<div class="tip"><strong>Próxima aula:</strong> <a href="compose-up-down.html">docker compose up e down</a> — subir e derrubar o projeto inteiro com um comando.</div>
+
+</div>
+</main>
+</div>
+<script src="assets/site.js?v=4"></script>
+</body>
+</html>

@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>docker network: criar, conectar, desconectar e remover redes | Guia Docker</title>
+<meta name="description" content="O subgrupo docker network: create para criar uma rede própria (com DNS automático por nome de container, --driver, --subnet e --gateway), ls para listar, connect e disconnect para ligar containers existentes a redes novas, inspect para ver o JSON da rede (sub-rede, gateway, containers conectados), rm e os erros reais de rede predefinida e de endpoints ativos, e prune. Exemplo completo da Ana ligando API e Postgres numa rede dedicada app-net no notebook, tabela de subcomandos, erros e quiz. Docker Engine 27.x.">
+<link rel="stylesheet" href="assets/style.css?v=4">
+<script>try{var t=localStorage.getItem("tema");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<meta http-equiv="Cache-Control" content="no-store, must-revalidate">
+<script>try{history.scrollRestoration="manual"}catch(e){}(function(){var n=0;function t(){window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;if(++n<60)setTimeout(t,50)}t();window.addEventListener("pagehide",function(){window.scrollTo(0,0);document.documentElement.scrollTop=0;});window.addEventListener("pageshow",function(){window.scrollTo(0,0)});window.addEventListener("load",function(){window.scrollTo(0,0)});})();document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(a){var h=a.getAttribute("href")||"";if(/[.]html($|[?#])/.test(h)&&a.host===location.host){window.scrollTo(0,0);document.documentElement.scrollTop=0;}}});</script>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" id="sidebar" aria-label="Tópicos"></nav>
+<main class="main">
+<div class="content">
+
+<div class="pager"></div>
+
+<h1><span class="hl">docker network</span> — criar, conectar e remover redes</h1>
+
+<p class="intro">Além das três redes de fábrica (<code>bridge</code>, <code>host</code>, <code>none</code>), você pode criar <strong>redes suas</strong> com <code>docker network create</code>. Uma rede própria traz duas vantagens grandes: <strong>isola</strong> um projeto do outro (o projeto A não enxerga o projeto B) e liga o <strong>DNS automático</strong> — dentro dela, um container alcança o outro pelo nome (assunto da próxima aula). A Ana vai criar a rede da aplicação dela agora.</p>
+
+<div class="note">
+<strong>Você vai aprender</strong>
+<ul>
+  <li><code>docker network create</code> e <code>docker network ls</code> — e as opções <code>--driver</code>, <code>--subnet</code>, <code>--gateway</code>.</li>
+  <li>Subir containers numa rede dedicada com <code>--network</code>.</li>
+  <li><code>docker network connect</code> e <code>disconnect</code> em containers que já existem (um container pode estar em várias redes).</li>
+  <li><code>docker network inspect</code>: o JSON da rede, com sub-rede, gateway e containers conectados.</li>
+  <li><code>docker network rm</code> e os erros reais: rede predefinida e "active endpoints".</li>
+  <li><code>docker network prune</code> para limpar redes não usadas.</li>
+</ul>
+</div>
+
+<hr>
+
+<h2>Por que criar uma rede própria?</h2>
+<p>Na <code>bridge</code> padrão, <strong>todos</strong> os containers que você sobe sem <code>--network</code> ficam no mesmo quintal — e se alcançam pelo IP. Se a Ana tem dois projetos no notebook (o site dela e o sistema da empresa), os containers dos dois se misturam. Com uma rede por projeto:</p>
+<ul>
+  <li><strong>Isolamento:</strong> o container do projeto A não alcança o do projeto B (nem por IP, nem por nome).</li>
+  <li><strong>DNS automático:</strong> dentro da rede criada por você, o nome do container resolve para o IP (na bridge padrão isso não acontece — próxima aula).</li>
+  <li><strong>Organização:</strong> <code>docker network ls</code> vira o mapa dos seus projetos; dá para apagar a rede inteira de um projeto antigo com um comando.</li>
+</ul>
+
+<hr>
+
+<h2>Criando uma rede</h2>
+<pre class="term" data-cwd="~">$ docker network create app-net
+7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0c9d8e7f6a5b4c3d2e1f0a9b8c7d6e
+$ docker network ls
+NETWORK ID     NAME      DRIVER    SCOPE
+a1b2c3d4e5f6   bridge    bridge    local
+b2c3d4e5f6a1   host      host      local
+c3d4e5f6a1b2   none      null      local
+7d6e5f4a3b2c   app-net   bridge    local</pre>
+<p>O <code>create</code> devolve o ID completo (64 hex) da rede nova. Repare que a rede criada usa o driver <code>bridge</code> — ela é uma bridge nova, separada da padrão, com a própria faixa de IPs (172.18.x.x, 172.19.x.x… conforme as redes vão sendo criadas).</p>
+<dl class="anatomy">
+  <dt>docker network</dt><dd>o subgrupo de comandos que gerencia redes.</dd>
+  <dt>create</dt><dd>cria uma rede nova (driver <code>bridge</code> por padrão).</dd>
+  <dt>app-net</dt><dd>o nome da rede — único na máquina; é esse nome que vai no <code>--network</code>.</dd>
+</dl>
+
+<h3>Opções úteis do create</h3>
+<pre class="term" data-cwd="~">$ docker network create --driver bridge \
+>     --subnet 192.168.50.0/24 --gateway 192.168.50.1 \
+>     --label projeto=guia rede-customizada
+$ docker network create --driver macvlan --subnet 192.168.1.0/24 \
+>     --gateway 192.168.1.1 -o parent=eth0 rede-macvlan   « macvlan dá IP real da rede física ao container</pre>
+<p>Na maioria dos casos o padrão basta. O <code>--subnet</code>/<code>--gateway</code> servem para encaixar o Docker numa rede corporativa com faixa fixa; o driver <code>macvlan</code>/<code>ipvlan</code> é para o container aparecer como um dispositivo real na rede física (caso avançado).</p>
+
+<hr>
+
+<h2>Exemplo: rede dedicada para app + banco</h2>
+<p>O cenário clássico da Ana: uma API e um Postgres que precisam se falar, sem nada mais nessa rede:</p>
+<pre class="term" data-cwd="~">$ docker network create app-net
+7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0c9d8e7f6a5b4c3d2e1f0a9b8c7d6e
+$ docker run -d --name meu-banco --network app-net \
+>     -e POSTGRES_PASSWORD=segredo \
+>     -v dados-postgres:/var/lib/postgresql/data \
+>     postgres:16-alpine
+a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5
+$ docker run -d --name minha-api --network app-net \
+>     -p 3000:3000 \
+>     -e DATABASE_URL=postgres://meu-banco:5432/guia \
+>     node:22-alpine node server.js
+b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5
+$ docker ps
+CONTAINER ID   IMAGE              STATUS         PORTS                     NAMES
+a1b2c3d4e5f6   postgres:16-alpine Up 8 seconds   5432/tcp                  meu-banco
+b2c3d4e5f6a1   node:22-alpine     Up 5 seconds   0.0.0.0:3000->3000/tcp    minha-api</pre>
+<p>Repare na coluna PORTS: só a API tem porta publicada (<code>3000:3000</code>). O banco está <code>5432/tcp</code> só — alcançável <strong>dentro da app-net</strong>, invisível para o mundo de fora. A variável <code>DATABASE_URL</code> já aponta para o banco <strong>pelo nome</strong>: <code>postgres://meu-banco:5432/guia</code> (próxima aula explica o DNS interno que faz isso funcionar).</p>
+
+<hr>
+
+<h2>Conectar um container que já existe</h2>
+<p>O container nasce na rede padrão, mas dá para ligá-lo a outra rede depois — sem recriar nada:</p>
+<pre class="term" data-cwd="~">$ docker run -d --name web nginx:alpine   « nasceu na bridge padrão
+$ docker network connect app-net web      « agora está nas duas redes
+$ docker inspect web --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{end}}'
+bridge app-net
+$ docker network disconnect bridge web     « opcional: tira da rede padrão</pre>
+<p>Um container pode estar em várias redes ao mesmo tempo — cada uma vira uma interface de rede dentro dele (visível com <code>docker exec web ip addr</code>: <code>eth0</code>, <code>eth1</code>…).</p>
+
+<div class="warn"><strong>Erro real: conectar container que não existe.</strong> <code>docker network connect app-net site</code> (nome errado) dá <code>Error response from daemon: No such container: site</code>. E conectar duas vezes na mesma rede dá <code>endpoint with name … already exists in network app-net</code>. Confira o nome com <code>docker ps</code> antes.</div>
+
+<hr>
+
+<h2>Inspecionando a rede: quem está conectado</h2>
+<p>O <code>docker network inspect</code> mostra o JSON da rede — sub-rede, gateway e a lista de containers conectados com IP e MAC:</p>
+<pre class="term" data-cwd="~">$ docker network inspect app-net
+[
+    {
+        "Name": "app-net",
+        "Id": "7d6e5f4a3b2c…",
+        "Scope": "local",
+        "Driver": "bridge",
+        "IPAM": {
+            "Config": [
+                {
+                    "Subnet": "172.18.0.0/16",
+                    "Gateway": "172.18.0.1"
+                }
+            ]
+        },
+        "Containers": {
+            "a1b2c3d4e5f6…": { "Name": "meu-banco", "IPv4Address": "172.18.0.2/16" },
+            "b2c3d4e5f6a1…": { "Name": "minha-api", "IPv4Address": "172.18.0.3/16" }
+        }
+    }
+]</pre>
+<p>Com <code>--format</code> dá para extrair só os nomes dos containers conectados — útil para scripts de "quem está na minha rede?":</p>
+<pre class="term">$ docker network inspect app-net --format '{{range .Containers}}{{.Name}}{{"\n"}}{{end}}'
+meu-banco
+minha-api</pre>
+
+<hr>
+
+<h2>Removendo uma rede</h2>
+<pre class="term" data-cwd="~">$ docker network rm app-net
+app-net</pre>
+<p>Sem erro, o comando devolve o nome da rede removida. Mas há dois erros comuns:</p>
+<pre class="term" data-cwd="~">$ docker network rm bridge
+Error response from daemon: predefined network bridge cannot be removed
+$ docker network rm app-net
+Error response from daemon: network app-net has active endpoints</pre>
+<div class="warn"><strong>Dois erros na hora de remover rede:</strong> <code>predefined network bridge cannot be removed</code> — as redes <code>bridge</code>, <code>host</code> e <code>none</code> são de fábrica e não podem ser apagadas. E <code>network app-net has active endpoints</code> — ainda existe container conectado; rode <code>docker network disconnect app-net &lt;container&gt;</code> (ou remova o container) antes.</div>
+
+<hr>
+
+<h2>docker network prune</h2>
+<p>Com o tempo, redes de projetos antigos vão sobrando. O <code>prune</code> remove todas as redes que <strong>nenhum container está usando</strong> (as de fábrica nunca são removidas):</p>
+<pre class="term" data-cwd="~">$ docker network prune
+WARNING! This will remove all custom networks not used by at least one container.
+Are you sure you want to continue? [y/N] y
+Deleted Networks:
+app-net-antiga
+teste-net</pre>
+
+<hr>
+
+<h2>O diagrama da rede app-net</h2>
+<p>A rede que a Ana criou funciona do mesmo jeito que a bridge padrão, só que separada — é uma "segunda ponte" só dela:</p>
+<pre class="file"># diagrama da app-net (rede criada com docker network create app-net)
+
+host (notebook da Ana)
+  └── app-net (bridge própria) .. gateway 172.18.0.1, faixa 172.18.0.0/16
+        ├── container "meu-banco" ... 172.18.0.2  (5432/tcp — sem -p, só interna)
+        └── container "minha-api" ... 172.18.0.3  (3000 → publicada na 3000 do host)
+              └── DNS interno em 127.0.0.11 resolve "meu-banco" → 172.18.0.2
+
+  └── bridge (padrão) ........... outros containers que não usam --network ficam aqui</pre>
+<p>Isolamento na prática: da <code>app-net</code>, ninguém alcança os containers da <code>bridge</code> padrão pelo nome (nem pelo IP, se as faixas não se cruzam) — são prédios diferentes.</p>
+
+<hr>
+
+<h2>Resumo dos subcomandos</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Comando</th><th>O que faz</th></tr>
+<tr><td><code>docker network ls</code></td><td>Lista as redes (use <code>--filter</code> e <code>-q</code> para filtrar/ só nomes).</td></tr>
+<tr><td><code>docker network create app-net</code></td><td>Cria uma rede bridge própria, com DNS automático por nome de container.</td></tr>
+<tr><td><code>docker network connect app-net web</code></td><td>Liga um container existente à rede (ele pode ficar em várias).</td></tr>
+<tr><td><code>docker network disconnect app-net web</code></td><td>Desliga o container da rede.</td></tr>
+<tr><td><code>docker network inspect app-net</code></td><td>Mostra o JSON da rede: sub-rede, gateway e containers conectados (com IPs).</td></tr>
+<tr><td><code>docker network rm app-net</code></td><td>Remove a rede (só se não tiver container conectado e não for de fábrica).</td></tr>
+<tr><td><code>docker network prune</code></td><td>Remove todas as redes personalizadas não usadas por nenhum container.</td></tr>
+</table>
+</div>
+
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Sintoma</th><th>Causa</th></tr>
+<tr><td><code>predefined network bridge cannot be removed</code></td><td>Tentou apagar <code>bridge</code>/<code>host</code>/<code>none</code> — não pode</td></tr>
+<tr><td><code>network app-net has active endpoints</code></td><td>Tem container conectado: disconnect ou remova o container antes</td></tr>
+<tr><td><code>No such container: site</code> no connect</td><td>Nome do container errado — confira com <code>docker ps</code></td></tr>
+<tr><td><code>network … not found</code> no rm/inspect</td><td>Nome da rede errado — confira com <code>docker network ls</code></td></tr>
+</table>
+</div>
+
+<div class="try" data-goal="app-net" data-solucao="docker network create app-net">
+<p class="try-task"><strong>Missão:</strong> crie a sua primeira rede: rode <code>docker network create app-net</code> e depois confirme com <code>docker network ls</code> — o nome <code>app-net</code> deve aparecer na lista.</p>
+</div>
+
+<div class="try" data-goal="one or more networks" data-solucao="docker network inspect app-net">
+<p class="try-task"><strong>Missão extra:</strong> depois de criar a rede, rode <code>docker network inspect app-net</code> no terminal abaixo e veja o help do subgrupo (no simulador, o inspect cai no help que lista "one or more networks").</p>
+</div>
+
+<hr>
+
+<h2>Quiz rápido</h2>
+
+<div class="mc" data-answer="2">
+<p class="mc-q">1. Qual comando cria uma rede chamada <code>app-net</code>?</p>
+<label><input type="radio" name="q1"> <code>docker run --network app-net</code></label>
+<label><input type="radio" name="q1"> <code>docker network create app-net</code></label>
+<label><input type="radio" name="q1"> <code>docker net new app-net</code></label>
+<label><input type="radio" name="q1"> <code>docker create network app-net</code></label>
+</div>
+
+<div class="mc" data-answer="3">
+<p class="mc-q">2. Quais as duas grandes vantagens de criar uma rede própria em vez de usar a bridge padrão?</p>
+<label><input type="radio" name="q2"> Deixa as imagens mais leves</label>
+<label><input type="radio" name="q2"> Nada muda</label>
+<label><input type="radio" name="q2"> Isola projetos entre si e liga o DNS automático (container alcança outro pelo nome)</label>
+<label><input type="radio" name="q2"> Aumenta a memória RAM</label>
+</div>
+
+<div class="mc" data-answer="4">
+<p class="mc-q">3. A Ana rodou <code>docker network rm app-net</code> e recebeu <code>network app-net has active endpoints</code>. O que fazer?</p>
+<label><input type="radio" name="q3"> Rodar <code>docker network rm -f app-net</code></label>
+<label><input type="radio" name="q3"> Reiniciar o Docker</label>
+<label><input type="radio" name="q3"> Apagar a pasta da rede com sudo</label>
+<label><input type="radio" name="q3"> Desconectar os containers da rede (<code>docker network disconnect</code>) ou removê-los antes</label>
+</div>
+
+<div class="mc" data-answer="1">
+<p class="mc-q">4. Por que <code>docker network rm bridge</code> sempre dá erro?</p>
+<label><input type="radio" name="q4"> Porque a bridge é uma rede predefinida (de fábrica) e não pode ser removida</label>
+<label><input type="radio" name="q4"> Porque falta memória</label>
+<label><input type="radio" name="q4"> Porque o nome está errado</label>
+<label><input type="radio" name="q4"> Porque precisa de sudo</label>
+</div>
+
+<hr>
+
+<h2>Resumo</h2>
+<ul>
+  <li>Além de <code>bridge</code>/<code>host</code>/<code>none</code>, você cria redes próprias com <code>docker network create NOME</code> (driver bridge por padrão, com <code>--subnet</code>/<code>--gateway</code>/<code>--label</code> opcionais).</li>
+  <li>Rede própria = <strong>isolamento entre projetos</strong> + <strong>DNS automático por nome de container</strong> dentro dela.</li>
+  <li>Suba containers nela com <code>--network app-net</code>; um container pode estar em várias redes (<code>docker network connect</code>/<code>disconnect</code> depois do run).</li>
+  <li><code>docker network inspect app-net</code> mostra sub-rede, gateway e os containers conectados com IPs — e com <code>--format</code> dá para extrair só os nomes.</li>
+  <li><code>docker network rm</code> falha se a rede for de fábrica (<code>predefined network … cannot be removed</code>) ou tiver container conectado (<code>has active endpoints</code>).</li>
+  <li><code>docker network prune</code> limpa as redes personalizadas não usadas.</li>
+</ul>
+
+<div class="tip"><strong>Próxima aula:</strong> <a href="containers-conversando.html">Containers se comunicando por nome</a> — o DNS interno que faz o <code>meu-banco</code> ser encontrado pelo nome.</div>
+
+<div class="pager"></div>
+
+</div>
+</main>
+</div>
+<script src="assets/site.js?v=4"></script>
+</body>
+</html>

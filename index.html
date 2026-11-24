@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tutorial Docker — aprenda containers do zero, como numa escola | Guia Docker</title>
+<meta name="description" content="Curso de Docker do zero ao avançado, em português: o que são containers e imagens, docker run, ps, images, pull, Dockerfile, build, volumes, redes, Docker Compose, projetos completos, com terminal simulado no navegador, missões e saídas conferidas no Docker real.">
+<link rel="stylesheet" href="assets/style.css?v=4">
+<script>try{var t=localStorage.getItem("tema");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<meta http-equiv="Cache-Control" content="no-store, must-revalidate">
+<script>try{history.scrollRestoration="manual"}catch(e){}(function(){var n=0;function t(){window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;if(++n<60)setTimeout(t,50)}t();window.addEventListener("pagehide",function(){window.scrollTo(0,0);document.documentElement.scrollTop=0;});window.addEventListener("pageshow",function(){window.scrollTo(0,0)});window.addEventListener("load",function(){window.scrollTo(0,0)});})();document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(a){var h=a.getAttribute("href")||"";if(/[.]html($|[?#])/.test(h)&&a.host===location.host){window.scrollTo(0,0);document.documentElement.scrollTop=0;}}});</script>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" id="sidebar" aria-label="Tópicos"></nav>
+<main class="main">
+<div class="content">
+
+<div class="hero">
+<h1>Tutorial <span class="hl">Docker</span> 🐳</h1>
+<p>Aprenda <strong>containers do zero</strong>, como numa escola: cada comando do Docker é explicado pedaço por pedaço, você vê exatamente o que aparece no terminal e pratica numa máquina fictícia aqui mesmo na página. Vale para Linux, macOS e Windows (WSL2).</p>
+<a class="btn btn-lg" href="introducao.html">Comece pelo Nível 1 &#10095;</a>
+</div>
+
+<div class="pager"></div>
+
+<p class="intro">Este é um <strong>curso completo e gratuito de Docker em português</strong>: do primeiro <code>docker run hello-world</code> até criar suas imagens, subir vários serviços com Compose e preparar tudo para produção — sempre com exemplo no terminal, missão para pratiquer e a saída real conferida no Docker Engine 27.</p>
+
+<h2>Experimente agora</h2>
+<p>A caixa abaixo é um <strong>terminal Docker simulado</strong>: uma máquina fictícia chamada <strong>notebook</strong>, com a usuária <strong>ana</strong>, com imagens e containers de mentira. Nada do que você digitar mexe no seu computador. Clique na janela escura, digite <code>docker images</code> e aperte <kbd>Enter</kbd>.</p>
+
+<div class="try" data-goal="REPOSITORY" data-solucao="docker images">
+<p class="try-task"><strong>Missão:</strong> digite <code>docker images</code> e aperte <kbd>Enter</kbd> para ver as imagens que a Ana já tem. Depois experimente <code>docker run hello-world</code> e <code>docker ps -a</code>.</p>
+</div>
+
+<p>O que aconteceu: você rodou o comando <code>docker images</code>, que lista as <strong>imagens</strong> guardadas na máquina. Uma imagem é como a "receita" de um container — o sistema de arquivos pronto, com tudo instalado. A máquina da Ana já veio com algumas: <code>hello-world</code>, <code>nginx:alpine</code>, <code>node:22-alpine</code>, <code>postgres:16-alpine</code>, <code>redis:7-alpine</code> e <code>python:3.12-slim</code>.</p>
+
+<pre class="term">$ docker images
+REPOSITORY   TAG          IMAGE ID       CREATED         SIZE
+nginx        alpine       b2c3d4e5f6a1   5 days ago      48.2MB
+node         22-alpine    c3d4e5f6a1b2   1 week ago      189MB
+postgres     16-alpine    d4e5f6a1b2c3   3 days ago      245MB
+redis        7-alpine     e5f6a1b2c3d4   1 week ago      42.8MB
+python       3.12-slim    f6a1b2c3d4e5   4 days ago      132MB
+hello-world  latest       a1b2c3d4e5f6   2 weeks ago     18.2kB</pre>
+
+<p>Cada linha é uma imagem: o nome (<code>REPOSITORY</code>), a versão (<code>TAG</code>), o identificador único (<code>IMAGE ID</code>), a idade e o tamanho em disco. A máquina da Ana é só um exemplo — no seu computador, depois de instalar o Docker, a lista começa vazia e vai enchendo conforme você baixa imagens com <code>docker pull</code>.</p>
+
+<h3>Uma sessão completa em cinco comandos</h3>
+<p>Para ter uma ideia de como é o dia a dia, olha a sessão abaixo — é exatamente o que a Ana faria no <code>notebook</code> dela para testar se o Docker está funcionando e ver um site no ar:</p>
+
+<pre class="term">$ docker --version
+Docker version 27.3.1, build ce12f7b
+$ docker run hello-world
+
+Hello from Docker!
+This message shows that your installation appears to be working correctly.
+…
+$ docker run -d -p 8080:80 --name meu-site nginx:alpine
+f3a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5
+$ docker ps
+CONTAINER ID   IMAGE          STATUS         PORTS                  NAMES
+f3a1b2c3d4e5   nginx:alpine   Up 5 seconds   0.0.0.0:8080->80/tcp   meu-site
+$ docker stop meu-site
+meu-site
+$ docker rm meu-site
+meu-site</pre>
+
+<p>Em cinco comandos: conferiu a versão, rodou o "olá, mundo", subiu um site na porta 8080, viu o container na lista, parou e removeu. Cada um desses passos tem uma aula própria neste guia — <a href="primeiro-container.html">Seu Primeiro Container</a>, <a href="docker-run.html">docker run</a>, <a href="docker-ps.html">docker ps</a>, <a href="docker-stop-start.html">docker stop/start</a> e <a href="docker-rm.html">docker rm</a>.</p>
+
+<hr>
+
+<h2>O que é este guia</h2>
+<p>O <strong>Docker</strong> é a ferramenta que empacota um programa com <strong>tudo o que ele precisa</strong> para rodar (bibliotecas, configurações, dependências) numa caixinha chamada <strong>container</strong>. Essa caixinha roda igual em qualquer máquina — no seu notebook, num servidor na nuvem, no computador do colega. Quem sabe Docker consegue:</p>
+<ul>
+  <li>rodar qualquer programa sem "na minha máquina funciona": <code>docker run</code>;</li>
+  <li>criar suas próprias imagens com um <strong>Dockerfile</strong> e <code>docker build</code>;</li>
+  <li>subir vários serviços juntos (site + banco + cache) com <strong>Docker Compose</strong>;</li>
+  <li>isolar projetos, testar versões diferentes e limpar tudo com um comando.</li>
+</ul>
+<p>O guia começa do zero absoluto (o que é um container?) e vai até projetos completos com Compose, imagens enxutas (multi-stage) e dicas de produção. A aula <a href="introducao.html">O que é Docker e Containers</a> conta a história e a ideia por trás — vale a leitura antes de pular para os comandos.</p>
+
+<h3>Para quem é este guia</h3>
+<p>Para quem está começando em desenvolvimento, ops ou DevOps e quer entender Docker <strong>de verdade</strong>, não só copiar comandos. Você não precisa saber programar: o guia usa programas prontos (Nginx, Postgres, Redis, Python) para mostrar o Docker funcionando. Se você já programa, vai reconhecer as situations do dia a dia — a Ana, nossa personagem, passa por elas em todas as aulas no <code>notebook</code> dela.</p>
+
+<h3>O que você precisa ter</h3>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Requisito</th><th>Detalhes</th></tr>
+<tr><td>Um computador com qualquer sistema</td><td>Linux (Ubuntu, Debian, Fedora, Arch…), macOS ou Windows 10/11 com WSL2</td></tr>
+<tr><td>Um terminal</td><td>No Linux/macOS já vem; no Windows, o WSL2 (o Docker Desktop instala para você)</td></tr>
+<tr><td>Docker instalado (opcional para começar)</td><td>Você pode fazer as primeiras aulas só no <strong>simulador desta página</strong>; a aula <a href="instalar.html">Instalar o Docker</a> mostra como colocar o Docker de verdade na sua máquina</td></tr>
+<tr><td>Uma conta no Docker Hub (opcional)</td><td>Só precisa para publicar suas imagens; para baixar e rodar não precisa de conta</td></tr>
+<tr><td>Curiosidade</td><td>Tudo aqui foi testado conferindo as saídas no Docker Engine 27 de verdade</td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>Como as aulas funcionam</h2>
+<p>Nenhum comando aparece "seco". Toda aula segue o mesmo caminho:</p>
+<ol class="passo">
+  <li><strong>A ideia primeiro.</strong> Antes do comando, você entende o problema que ele resolve, com um exemplo do dia a dia.</li>
+  <li><strong>Anatomia do comando.</strong> Cada pedaço é explicado: o comando, as opções (<code>-d</code>, <code>-p</code>, <code>-v</code>…) e os argumentos.</li>
+  <li><strong>Terminal com a resposta.</strong> Você vê exatamente o que aparece na tela. Toda saída foi conferida no Docker Engine real.</li>
+  <li><strong>Várias formas de fazer.</strong> Quase sempre há mais de um caminho, e uma tabela "Qual usar?" mostra quando escolher cada um.</li>
+  <li><strong>Quando não funciona.</strong> As mensagens de erro reais, por que acontecem e como resolver.</li>
+  <li><strong>Experimente.</strong> Missões no terminal simulado, com verificação na hora.</li>
+</ol>
+
+<h3>Exemplo: a anatomia do docker run</h3>
+<p>Vamos subir um site estático com Nginx numa porta específica:</p>
+
+<dl class="anatomy">
+  <dt>docker</dt><dd>O programa (o cliente Docker, que fala com o daemon).</dd>
+  <dt>run</dt><dd>O subcomando: "crie e inicie um container novo".</dd>
+  <dt>-d</dt><dd>Opção <em>detach</em>: roda em segundo plano e devolve o terminal.</dd>
+  <dt>-p 8080:80</dt><dd>Opção <em>publish</em>: publica a porta 80 do container na porta 8080 da sua máquina.</dd>
+  <dt>--name meu-site</dt><dd>Dá um nome fácil ao container, em vez do nome aleatório.</dd>
+  <dt>nginx:alpine</dt><dd>A imagem que vai virar o container (a "receita").</dd>
+</dl>
+
+<pre class="term">$ docker run -d -p 8080:80 --name meu-site nginx:alpine
+f3a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5
+$ docker ps
+CONTAINER ID   IMAGE          COMMAND                  CREATED          STATUS          PORTS                  NAMES
+f3a1b2c3d4e5   nginx:alpine   "/docker-entrypoint.…"   10 seconds ago   Up 10 seconds   0.0.0.0:8080->80/tcp   meu-site</pre>
+
+<p>Depois é só abrir <code>http://localhost:8080</code> no navegador. A aula <a href="docker-run.html">docker run: anatomia do comando</a> detalha cada opção.</p>
+
+<h3>As peças de toda aula</h3>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Elemento da página</th><th>O que é</th></tr>
+<tr><td><code>pre.term</code> (caixa de terminal)</td><td>Um exemplo real de comando e a saída que o Docker imprime</td></tr>
+<tr><td><code>dl.anatomy</code></td><td>A anatomia: cada termo do comando explicado linha por linha</td></tr>
+<tr><td><code>table.ref</code></td><td>Tabelas de referência rápida e de "quando usar"</td></tr>
+<tr><td><code>div.warning</code></td><td>Erros reais que as pessoas cometem, com a mensagem exata e a solução</td></tr>
+<tr><td><code>div.try</code> (caixa escura)</td><td>O terminal simulado com uma <strong>missão</strong>: rode o comando e veja o selo verde "✔ Missão cumprida!"</td></tr>
+<tr><td><code>div.mc</code></td><td>Quiz de múltipla escolha para fixar a aula</td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>O caminho das aulas (roadmap)</h2>
+<p>O guia é dividido em níveis. Cada nível termina de pé, com projetos funcionando:</p>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Nível</th><th>Você vai aprender</th><th>Principais aulas</th><th>Tempo estimado</th></tr>
+<tr><td><strong>Nível 1 · Iniciante</strong></td><td>Containers e imagens no dia a dia, sem medo do terminal</td><td><code>run</code>, <code>ps</code>, <code>images</code>, <code>pull</code>, <code>stop/rm</code>, <code>logs</code>, <code>exec</code>, portas, variáveis, volumes básicos</td><td>2–3 horas</td></tr>
+<tr><td><strong>Nível 2 · Intermediário</strong></td><td>Criar suas imagens e subir vários serviços juntos</td><td><code>Dockerfile</code>, <code>build</code>, cache de camadas, volumes a fundo, redes, <strong>Compose</strong>, limpeza (<code>system prune</code>)</td><td>4–6 horas</td></tr>
+<tr><td><strong>Nível 3 · Avançado</strong></td><td>Produção e segurança</td><td>usuário não-root, read-only, capabilities, multi-stage, limites de CPU/memória, healthcheck, Swarm, CI/CD</td><td>4–8 horas</td></tr>
+<tr><td><strong>Projetos</strong></td><td>Aplicações completas passo a passo</td><td>site estático, API Node, fullstack React+API+banco, WordPress+MySQL, API Python+Postgres</td><td>2–4 horas</td></tr>
+<tr><td><strong>Referência</strong></td><td>Consulta rápida na hora de usar</td><td>cola de comandos, Dockerfile, compose, flags, glossário, erros comuns, quiz final</td><td>consulta</td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>Escolha sua trilha</h2>
+<div class="trilhas">
+  <div class="trilha n1">
+    <h3>Nível 1 · Iniciante</h3>
+    <p>Containers e imagens no dia a dia: <code>docker run</code>, <code>ps</code>, <code>images</code>, <code>pull</code>, portas, variáveis e volumes básicos.</p>
+    <a class="btn" href="introducao.html">Começar &#10095;</a>
+  </div>
+  <div class="trilha n2">
+    <h3>Nível 2 · Intermediário</h3>
+    <p>Crie suas imagens com <strong>Dockerfile</strong> e <code>docker build</code>, volumes, redes e <strong>Docker Compose</strong> com vários serviços.</p>
+    <a class="btn" href="dockerfile-intro.html">Ver Dockerfile &#10095;</a>
+  </div>
+  <div class="trilha n3">
+    <h3>Nível 3 · Avançado</h3>
+    <p>Produção e segurança: imagens enxutas (multi-stage), limites de recursos, usuário não-root, Swarm e CI/CD.</p>
+    <a class="btn" href="multi-stage.html">Ver avançado &#10095;</a>
+  </div>
+</div>
+
+<p>Depois dos três níveis, a seção <a href="projetos.html">Projetos</a> monta aplicações de verdade com tudo o que você aprendeu — e a seção <a href="ref-comandos.html">Referência</a> vira sua cola de comandos no dia a dia.</p>
+
+<hr>
+
+<h2>Perguntas que todo mundo faz no começo</h2>
+
+<h3>Preciso saber programar para aprender Docker?</h3>
+<p>Não. O guia usa imagens prontas (um site Nginx, um banco Postgres, um interpretador Python) para mostrar cada comando funcionando. Saber o básico de terminal ajuda, mas tudo é explicado passo a passo.</p>
+
+<h3>O simulador é igual ao Docker de verdade?</h3>
+<p>Os comandos e as saídas mostradas nas caixas <code>pre.term</code> foram conferidos no Docker Engine 27 real. O simulador da página imita os principais comandos para você pratiquer sem medo de quebrar nada — a aula <a href="simulador.html">Terminal Simulado</a> lista exatamente o que ele sabe e o que não sabe.</p>
+
+<h3>Docker é de graça?</h3>
+<p>O Docker Engine (o que roda os containers) é gratuito e open source. O Docker Desktop (app para macOS/Windows) também é gratuito para uso pessoal, education e pequenas empresas. Publicar imagens no Docker Hub tem plano gratuito com limites. Para aprender, não gasta nada.</p>
+
+<h3>Docker funciona no Windows?</h3>
+<p>Sim. No Windows 10/11 você instala o Docker Desktop com WSL2 (o subsistema Linux do Windows) — a aula <a href="instalar.html">Instalar o Docker</a> mostra o passo a passo. No servidor, o mais comum é Linux puro com o Docker Engine.</p>
+
+<h3>E máquina virtual, é a mesma coisa?</h3>
+<p>Não. Máquina virtual simula um computador inteiro (com sistema operacional próprio, pesado e lento para ligar). Container compartilha o sistema do hospedeiro e isola só o processo — liga em segundos e pesa megabytes. A aula <a href="introducao.html">O que é Docker e Containers</a> compara os dois lado a lado.</p>
+
+<h3>Quanto tempo até eu usar Docker no trabalho?</h3>
+<p>Com o Nível 1 (umas 2–3 horas de estudo) você já roda banco de dados, sites e APIs locais com containers no mesmo dia. O Nível 2 (Dockerfile + Compose) é o que times usam para desenvolver junto. O resto é aprofundamento.</p>
+
+<hr>
+
+<h2>Resumo desta página</h2>
+<ul>
+  <li>Docker empacota um programa com <strong>tudo o que ele precisa</strong> numa caixa chamada <strong>container</strong>, que roda igual em qualquer máquina.</li>
+  <li><strong>Imagem</strong> é a receita (somente leitura); <strong>container</strong> é o bolo pronto (uma instância viva).</li>
+  <li>Toda aula tem: a ideia, a anatomia do comando, o terminal com a saída real, a tabela "quando usar", os erros comuns e missões no simulador.</li>
+  <li>O guia tem 3 níveis + projetos + referência; comece pelo <a href="introducao.html">Nível 1</a>.</li>
+  <li>Você pode pratiquer agora mesmo na caixa de terminal simulado desta página — nada mexe no seu computador.</li>
+</ul>
+
+<div class="tip"><strong>Próxima aula:</strong> <a href="introducao.html">O que é Docker e Containers</a> — a analogia da caixa de mudança, por que "na minha máquina funciona" existe e a diferença entre container e máquina virtual.</div>
+
+</div>
+</main>
+</div>
+<script src="assets/site.js?v=4"></script>
+</body>
+</html>

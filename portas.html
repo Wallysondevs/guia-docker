@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Publicando portas (-p) — acessar containers de fora | Guia Docker</title>
+<meta name="description" content="Como publicar portas de containers com -p: o formato HOST:CONTAINER, a anatomia de -p 8080:80, -p 127.0.0.1:8080:80 para só localhost (mais seguro), porta aleatória no host (-p 80 ou -P), protocolo UDP (/udp), como ver o mapeamento com docker ps e docker port, exemplos com nginx, API Node e Postgres, e os erros reais (porta já em uso: 'port is already allocated'). Missão no simulador.">
+<link rel="stylesheet" href="assets/style.css?v=4">
+<script>try{var t=localStorage.getItem("tema");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<meta http-equiv="Cache-Control" content="no-store, must-revalidate">
+<script>try{history.scrollRestoration="manual"}catch(e){}(function(){var n=0;function t(){window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;if(++n<60)setTimeout(t,50)}t();window.addEventListener("pagehide",function(){window.scrollTo(0,0);document.documentElement.scrollTop=0;});window.addEventListener("pageshow",function(){window.scrollTo(0,0)});window.addEventListener("load",function(){window.scrollTo(0,0)});})();document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(a){var h=a.getAttribute("href")||"";if(/[.]html($|[?#])/.test(h)&&a.host===location.host){window.scrollTo(0,0);document.documentElement.scrollTop=0;}}});</script>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" id="sidebar" aria-label="Tópicos"></nav>
+<main class="main">
+<div class="content">
+
+<div class="pager"></div>
+
+<h1>Publicando <span class="hl">portas (-p)</span></h1>
+
+<p class="intro">Um container tem a <strong>rede isolada</strong> própria: o Nginx dentro dele abre a porta 80, mas isso só existe lá dentro. Para acessar de fora (navegador, <code>curl</code>, outro programa), você <strong>publica</strong> a porta do container numa porta da sua máquina com <code>-p</code>.</p>
+
+<div class="note">
+<strong>Você vai aprender</strong>
+<ul>
+  <li>O formato <code>-p HOST:CONTAINER</code> e a anatomia de <code>-p 8080:80</code>.</li>
+  <li>Publicar só no localhost: <code>-p 127.0.0.1:8080:80</code> (mais seguro).</li>
+  <li>Porta aleatória no host: <code>-p 80</code> e <code>-P</code> (publish all).</li>
+  <li>Protocolo UDP: <code>-p 53:53/udp</code>.</li>
+  <li>Ver o mapeamento com <code>docker ps</code> (coluna PORTS) e <code>docker port</code>.</li>
+  <li>Erros reais: porta já em uso no host (<code>port is already allocated</code>).</li>
+</ul>
+</div>
+
+<hr>
+
+<h2>A cena: o site da Ana não abre</h2>
+<p>Ela subiu o Nginx assim (só com <code>-d</code>):</p>
+<pre class="term">$ docker run -d --name meu-site nginx:alpine
+$ docker ps
+CONTAINER ID   IMAGE          STATUS         PORTS     NAMES
+f3a1b2c3d4e5   nginx:alpine   Up 5 seconds   80/tcp    meu-site
+$ curl -s http://localhost:80
+curl: (7) Failed to connect to localhost port 80 … Connection refused</pre>
+<p>O <code>80/tcp</code> na coluna PORTS é a porta que o container expõe <strong>na rede interna dele</strong> — ainda não está publicada no seu computador. Abrir <code>http://localhost</code> dá "connection refused".</p>
+
+<hr>
+
+<h2>O formato: -p HOST:CONTAINER</h2>
+<div class="try" data-goal="Up 2 minutes" data-solucao="docker run -d -p 8080:80 --name meu-site nginx:alpine">
+<p class="try-task"><strong>Missão:</strong> suba o Nginx publicando a porta: <code>docker run -d -p 8080:80 --name meu-site nginx:alpine</code>. Depois rode <code>docker ps</code> e veja o container <code>Up 2 minutes</code> com a porta mapeada.</p>
+</div>
+
+<pre class="term">$ docker run -d -p 8080:80 --name meu-site nginx:alpine
+f3a1b2c3d4e5…
+$ docker ps
+CONTAINER ID   IMAGE          STATUS         PORTS                   NAMES
+f3a1b2c3d4e5   nginx:alpine   Up 5 seconds   0.0.0.0:8080->80/tcp    meu-site
+$ curl -s http://localhost:8080 | head -3
+&lt;!DOCTYPE html&gt;
+&lt;html&gt;
+&lt;head&gt;&lt;title&gt;Welcome to nginx!&lt;/title&gt;…</pre>
+
+<dl class="anatomy">
+  <dt>-p</dt><dd><em>publish</em>: "publica uma porta do container no host".</dd>
+  <dt>8080</dt><dd>A porta da <strong>sua máquina</strong> (host) que vai receber o acesso.</dd>
+  <dt>80</dt><dd>A porta <strong>do container</strong> para onde o acesso é encaminhado (o Nginx ouve 80).</dd>
+  <dt>0.0.0.0:8080-&gt;80/tcp</dt><dd>Como aparece no <code>ps</code>: qualquer IP da máquina na porta 8080 vai para a 80 do container.</dd>
+</dl>
+
+<p>A regra mental: <strong>esquerda = sua máquina, direita = container</strong>. <code>-p 8080:80</code> lê-se "minha 8080 aponta para a 80 dele".</p>
+
+<hr>
+
+<h2>Variações</h2>
+<pre class="term">$ docker run -d -p 127.0.0.1:8080:80 nginx:alpine  « só o localhost acessa (mais seguro)
+$ docker ps
+… PORTS
+… 127.0.0.1:8080->80/tcp
+$ docker run -d -p 80 nginx:alpine                « porta ALEATÓRIA no host → 80 do container
+$ docker ps
+… PORTS
+… 0.0.0.0:32768->80/tcp     « o Docker escolheu a 32768 para você
+$ docker run -d -P nginx:alpine                   « -P = publica TODAS as portas expostas pela imagem, em portas aleatórias
+$ docker run -d -p 53:53/udp imagem-dns           « protocolo UDP (padrão é TCP; escreva /udp no fim)
+$ docker port meu-site                            « mostra só o mapeamento de portas do container
+8080/tcp -> 0.0.0.0:8080</pre>
+
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Forma</th><th>Quando usar</th></tr>
+<tr><td><code>-p 8080:80</code></td><td>O caso comum: porta fixa e conhecida no host (site local, API).</td></tr>
+<tr><td><code>-p 127.0.0.1:8080:80</code></td><td>Quando só você deve acessar (banco de dados, painel admin) — ninguém de fora chega.</td></tr>
+<tr><td><code>-p 80</code> / <code>-P</code></td><td>Quando a porta do host não importa (testes rápidos); veja qual foi no <code>ps</code>.</td></tr>
+<tr><td><code>-p 53:53/udp</code></td><td>Serviços UDP (DNS, alguns jogos, VoIP).</td></tr>
+<tr><td>várias portas</td><td><code>-p 8080:80 -p 8443:443</code> (repete a flag, uma por porta).</td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>Exemplos reais</h2>
+<h3>Site estático (Nginx)</h3>
+<pre class="term">$ docker run -d -p 8080:80 --name site nginx:alpine
+$ # abra http://localhost:8080 no navegador</pre>
+<h3>API Node</h3>
+<pre class="term">$ docker run -d -p 3000:3000 --name api node:22-alpine node server.js
+$ curl http://localhost:3000/ola
+ola</pre>
+<h3>Banco Postgres (só localhost!)</h3>
+<pre class="term">$ docker run -d -p 127.0.0.1:5432:5432 -e POSTGRES_PASSWORD=segredo --name banco postgres:16-alpine
+$ psql -h localhost -p 5432 -U postgres   « conecta do seu computador
+$ # de fora da máquina, ninguém alcança o banco ✅</pre>
+
+<hr>
+
+<h2>Erros reais</h2>
+<div class="warning">
+<strong>Porta do host já está em uso</strong>
+<pre class="term">$ docker run -d -p 8080:80 --name site2 nginx:alpine
+docker: Error response from daemon: driver failed programming external connectivity on endpoint site2 (…): Bind for 0.0.0.0:8080 failed: port is already allocated</pre>
+<p>Já tem algo usando a 8080 na sua máquina (outro container ou um programa local — veja com <code>sudo ss -ltnp | grep 8080</code>). Como consertar: escolha outra porta do host (<code>-p 8081:80</code>) ou pare o que está usando a 8080.</p>
+</div>
+
+<div class="warning">
+<strong>Porta baixa no host (&lt; 1024) pode pedir permissão</strong>
+<p>Publicar <code>-p 80:80</code> no Linux pode exigir root para o host (portas abaixo de 1024 são privilegiadas). Solução: use uma porta alta no host (<code>-p 8080:80</code>) — é o padrão.</p>
+</div>
+
+<div class="warning">
+<strong>Publiquei a porta, mas o serviço não responde</strong>
+<p>Verifique duas coisas: (1) o programa dentro do container está ouvindo na porta certa? (ex.: <code>docker exec web netstat -ltn</code> ou <code>ss -ltn</code>); (2) você mapeou a porta certa? <code>-p 8080:80</code> manda para a 80 <em>do container</em> — se o app ouve na 3000, é <code>-p 8080:3000</code>.</p>
+</div>
+
+<div class="warning">
+<strong>EXPOSE não publica porta</strong>
+<p>A instrução <code>EXPOSE 80</code> do Dockerfile só <strong>documenta</strong> a porta (aparece no <code>docker ps</code> como <code>80/tcp</code>) — ela <strong>não</strong> publica nada no host. Publicar é só com <code>-p</code> no <code>run</code> (ou <code>ports:</code> no Compose).</p>
+</div>
+
+<div class="mc" data-answer="2">
+<p class="mc-q">O que significa <code>-p 8080:80</code>?</p>
+<label><input type="radio" name="q1"> Porta 80 da sua máquina → porta 8080 do container</label>
+<label><input type="radio" name="q1"> Porta 8080 da sua máquina (host) → porta 80 do container</label>
+<label><input type="radio" name="q1"> Duas portas do mesmo container</label>
+<label><input type="radio" name="q1"> A versão 8080 do software na porta 80</label>
+</div>
+
+<div class="mc" data-answer="3">
+<p class="mc-q">Por que <code>-p 127.0.0.1:5432:5432</code> é a forma mais segura de publicar um banco?</p>
+<label><input type="radio" name="q2"> Porque fica mais rápido</label>
+<label><input type="radio" name="q2"> Porque é menor</label>
+<label><input type="radio" name="q2"> Porque só o localhost da máquina acessa — ninguém de fora alcança o banco</label>
+<label><input type="radio" name="q2"> Porque não precisa de senha</label>
+</div>
+
+<div class="mc" data-answer="1">
+<p class="mc-q">No <code>docker ps</code>, aparece <code>0.0.0.0:8080-&gt;80/tcp</code>. O que isso quer dizer?</p>
+<label><input type="radio" name="q3"> Toda interface de rede da máquina na porta 8080 encaminha para a porta 80 do container</label>
+<label><input type="radio" name="q3"> O container usa 8080 GB de rede</label>
+<label><input type="radio" name="q3"> A porta 8080 está bloqueada</label>
+<label><input type="radio" name="q3"> É um erro de configuração</label>
+</div>
+
+<hr>
+
+<h2>Publicando várias portas de uma vez</h2>
+<p>Repita a flag <code>-p</code> para cada porta (é uma opção de <code>list</code> — lembra do <code>--help</code>?):</p>
+<pre class="term">$ docker run -d --name site-completo \
+    -p 8080:80 \
+    -p 8443:443 \
+    nginx:alpine
+$ docker ps
+… PORTS
+… 0.0.0.0:8080->80/tcp, 0.0.0.0:8443->443/tcp
+$ docker port site-completo
+80/tcp -> 0.0.0.0:8080
+443/tcp -> 0.0.0.0:8443</pre>
+
+<h3>E no Compose?</h3>
+<p>Quando o projeto sobe com <code>docker compose up</code> (nível 2), as portas vão no arquivo YAML em vez da linha de comando:</p>
+<pre class="file">services:
+  web:
+    image: nginx:alpine
+    ports:
+      - "8080:80"     # mesma regra: HOST:CONTAINER
+      - "127.0.0.1:8443:443"</pre>
+<p>Aula <a href="compose-servicos.html">Serviços no Compose</a> mostra isso e muito mais.</p>
+
+<h3>IPv6</h3>
+<p>Se o container também ouve em IPv6, o <code>ps</code> mostra as duas linhas: <code>:::8080-&gt;80/tcp</code> (o <code>::</code> é o "0.0.0.0" do IPv6). Em hosts com IPv6 ligado, às vezes é preciso publicar assim explicitamente: <code>-p [::1]:8080:80</code> (só IPv6 local).</p>
+
+<div class="warning">
+<strong>Nunca publique banco de dados na internet</strong>
+<p>Publicar <code>-p 5432:5432</code> (sem o <code>127.0.0.1</code>) deixa o Postgres acessível para <strong>qualquer um que saiba o IP da sua máquina</strong> — e bots escaneiam a internet inteira procurando portas de banco abertas. Regra: banco e serviços internos sempre com <code>127.0.0.1</code> (ou numa rede Docker privada, nível 2). Só publique de verdade o que for público (site, API) — e mesmo assim, atrás de HTTPS.</p>
+</div>
+
+<hr>
+
+<h2>Testando se a porta publicó (curl e ss)</h2>
+<p>Depois do <code>run -p</code>, confirme de dois jeitos:</p>
+<pre class="term">$ curl -s -o /dev/null -w "%{http_code}\n" http://localhost:8080
+200                       « o Nginx respondió HTTP 200
+$ ss -ltnp | grep 8080    « quem está ouvindo na 8080 da sua máquina (Linux)
+LISTEN 0  511  0.0.0.0:8080  0.0.0.0:*  users:(("docker-proxy",pid=…))
+$ docker port meu-site    « o mapeamento que o Docker registrou
+80/tcp -> 0.0.0.0:8080</pre>
+
+<h3>Não dá para mudar o -p depois</h3>
+<p>O <code>-p</code> só existe na hora de <strong>criar</strong> o container (<code>docker run</code> ou <code>create</code>). Num container que já existe, não dá para adicionar porta: é preciso recriar (<code>docker rm</code> + <code>docker run</code> com o <code>-p</code> novo). Por isso vale pensar nas portas antes — ou usar Compose, onde o <code>ports:</code> fica no arquivo e você só dá <code>up</code> de novo.</p>
+
+<div class="warning">
+<strong>Conflito de porta é o erro nº 1 de iniciante</strong>
+<p>Se <code>localhost:8080</code> já abre outra coisa (ou outro container já publicó 8080), o run novo falha com <code>port is already allocated</code>. Veja quem está usando com <code>ss -ltnp | grep 8080</code> (Linux) ou <code>netstat -ano | findstr 8080</code> (Windows) e escolha outra porta do host (<code>-p 8081:80</code>).</p>
+</div>
+
+<hr>
+
+<h2>Portas.error: diagnóstico rápido</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Sintoma</th><th>Causa provável</th><th>Como testa</th></tr>
+<tr><td><code>port is already allocated</code> no run</td><td>Outra coisa já usa a porta do host</td><td><code>ss -ltnp | grep 8080</code> (Linux) / <code>netstat -ano | findstr 8080</code> (Windows)</td></tr>
+<tr><td><code>Connection refused</code> no navegador/curl</td><td>Nada publicado nessa porta, ou container caiu</td><td><code>docker ps</code> (está Up? tem PORTS?)</td></tr>
+<tr><td>Abre, mas página errada</td><td>Outro serviço atende essa porta</td><td>Pare o outro serviço ou mude a porta do host</td></tr>
+<tr><td>Só abre com IP da máquina, não com localhost</td><td>Publicou num IP específico</td><td>Veja <code>docker ps</code>: <code>127.0.0.1:8080</code> só vale local; <code>0.0.0.0</code> vale para a rede</td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>Mesma porta em dois containers?</h2>
+<p>Dois containers <strong>podem</strong> ouvir a mesma porta interna (cada um na sua rede isolada — ex.: dois Nginx ouvindo 80). O conflito só existe no <strong>host</strong>: não dá para publicar <code>-p 8080:80</code> duas vezes na mesma máquina. A solução é dar portas diferentes no host:</p>
+<pre class="term">$ docker run -d -p 8080:80 --name site1 nginx:alpine
+$ docker run -d -p 8081:80 --name site2 nginx:alpine   « mesma porta interna (80), portas diferentes no host
+$ docker ps
+… PORTS
+… 0.0.0.0:8080->80/tcp   site1
+… 0.0.0.0:8081->80/tcp   site2</pre>
+
+<hr>
+
+<h2>Resumo</h2>
+<ul>
+  <li>Container tem rede isolada: para acessar de fora, publique com <code>-p HOST:CONTAINER</code> (esquerda = sua máquina, direita = container).</li>
+  <li><code>-p 8080:80</code> → <code>http://localhost:8080</code> chega na porta 80 do container. No <code>ps</code> aparece <code>0.0.0.0:8080-&gt;80/tcp</code>.</li>
+  <li>Segurança: <code>-p 127.0.0.1:…</code> publica só no localhost (use para bancos). <code>-p 80</code>/<code>-P</code> = porta aleatória no host. <code>/udp</code> para protocolo UDP.</li>
+  <li>Veja o mapeamento com <code>docker ps</code> (PORTS) e <code>docker port NOME</code>.</li>
+  <li>Erros reais: <code>Bind for 0.0.0.0:8080 failed: port is already allocated</code> (porta do host ocupada — troque a porta do host) e porta &lt;1024 pode exigir root.</li>
+  <li><code>EXPOSE</code> no Dockerfile só documenta — não publica; publicar é <code>-p</code>.</li>
+</ul>
+
+<div class="tip"><strong>Próxima aula:</strong> <a href="variaveis-ambiente.html">Variáveis de ambiente (-e)</a> — agora que o serviço está acessível, falta configurar ele (senhas, modo de produção) na hora do <code>run</code>.</div>
+
+</div>
+</main>
+</div>
+<script src="assets/site.js?v=4"></script>
+</body>
+</html>

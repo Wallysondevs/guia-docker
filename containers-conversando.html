@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Containers se comunicando por nome: o DNS interno do Docker | Guia Docker</title>
+<meta name="description" content="Como containers numa rede criada pelo usuário se alcançam pelo nome: o servidor DNS interno do Docker (127.0.0.11, visível no /etc/resolv.conf do container), a aplicação acessando postgres://meu-banco:5432 sem saber IP nenhum, --network-alias para apelidos, por que na rede bridge padrão o nome NÃO resolve (só IP), por que -p só vai no serviço externo (banco sem porta publicada = perímetro de graça), e como o docker network inspect mostra os containers e IPs da rede. Exemplo completo da Ana no notebook, erros reais e quiz. Docker Engine 27.x.">
+<link rel="stylesheet" href="assets/style.css?v=4">
+<script>try{var t=localStorage.getItem("tema");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<meta http-equiv="Cache-Control" content="no-store, must-revalidate">
+<script>try{history.scrollRestoration="manual"}catch(e){}(function(){var n=0;function t(){window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;if(++n<60)setTimeout(t,50)}t();window.addEventListener("pagehide",function(){window.scrollTo(0,0);document.documentElement.scrollTop=0;});window.addEventListener("pageshow",function(){window.scrollTo(0,0)});window.addEventListener("load",function(){window.scrollTo(0,0)});})();document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(a){var h=a.getAttribute("href")||"";if(/[.]html($|[?#])/.test(h)&&a.host===location.host){window.scrollTo(0,0);document.documentElement.scrollTop=0;}}});</script>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" id="sidebar" aria-label="Tópicos"></nav>
+<main class="main">
+<div class="content">
+
+<div class="pager"></div>
+
+<h1><span class="hl">DNS interno</span> — containers se comunicando por nome</h1>
+
+<p class="intro">Numa rede criada por você (<code>docker network create</code>), o Docker liga um <strong>servidor DNS interno</strong> (no endereço <code>127.0.0.11</code>) que resolve o <strong>nome de cada container</strong> para o IP dele, na hora. É isso que permite a sua aplicação falar com o banco usando <code>postgres://meu-banco:5432</code> — sem saber nenhum IP, e sem quebrar quando o IP mudar. Nesta aula a Ana monta o cenário completo dela: API + banco conversando por nome.</p>
+
+<div class="note">
+<strong>Você vai aprender</strong>
+<ul>
+  <li>Como o DNS interno do Docker (127.0.0.11) resolve nomes de containers numa rede user-defined.</li>
+  <li>Um exemplo completo: app + banco na mesma rede, com <code>--network</code>.</li>
+  <li>Por que o IP pode mudar e o nome não — e como recriar o container não quebra a app.</li>
+  <li><code>--network-alias</code> para dar apelidos a um container (vários nomes para o mesmo IP).</li>
+  <li>Por que <code>-p</code> só vai no serviço que precisa ser externo (o banco sem porta publicada fica protegido).</li>
+  <li>Por que na rede bridge padrão o nome <strong>não</strong> resolve (só o IP).</li>
+  <li><code>docker network inspect</code> para ver os containers e IPs que o DNS está resolvendo.</li>
+</ul>
+</div>
+
+<hr>
+
+<h2>A analogia: a lista telefônica do prédio</h2>
+<p>Na aula anterior vimos a rede como um prédio de apartamentos, onde cada container tem um interfone interno (um IP). O problema: IP muda — se o síndico troca o apartamento de lugar, o número do interfone muda. O DNS interno do Docker é a <strong>lista telefônica do prédio</strong>: você liga para o <em>nome</em> ("meu-banco") e a lista entrega o número atual. Se o container do banco for recriado e ganhar outro IP, a app nem percebe — ela continua ligando para o nome.</p>
+
+<hr>
+
+<h2>O cenário: app + banco na mesma rede</h2>
+<p>A Ana sobe a rede, o banco e a API no notebook dela, tudo na <code>app-net</code>:</p>
+<pre class="term" data-cwd="~">$ docker network create app-net
+7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0c9d8e7f6a5b4c3d2e1f0a9b8c7d6e
+$ docker run -d --name meu-banco --network app-net \
+>     -e POSTGRES_PASSWORD=segredo \
+>     -v dados-postgres:/var/lib/postgresql/data \
+>     postgres:16-alpine
+a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5
+$ docker run -d --name minha-api --network app-net \
+>     -p 3000:3000 \
+>     -e DATABASE_URL=postgres://meu-banco:5432/guia \
+>     node:22-alpine node server.js
+b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5</pre>
+<p>A mágica está na variável de ambiente: a API não sabe o IP do banco — ela só sabe o <strong>nome</strong> <code>meu-banco</code>.</p>
+<dl class="anatomy">
+  <dt>postgres://</dt><dd>o protocolo do banco (Postgres no caso).</dd>
+  <dt>meu-banco</dt><dd>o <strong>nome do container</strong> — o DNS interno do Docker resolve isso para o IP na hora da conexão.</dd>
+  <dt>:5432</dt><dd>a porta padrão do Postgres, dentro da rede.</dd>
+  <dt>/guia</dt><dd>o nome do banco de dados dentro do Postgres.</dd>
+</dl>
+
+<hr>
+
+<h2>O DNS interno na prática</h2>
+<p>De dentro da API, o nome <code>meu-banco</code> resolve sozinho. A Ana prova com um ping:</p>
+<pre class="term" data-cwd="~">$ docker exec minha-api ping -c 2 meu-banco
+PING meu-banco (172.18.0.2): 56 data bytes
+64 bytes from 172.18.0.2: seq=0 ttl=64 time=0.089 ms
+64 bytes from 172.18.0.2: seq=1 ttl=64 time=0.112 ms
+--- meu-banco ping statistics ---
+2 packets transmitted, 2 packets received, 0% packet loss</pre>
+<p>Repare no <code>(172.18.0.2)</code>: era o nome que ela deu no <code>--name</code>, e o DNS interno devolveu o IP. E dá para ver para quem o container está perguntando: o arquivo <code>/etc/resolv.conf</code> dentro do container aponta para o DNS interno:</p>
+<pre class="term" data-cwd="~">$ docker exec minha-api cat /etc/resolv.conf
+nameserver 127.0.0.11   « o DNS interno do Docker mora nesse endereço dentro de toda rede user-defined
+options ndots:0</pre>
+<p>Esse <code>127.0.0.11</code> é um endereço de loopback especial que o Docker intercepta e responde com os nomes dos containers da rede. É por isso que o nome resolve "magicamente".</p>
+
+<h3>O IP muda, o nome não</h3>
+<p>A Ana recria o container do banco (para testar) e o IP muda — a app nem sente:</p>
+<pre class="term" data-cwd="~">$ docker rm -f meu-banco && docker run -d --name meu-banco --network app-net \
+>     -e POSTGRES_PASSWORD=segredo -v dados-postgres:/var/lib/postgresql/data postgres:16-alpine
+$ docker inspect meu-banco --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}'
+172.18.0.5   « o IP mudou (antes era .2)!
+$ docker exec minha-api ping -c 1 meu-banco | head -1
+PING meu-banco (172.18.0.5): …   « mas o nome continua resolvendo para o IP novo</pre>
+
+<hr>
+
+<h2>Apelidos: --network-alias</h2>
+<p>Além do <code>--name</code>, um container pode ter <strong>apelidos</strong> na rede com <code>--network-alias</code> — vários nomes apontando para o mesmo IP. Útil quando vários containers têm a mesma função (vários workers) e a app deve falar com "qualquer um deles":</p>
+<pre class="term" data-cwd="~">$ docker run -d --name worker1 --network app-net --network-alias fila node:22-alpine node worker.js
+$ docker run -d --name worker2 --network app-net --network-alias fila node:22-alpine node worker.js
+$ docker exec minha-api ping -c 1 fila
+PING fila (172.18.0.6): …   « "fila" resolve para um dos workers (round-robin)</pre>
+<p>O DNS interno faz balanceamento simples entre os apelidos iguais. No Compose, o nome do <strong>serviço</strong> já vira um alias automático (próximas aulas do nível 2).</p>
+
+<hr>
+
+<h2>-p só no serviço externo</h2>
+<p>Olhe de novo a lista de containers desse cenário:</p>
+<pre class="term" data-cwd="~">$ docker ps
+CONTAINER ID   IMAGE              STATUS         PORTS                     NAMES
+a1b2c3d4e5f6   postgres:16-alpine Up 2 minutes   5432/tcp                  meu-banco
+b2c3d4e5f6a1   node:22-alpine     Up 2 minutes   0.0.0.0:3000->3000/tcp    minha-api</pre>
+<p>A regra de ouro: <strong>só publique com <code>-p</code> quem o mundo de fora precisa acessar</strong>. A API precisa (é o serviço externo, na 3000). O banco, não — ele só existe para a API, dentro da <code>app-net</code>. Sem <code>-p</code>, a porta 5432 do banco não existe para a sua máquina nem para a internet: é um perímetro de segurança de graça. A Ana testa:</p>
+<pre class="term" data-cwd="~">$ curl http://localhost:5432
+curl: (7) Failed to connect to localhost port 5432   « o banco não está publicado no host
+$ docker exec minha-api sh -c "node -e \"require('net').connect(5432,'meu-banco').on('connect',()=>console.log('conectou no banco pelo nome!'))\""
+conectou no banco pelo nome!   « mas de dentro da rede, o nome resolve e a porta abre</pre>
+
+<div class="warn"><strong>Na rede bridge padrão o nome não resolve.</strong> Se você subir dois containers só com <code>docker run -d</code> (sem <code>--network</code>), eles se alcançam pelo IP (172.17.0.x), mas <code>ping meu-banco</code> falha com <code>bad address 'meu-banco'</code>. O DNS automático por nome só existe em redes criadas por você (ou no Compose, que cria uma rede para o projeto sozinho):
+<pre class="term" data-cwd="~">$ docker run -d --name banco2 postgres:16-alpine   « bridge padrão
+$ docker run --rm alpine ping -c 1 banco2
+ping: bad address 'banco2'   « nome não resolve na bridge padrão!</pre>
+<strong>Como consertar:</strong> crie uma rede e suba os dois nela com <code>--network</code> (ou use Compose).</div>
+
+<hr>
+
+<h2>Quem está nessa rede?</h2>
+<p>Para ver os containers conectados e os IPs que o DNS está resolvendo:</p>
+<pre class="term" data-cwd="~">$ docker network inspect app-net
+[
+    {
+        "Name": "app-net",
+        "Id": "7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0c9d8e7f6a5b4c3d2e1f0a9b8c7d6e",
+        "Scope": "local",
+        "Driver": "bridge",
+        "IPAM": {
+            "Config": [
+                {
+                    "Subnet": "172.18.0.0/16",
+                    "Gateway": "172.18.0.1"
+                }
+            ]
+        },
+        "Containers": {
+            "a1b2c3d4e5f6a1b2…": {
+                "Name": "meu-banco",
+                "MacAddress": "02:42:ac:12:00:02",
+                "IPv4Address": "172.18.0.2/16"
+            },
+            "b2c3d4e5f6a1b2…": {
+                "Name": "minha-api",
+                "MacAddress": "02:42:ac:12:00:03",
+                "IPv4Address": "172.18.0.3/16"
+            }
+        }
+    }
+]</pre>
+<p>O bloco <code>Containers</code> é o "quem está na festa": nome, MAC e IP de cada um. É exatamente essa tabela que o DNS interno usa para responder <code>meu-banco</code> → <code>172.18.0.2</code>. Dá para extrair só os nomes com <code>--format '{{range .Containers}}{{.Name}}{{"\n"}}{{end}}'</code>.</p>
+
+<hr>
+
+<h2>Erros comuns na conversa entre containers</h2>
+
+<div class="warn"><strong>bad address 'meu-banco':</strong> a app não achou o nome. Quase sempre é porque os dois containers estão em redes diferentes (um na bridge padrão, outro numa rede criada) — o DNS interno só enxerga a própria rede. <strong>Como consertar:</strong> confira com <code>docker inspect</code> se os dois estão na mesma rede (<code>.NetworkSettings.Networks</code>) e suba os dois com o mesmo <code>--network</code>.</div>
+
+<div class="warn"><strong>Connection refused na porta certa:</strong> o nome resolveu (o DNS achou), mas a conexão foi recusada — o serviço dentro do container ainda não subiu, ou está ouvindo em outra porta/endereço. Ex.: o Postgres recusou porque a app tentou na 5432 mas o banco está na 5433, ou a app Node tentou conectar em <code>localhost</code> (dentro do próprio container!) em vez do nome do banco. <strong>Como consertar:</strong> dentro de um container, <code>localhost</code> é o próprio container — para falar com outro container, use o nome dele na rede.</div>
+
+<div class="warn"><strong>Timed out / sem rota:</strong> firewall do host bloqueando a bridge (raro em instalação padrão), ou o container caiu entre o DNS e a conexão. <strong>Como consertar:</strong> <code>docker ps</code> para ver se o alvo está Up; <code>docker logs</code> nele para ver se o serviço iniciou de verdade.</div>
+
+<hr>
+
+<h2>Preview: isso tudo vira automático no Compose</h2>
+<p>Subir rede + banco + API na mão, um <code>docker run</code> por vez, dá trabalho (e a Ana já cansou). Na próxima aula o Compose faz tudo isso sozinho a partir de um YAML — este é o arquivo que ela vai escrever, comentado linha a linha:</p>
+<pre class="file"># arquivo: docker-compose.yml (próxima aula — o Compose cria a rede sozinha)
+services:
+  banco:                          # um serviço = um container
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_PASSWORD: segredo
+    volumes:
+      - dados-postgres:/var/lib/postgresql/data   # volume nomeado (criado se não existir)
+    # sem ports: o banco não precisa ser alcançado de fora
+
+  api:                            # outro serviço, na MESMA rede do projeto
+    image: node:22-alpine
+    command: node server.js
+    ports:
+      - "3000:3000"               # só a API é publicada
+    environment:
+      DATABASE_URL: postgres://banco:5432/guia   # « repare: "banco" é o NOME do serviço
+    depends_on:
+      - banco
+
+volumes:
+  dados-postgres:                 # declara o volume nomeado usado acima</pre>
+<p>Com esse arquivo, <code>docker compose up</code> cria a rede, sobe os dois containers nela e o DNS interno já resolve <code>banco</code> — exatamente o cenário desta aula, sem nenhum comando manual. É o que vem a seguir.</p>
+
+<hr>
+
+<h2>Referência rápida</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Situação</th><th>Como fazer</th></tr>
+<tr><td>Dois containers se falarem por nome</td><td>Crie uma rede (<code>docker network create app-net</code>) e suba os dois com <code>--network app-net</code></td></tr>
+<tr><td>Aplicação alcançando o banco</td><td>Use o nome do container na URL: <code>postgres://meu-banco:5432/guia</code></td></tr>
+<tr><td>Apelido extra para um container</td><td><code>--network-alias fila</code> no <code>docker run</code></td></tr>
+<tr><td>Serviço que o mundo acessa</td><td>Só esse leva <code>-p</code> (ex.: <code>-p 3000:3000</code>)</td></tr>
+<tr><td>Banco e serviços internos</td><td>Sem <code>-p</code>: só alcançáveis dentro da rede</td></tr>
+<tr><td>Ver quem está na rede e os IPs</td><td><code>docker network inspect app-net</code></td></tr>
+<tr><td>Ver o DNS que o container usa</td><td><code>docker exec web cat /etc/resolv.conf</code> → <code>nameserver 127.0.0.11</code></td></tr>
+</table>
+</div>
+
+<div class="try" data-goal="one or more networks" data-solucao="docker network create app-net">
+<p class="try-task"><strong>Missão:</strong> monte o cenário: crie a rede com <code>docker network create app-net</code>, suba dois containers nela (por exemplo <code>docker run -d --name meu-banco --network app-net postgres:16-alpine</code> e <code>docker run -d --name web --network app-net nginx:alpine</code>) e rode <code>docker network inspect app-net</code> para ver os detalhes da rede.</p>
+</div>
+
+<div class="try" data-goal="app-net" data-solucao="docker network ls">
+<p class="try-task"><strong>Missão extra:</strong> confirme que a rede existe: rode <code>docker network ls</code> e ache <code>app-net</code> na lista (ao lado de bridge, host e none).</p>
+</div>
+
+<hr>
+
+<h2>Quiz rápido</h2>
+
+<div class="mc" data-answer="2">
+<p class="mc-q">1. Dentro de uma rede criada por você, como a API alcança o banco sem saber o IP dele?</p>
+<label><input type="radio" name="q1"> Passando o IP fixo no <code>-e</code></label>
+<label><input type="radio" name="q1"> Pelo <strong>nome</strong> do container (<code>postgres://meu-banco:5432</code>) — o DNS interno (127.0.0.11) resolve na hora</label>
+<label><input type="radio" name="q1"> Com <code>localhost</code></label>
+<label><input type="radio" name="q1"> Não dá, precisa do IP</label>
+</div>
+
+<div class="mc" data-answer="3">
+<p class="mc-q">2. A Ana recriou o container do banco e o IP mudou de 172.18.0.2 para 172.18.0.5. O que aconteceu com a API?</p>
+<label><input type="radio" name="q2"> Quebrou, porque ela usava o IP antigo</label>
+<label><input type="radio" name="q2"> Nada — ela usa o nome, e o DNS interno passou a resolver para o IP novo</label>
+<label><input type="radio" name="q2"> Ela precisa de rebuild da imagem</label>
+<label><input type="radio" name="q2"> O banco corrompeu</label>
+</div>
+
+<div class="mc" data-answer="4">
+<p class="mc-q">3. Por que na rede <code>bridge</code> padrão o <code>ping meu-banco</code> dá <code>bad address</code>?</p>
+<label><input type="radio" name="q3"> Porque o ping está quebrado no Docker</label>
+<label><input type="radio" name="q3"> Porque a bridge padrão não tem DNS</label>
+<label><input type="radio" name="q3"> Porque o banco está desligado</label>
+<label><input type="radio" name="q3"> Porque o DNS automático por nome só existe em redes user-defined (criadas com <code>docker network create</code>) — na bridge padrão só o IP vale</label>
+</div>
+
+<div class="mc" data-answer="1">
+<p class="mc-q">4. No cenário app + banco, por que o banco <code>meu-banco</code> não leva <code>-p</code>?</p>
+<label><input type="radio" name="q4"> Porque só o serviço externo (a API) precisa ser alcançado de fora; o banco sem <code>-p</code> fica inacessível para o host e a internet — só a rede interna alcança ele</label>
+<label><input type="radio" name="q4"> Porque o Postgres não gosta de porta publicada</label>
+<label><input type="radio" name="q4"> Porque economiza memória</label>
+<label><input type="radio" name="q4"> Porque o volume já publica a porta</label>
+</div>
+
+<hr>
+
+<h2>Resumo</h2>
+<ul>
+  <li>Numa rede criada por você, o Docker liga um <strong>DNS interno</strong> (<code>127.0.0.11</code>, visível no <code>/etc/resolv.conf</code> do container) que resolve o <strong>nome de cada container</strong> para o IP atual.</li>
+  <li>A aplicação fala com o banco pelo nome: <code>postgres://meu-banco:5432/guia</code>. Se o container for recriado e o IP mudar, o nome continua valendo — a app não quebra.</li>
+  <li><code>--network-alias</code> dá apelidos extras a um container (vários nomes → mesmo IP, com balanceamento simples).</li>
+  <li>Na <code>bridge</code> padrão o nome <strong>não</strong> resolve — só IP. O DNS por nome existe em redes user-defined e no Compose.</li>
+  <li>Regra de segurança: só o serviço externo leva <code>-p</code>; banco e serviços internos ficam só na rede interna (<code>5432/tcp</code> sem <code>-></code> no <code>docker ps</code>).</li>
+  <li><code>docker network inspect app-net</code> mostra o mapa da rede: sub-rede, gateway e containers com IP/MAC — é a tabela que o DNS usa.</li>
+  <li>Erros reais: <code>bad address</code> (redes diferentes ou bridge padrão), <code>connection refused</code> (serviço não subiu ou porta errada; dentro do container, <code>localhost</code> é ele mesmo — use o nome do outro container).</li>
+</ul>
+
+<div class="tip"><strong>Próxima aula:</strong> <a href="compose-intro.html">O que é Docker Compose</a> — porque subir app + banco + cache na mão, um <code>docker run</code> por vez, dá trabalho demais.</div>
+
+<div class="pager"></div>
+
+</div>
+</main>
+</div>
+<script src="assets/site.js?v=4"></script>
+</body>
+</html>

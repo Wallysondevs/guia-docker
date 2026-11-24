@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Otimizando builds para CI — cache, buildx e multi-stage | Guia Docker</title>
+<meta name="description" content="Como deixar o build do Docker rápido no CI e no notebook da Ana: a regra de ouro da ordem das instruções no Dockerfile (dependências antes do código, com saída CACHED real), .dockerignore agressivo, multi-stage builds com tabela de tamanhos, cache entre execuções no GitHub Actions (cache-from/cache-to type=gha e type=registry), buildx multi-plataforma e medição com time. Erros reais de build e tabela resumo das técnicas.">
+<link rel="stylesheet" href="assets/style.css?v=4">
+<script>try{var t=localStorage.getItem("tema");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<meta http-equiv="Cache-Control" content="no-store, must-revalidate">
+<script>try{history.scrollRestoration="manual"}catch(e){}(function(){var n=0;function t(){window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;if(++n<60)setTimeout(t,50)}t();window.addEventListener("pagehide",function(){window.scrollTo(0,0);document.documentElement.scrollTop=0;});window.addEventListener("pageshow",function(){window.scrollTo(0,0)});window.addEventListener("load",function(){window.scrollTo(0,0)});})();document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(a){var h=a.getAttribute("href")||"";if(/[.]html($|[?#])/.test(h)&&a.host===location.host){window.scrollTo(0,0);document.documentElement.scrollTop=0;}}});</script>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" id="sidebar" aria-label="Tópicos"></nav>
+<main class="main">
+<div class="content">
+
+<div class="pager"></div>
+
+<h1>Builds <span class="hl">otimizados</span> para CI</h1>
+
+<p class="intro">O pipeline da aula <a href="docker-ci.html">Docker no CI</a> rodava verde, mas cada execução levava <strong>8 minutos</strong> — e 6 deles eram só o <code>npm install</code> rodando do zero. Por quê? Porque no CI cada build começa numa máquina limpa, sem cache local, e se o Dockerfile estiver mal ordenado qualquer vírgula no código invalida <strong>todas</strong> as camadas seguintes. Nesta aula a Ana reorganiza o build dela e o pipeline cai para menos de 1 minuto. As técnicas servem tanto para o CI quanto para o notebook dela.</p>
+
+<div class="note">
+<strong>Você vai aprender</strong>
+<ul>
+  <li>Como funciona o cache de camadas: por que a ordem das instruções decide se o build leva 8 minutos ou 40 segundos.</li>
+  <li>A regra de ouro: <strong>dependências antes do código</strong> (<code>COPY package*.json</code> → <code>RUN npm install</code> → <code>COPY . .</code>).</li>
+  <li><code>.dockerignore</code> agressivo: o que tirar do contexto e o erro real de tirar demais.</li>
+  <li>Multi-stage: imagem final enxuta, sem ferramentas de build (com tabela de tamanhos).</li>
+  <li>Cache entre execuções no GitHub Actions: <code>cache-from</code>/<code>cache-to</code> com <code>type=gha</code> e <code>type=registry</code>.</li>
+  <li>Buildx: builds multi-plataforma (amd64 + arm64) e <code>docker buildx build --load</code>.</li>
+  <li>Como medir: <code>time docker build</code> e <code>docker system df</code> para o cache.</li>
+</ul>
+</div>
+
+<hr>
+
+<h2>A ideia: cada instrução é uma gaveta com cadeado</h2>
+<p>Cada instrução do Dockerfile vira uma <strong>camada</strong> (gaveta) na imagem. O Docker guarda o cache de cada gaveta: se a <em>entrada</em> da instrução não mudou desde o último build, ele reaproveita a gaveta inteira e imprime <code>CACHED</code>; se mudou, ele abre a gaveta, refaz o conteúdo <strong>e invalida todas as gavetas abaixo dela</strong>.</p>
+<p>Imagine o Dockerfile como uma pilha de gavetas. Se a gaveta do <code>npm install</code> está <em>acima</em> da gaveta do código (<code>COPY . .</code>), qualquer mudança no código passa por cima e invalida o install. Se a gaveta do install está <em>acima</em> do código (ordem correta), mudar o código só refaz a última gaveta. É só isso — ordem das instruções.</p>
+
+<hr>
+
+<h2>A regra de ouro: dependências antes do código</h2>
+<p>Compare os dois Dockerfiles da API da Ana:</p>
+<pre class="file" data-file="Dockerfile RUIM"># Dockerfile RUIM — qualquer mudança no código refaz o npm install
+FROM node:22-alpine
+WORKDIR /app
+COPY . .                  # código + package.json juntos: muda toda hora
+RUN npm install           # ← invalida a cada vírgula alterada
+EXPOSE 3000
+CMD ["node", "app.js"]</pre>
+<pre class="file" data-file="Dockerfile BOM"># Dockerfile BOM — o npm install fica em cache
+FROM node:22-alpine
+WORKDIR /app
+COPY package*.json ./     # muda só quando as dependências mudam (raro)
+RUN npm install           # ← fica CACHED na maioria dos builds
+COPY . .                  # muda toda hora, mas é a ÚLTIMA gaveta de build
+EXPOSE 3000
+CMD ["node", "app.js"]</pre>
+<p>A diferença na prática, no terminal da <code>ana@notebook</code>:</p>
+<pre class="term" data-cwd="~/api">$ # build 1: tudo novo
+$ time docker build -t api:latest .
+...
+#7 [4/5] RUN npm install
+#7 2.87 added 58 packages in 3s
+#7 DONE 3.1s
+...
+real  0m4.21s
+
+$ # Ana muda UMA vírgula no app.js e refaz o build:
+$ time docker build -t api:latest .
+#6 [3/5] COPY package*.json ./
+#6 CACHED                 « não mudou → reaproveitado
+#7 [4/5] RUN npm install
+#7 CACHED                 « idem: 0s em vez de 3s!
+#8 [5/5] COPY . .
+#8 DONE 0.2s               « só o código é reempacotado
+...
+real  0m0.68s               « 6x mais rápido</pre>
+<p>Mesma regra para outras linguagens: <code>COPY requirements.txt</code> → <code>RUN pip install</code> → <code>COPY . .</code> (Python), <code>COPY go.mod go.sum</code> → <code>RUN go mod download</code> → <code>COPY . .</code> (Go), <code>COPY pom.xml</code> → <code>RUN mvn dependency:go-offline</code> → <code>COPY . .</code> (Java). Sempre: manifesto de dependências primeiro, código depois.</p>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Linguagem</th><th>Ordem correta no Dockerfile</th></tr>
+<tr><td>Node</td><td><code>COPY package*.json ./</code> → <code>RUN npm install</code> → <code>COPY . .</code></td></tr>
+<tr><td>Python</td><td><code>COPY requirements.txt .</code> → <code>RUN pip install -r requirements.txt</code> → <code>COPY . .</code></td></tr>
+<tr><td>Go</td><td><code>COPY go.mod go.sum .</code> → <code>RUN go mod download</code> → <code>COPY . .</code></td></tr>
+<tr><td>Java (Maven)</td><td><code>COPY pom.xml .</code> → <code>RUN mvn -B dependency:go-offline</code> → <code>COPY . .</code></td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>.dockerignore agressivo</h2>
+<p>Antes do build, o Docker envia a pasta inteira — o <strong>contexto</strong> — para o daemon. Se a pasta tem <code>node_modules</code> (dezenas de milhares de arquivos), <code>.git</code>, logs e afins, o envio sozinho pode levar minutos e o <code>COPY . .</code> copia essa porcaria para dentro da imagem. Solução: um arquivo <code>.dockerignore</code> na raiz do contexto (aula <a href="dockerignore.html">.dockerignore</a>):</p>
+<pre class="file" data-file=".dockerignore">node_modules
+npm-debug.log
+.git
+.gitignore
+Dockerfile
+.dockerignore
+docker-compose*.yml
+*.md
+.env
+.env.*
+tests
+coverage
+.vscode
+.idea
+__pycache__
+*.pyc
+.venv</pre>
+<p>Como saber se o contexto está gordo? O próprio build conta:</p>
+<pre class="term">$ docker build -t api:latest .
+#2 [internal] load build context
+#2 transferring context: 2.45MB done    « com .dockerignore agressivo
+#2 DONE 0.1s
+# (sem .dockerignore, a mesma pasta dava: transferring context: 184MB)</pre>
+<div class="warn"><strong>Cuidado:</strong> se o seu build precisa de um arquivo que você listou no <code>.dockerignore</code>, a imagem quebra na hora com <code>COPY failed: file not found in build context or excluded by .dockerignore</code>. A mensagem já entrega o culpado: tire o arquivo da lista.</div>
+
+<hr>
+
+<h2>Multi-stage: imagem final enxuta</h2>
+<p>Com <em>multi-stage</em> (aula <a href="multi-stage.html">Multi-stage builds</a>) você usa uma primeira imagem completa para compilar e uma segunda, mínima, só com o resultado. Compiladores e devDependencies não vão para a imagem final:</p>
+<pre class="file" data-file="Dockerfile multi-stage"># ---- stage 1: builder (imagem grande, só para compilar) ----
+FROM node:22-alpine AS builder
+WORKDIR /app
+COPY package*.json ./
+RUN npm install              # instala TUDO, inclusive devDependencies
+COPY . .
+RUN npm run build            # gera dist/ (ou compila TypeScript)
+
+# ---- stage 2: imagem final (limpa) ----
+FROM node:22-alpine
+ENV NODE_ENV=production
+WORKDIR /app
+COPY package*.json ./
+RUN npm install --omit=dev   # só dependências de produção
+COPY --from=builder /app/dist ./dist
+EXPOSE 3000
+CMD ["node", "dist/server.js"]</pre>
+<p>O <code>COPY --from=builder /app/dist ./dist</code> é a mágica: copia só a pasta <code>dist/</code> do estágio anterior para a imagem final. O resto do stage 1 (o <code>node_modules</code> completo, ferramentas de build) é descartado.</p>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Versão da imagem</th><th>Tamanho típico (app Node)</th><th>O que carrega</th></tr>
+<tr><td>Sem multi-stage (build na imagem final)</td><td>~450MB</td><td>Node + devDependencies + ferramentas de build + código fonte</td></tr>
+<tr><td>Com multi-stage (<code>--omit=dev</code> + só <code>dist/</code>)</td><td>~195MB</td><td>Node + só dependências de produção + código compilado</td></tr>
+<tr><td>Base <code>node:22-alpine</code> pura</td><td>189MB</td><td>Só o Node sobre Alpine</td></tr>
+<tr><td>Multi-stage + <code>distroless</code>/<code>scratch</code> (estático)</td><td>~20–60MB</td><td>Só o binário compilado (Go/Rust) — aula <a href="distroless.html">Distroless e Alpine</a></td></tr>
+</table>
+</div>
+<p>Por que isso importa no CI: imagem menor = <code>push</code> mais rápido, <code>pull</code> mais rápido nos servidores de produção, menos disco gasto em todo lugar, superfície de ataque menor (sem shell, sem gerenciador de pacotes dentro).</p>
+
+<hr>
+
+<h2>Cache no GitHub Actions (type=gha e type=registry)</h2>
+<p>O problema do CI: cada run começa numa máquina limpa, então o cache local do Docker não existe. A solução é exportar o cache para fora do runner. O <code>docker/build-push-action</code> oferece dois jeitos:</p>
+<pre class="file"># trecho do workflow .github/workflows/ci.yml
+      - name: Build e push (com cache do GHA)
+        uses: docker/build-push-action@v6
+        with:
+          push: true
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/minhaapp:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max</pre>
+<ul>
+  <li><code>cache-from: type=gha</code> — lê o cache salvo no cache do próprio GitHub Actions (limite de <strong>10GB por repositório</strong>, expulsa o mais antigo quando enche).</li>
+  <li><code>cache-to: type=gha,mode=max</code> — salva <strong>todas</strong> as camadas intermediárias, não só a final (<code>mode=min</code> é o padrão e é mais limitado).</li>
+  <li>Alternativa quando o limite do GHA estoura: <code>cache-from: type=registry,ref=usuario/minhaapp:buildcache</code> e <code>cache-to: type=registry,ref=usuario/minhaapp:buildcache,mode=max</code> — guarda o cache como uma imagem especial no próprio registry.</li>
+  <li>Também dá para cache local com <code>type=local</code> (pasta no runner) — útil em runners self-hosted que persistem.</li>
+</ul>
+<p>Com o cache no lugar, o segundo build do pipeline (com a mesma ordem de instruções correta) fica quase instantâneo:</p>
+<pre class="term">$ docker build -t ana/minhaapp:latest .   « no 2º run do pipeline
+#6 [3/5] COPY package*.json ./
+#6 CACHED
+#7 [4/5] RUN npm install
+#7 CACHED                 « cache veio do type=gha!
+#8 [5/5] COPY . .
+#8 DONE 0.3s
+...
+[+] Building 1.2s (8/8) FINISHED   « era 8 minutos no 1º run</pre>
+
+<hr>
+
+<h2>Buildx: o motor por trás dos builds</h2>
+<p>Os runners do GitHub e o Docker Desktop usam o <strong>BuildKit</strong> por padrão — é ele que imprime <code>#1 [internal] load…</code> e faz o cache funcionar. Com o <code>buildx</code> você cria <em>builders</em> avançados: builds para várias arquiteturas de uma vez (amd64 + arm64, para rodar no notebook x86 e no Raspberry Pi da Ana) e cache remoto:</p>
+<pre class="term">$ docker buildx ls
+NAME/NODE          DRIVER/ENDPOINT             STATUS
+default *          docker
+  desktop-linux    docker-container            running
+
+$ docker buildx create --name cibuilder --use   « cria um builder novo
+cibuilder
+
+$ docker buildx build --platform linux/amd64,linux/arm64 -t ana/minhaapp:latest --push .
+#1 [internal] load build definition from Dockerfile
+...
+#20 exporting to image
+#20 pushing layers 12.4s done
+#20 naming to docker.io/ana/minhaapp:latest done</pre>
+<p>No GitHub Actions, o passo <code>docker/setup-buildx-action@v3</code> cria esse builder para você antes do build (já está no workflow da aula anterior). No notebook, dá para criar um builder com driver <code>docker-container</code> para isolar o build — útil quando o build quebra o build padrão.</p>
+
+<hr>
+
+<h2>Medindo para saber se melhorou</h2>
+<p>Não adivinhe: meça. Os dois comandos que mostram a melhora:</p>
+<pre class="term">$ time docker build -t api:latest .
+...
+real  0m0.68s     « depois das otimizações (era 4.2s / 8min no CI frio)
+
+$ docker system df
+TYPE            TOTAL     ACTIVE    SIZE      RECLAIMABLE
+Images          8         2         1.2GB     900MB (75%)
+Containers      3         1         15MB      10MB (66%)
+Local Volumes   1         1         120MB     0B (0%)
+Build Cache     42        0         3.4GB     3.4GB   « o cache de build também ocupa disco!</pre>
+<p>O <strong>Build Cache</strong> é exactly o que o <code>CACHED</code> usa — e ele cresce para sempre até você limpar. No CI não importa (a máquina é descartada), mas no notebook vale rodar de vez em quando:</p>
+<pre class="term">$ docker builder prune        « limpa só o cache de build ocioso
+$ docker system prune        « limpa tudo que não está em uso (aula docker-system-prune)</pre>
+
+<div class="try" data-goal="Successfully tagged api" data-solucao="docker build -t api .">
+<p class="try-task"><strong>Missão:</strong> simule o build otimizado do CI: rode <code>docker build -t api .</code> e depois <code>docker images</code> — a imagem <code>api</code> deve aparecer na lista.</p>
+</div>
+
+<div class="try" data-goal="Build Cache" data-solucao="docker system df">
+<p class="try-task"><strong>Missão:</strong> veja quanto espaço o cache de build está ocupando: rode <code>docker system df</code> e procure a linha <code>Build Cache</code>.</p>
+</div>
+
+<hr>
+
+<h2>Erros comuns em build otimizado</h2>
+<div class="warn"><strong>RUN falhou:</strong>
+<pre class="term">#7 ERROR: process "/bin/sh -c npm install" did not complete successfully: exit code: 1
+#7 2.912 npm error code E404
+#7 2.912 npm error 404 Not Found - GET https://registry.npmjs.org/pacote-que-nao-existe</pre>
+Quando uma instrução <code>RUN</code> falha, o build para na hora. Olhe as linhas <em>acima</em> do <code>ERROR</code>: geralmente é dependência quebrada no manifesto, arquivo faltando no contexto (culpa do <code>.dockerignore</code>) ou variável <code>ARG</code> faltando. A partir do BuildKit, dá para montar secrets no build sem gravar na imagem: <code>RUN --mount=type=secret,id=npmrc …</code>.</div>
+<div class="warn"><strong>Cache "mágico" demais:</strong> se o <code>npm install</code> ficou <code>CACHED</code> mas você <em>mudou</em> o <code>package.json</code>, a ordem das instruções está errada — o <code>COPY package*.json ./</code> deve vir <strong>antes</strong> do <code>RUN npm install</code>. Para forçar um build sem cache (debug), use <code>docker build --no-cache -t api .</code>.</div>
+<div class="warn"><strong>Plataforma errada:</strong> <code>exec format error</code> ao rodar a imagem — você buildou para arm64 num runner amd64 (ou vice-versa). Solução: <code>--platform linux/amd64</code> explícito no build, ou o setup-qemu + platforms do buildx.</div>
+
+<hr>
+
+<h2>Resumo das técnicas</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Técnica</th><th>O que resolve</th><th>Ganho típico</th></tr>
+<tr><td>Dependências antes do código</td><td>O cache do <code>RUN npm install</code>/<code>pip install</code> sobrevive a mudanças no código (<code>CACHED</code>).</td><td>De minutos para segundos por build</td></tr>
+<tr><td><code>.dockerignore</code> agressivo</td><td>Contexto menor: envio mais rápido e imagem limpa (sem <code>node_modules</code>, <code>.git</code>…).</td><td>Segundos a minutos + MB de imagem</td></tr>
+<tr><td>Multi-stage</td><td>Imagem final só com o necessário, sem ferramentas de build.</td><td>Imagem 50%+ menor; push/pull mais rápidos</td></tr>
+<tr><td><code>cache-from/cache-to: type=gha</code></td><td>Cache entre runs do CI (máquina limpa a cada vez).</td><td>Build quase instantâneo no 2º run</td></tr>
+<tr><td><code>type=registry</code> (buildcache)</td><td>Cache quando o limite de 10GB do GHA estoura.</td><td>idem, guardado no próprio registry</td></tr>
+<tr><td>buildx multi-plataforma</td><td>Uma imagem para amd64 e arm64 num comando só.</td><td>Um build em vez de dois</td></tr>
+<tr><td><code>docker builder prune</code></td><td>Libera o disco do cache de build no host.</td><td>GBs recuperados no notebook</td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>Checklist de build otimizado</h2>
+<ul>
+  <li>☐ O Dockerfile copia o manifesto de dependências antes do código (<code>package*.json</code>, <code>requirements.txt</code>…).</li>
+  <li>☐ Existe <code>.dockerignore</code> com <code>node_modules</code>/<code>.git</code>/<code>__pycache__</code>/<code>.env</code>…</li>
+  <li>☐ Apps compilados usam multi-stage (imagem final limpa, <code>--omit=dev</code>).</li>
+  <li>☐ No CI, o build-push-action tem <code>cache-from: type=gha</code> e <code>cache-to: type=gha,mode=max</code>.</li>
+  <li>☐ Medi com <code>time docker build …</code> antes e depois — a melhora é visível no número.</li>
+  <li>☐ No notebook, rodei <code>docker builder prune</code> de vez em quando para liberar disco.</li>
+</ul>
+
+<div class="tip"><strong>Próxima aula:</strong> <a href="projetos.html">Como usar os Projetos</a> — agora que o build está rápido, vamos montar aplicações completas passo a passo, começando por um site estático com Nginx.</div>
+
+</div>
+</main>
+</div>
+<script src="assets/site.js?v=4"></script>
+</body>
+</html>

@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>.dockerignore — o que não enviar no contexto do build | Guia Docker</title>
+<meta name="description" content="O arquivo .dockerignore: fica na raiz do contexto do build, tem o mesmo formato do .gitignore (curingas, comentários, exceções com !) e impede que pastas (node_modules, .git, .env) sejam enviadas ao daemon no docker build. Por que isso importa: contexto menor e build mais rápido (a linha Sending build context mostra o tamanho), cache mais estável e nada de segredos gravados nas camadas da imagem. Como debugar (ver o tamanho do contexto), o erro de COPY de arquivo ignorado, e um .dockerignore pronto para projeto Node. Quiz e resumo. Docker Engine 27.x.">
+<link rel="stylesheet" href="assets/style.css?v=4">
+<script>try{var t=localStorage.getItem("tema");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<meta http-equiv="Cache-Control" content="no-store, must-revalidate">
+<script>try{history.scrollRestoration="manual"}catch(e){}(function(){var n=0;function t(){window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;if(++n<60)setTimeout(t,50)}t();window.addEventListener("pagehide",function(){window.scrollTo(0,0);document.documentElement.scrollTop=0;});window.addEventListener("pageshow",function(){window.scrollTo(0,0)});window.addEventListener("load",function(){window.scrollTo(0,0)});})();document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(a){var h=a.getAttribute("href")||"";if(/[.]html($|[?#])/.test(h)&&a.host===location.host){window.scrollTo(0,0);document.documentElement.scrollTop=0;}}});</script>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" id="sidebar" aria-label="Tópicos"></nav>
+<main class="main">
+<div class="content">
+
+<div class="pager"></div>
+
+<h1><span class="hl">.dockerignore</span> — o que não entra no build</h1>
+
+<p class="intro">Lembra que o <code>docker build</code> envia <strong>a pasta inteira</strong> (o contexto) para o daemon, toda vez? O arquivo <code>.dockerignore</code> é a lista do que <strong>não</strong> deve ser enviado — um porteiro na porta da cozinha. Ele fica na <strong>raiz do contexto</strong>, ao lado do <code>Dockerfile</code>, e a sintaxe é a mesma do <code>.gitignore</code>, que você já conhece.</p>
+
+<div class="note">
+<strong>Você vai aprender</strong>
+<ul>
+  <li>Onde o <code>.dockerignore</code> fica e o formato (igual ao <code>.gitignore</code>: curingas, <code>#</code>, exceção com <code>!</code>).</li>
+  <li>Por que ignorar <code>node_modules</code>, <code>.git</code>, <code>.env</code> e arquivos de build local.</li>
+  <li>Os três motivos: contexto menor (build rápido), cache estável e <strong>segurança</strong> (segredo não entra na imagem).</li>
+  <li>Como medir o efeito: a linha <code>Sending build context …</code> antes e depois.</li>
+  <li>Erros reais: <code>COPY</code> de arquivo que o .dockerignore excluiu, e o arquivo na subpasta errada.</li>
+  <li>Um <code>.dockerignore</code> pronto para copiar para um projeto Node.</li>
+</ul>
+</div>
+
+<hr>
+
+<h2>A cena: o antes e o depois na máquina da Ana</h2>
+<p>A Ana tem o projeto <code>~/meusite</code> no notebook. Sem <code>.dockerignore</code>, o build dela envia tudo — incluindo a pasta <code>.git</code> e um <code>node_modules</code> enorme:</p>
+<pre class="term" data-cwd="~/meusite">$ ls -a
+.  ..  .git  Dockerfile  index.html  node_modules  package.json
+$ du -sh .
+482M    .   « a pasta pesa quase meio giga!
+$ docker build -t site:1.0 .
+Sending build context to Docker daemon  482.4MB   « tudo isso vai para o daemon, a cada build</pre>
+<p>Ela cria um <code>.dockerignore</code> na raiz e rebuilda:</p>
+<pre class="term" data-cwd="~/meusite">$ cat > .dockerignore &lt;&lt;'EOF'
+node_modules/
+.git/
+EOF
+$ docker build -t site:1.0 .
+Sending build context to Docker daemon  4.096kB   « de 482MB para 4kB!</pre>
+<p>Mesma imagem, build muito mais rápido — e o <code>node_modules</code> nem chega a ser observado pelo cache.</p>
+
+<hr>
+
+<h2>Como funciona</h2>
+<p>Tudo que você listar no <code>.dockerignore</code> <strong>não é enviado ao daemon</strong> no momento do build — logo não pode ser copiado para a imagem com <code>COPY</code> e não entra no cálculo do cache. A sintaxe é a do <code>.gitignore</code>:</p>
+<ul>
+  <li><code>pasta/</code> ou <code>pasta</code> — ignora a pasta inteira;</li>
+  <li><code>*.log</code> — curingas funcionam (<code>*</code>, <code>?</code>, <code>**</code> para recursivo);</li>
+  <li><code># comentário</code> — linhas com <code>#</code> são comentários;</li>
+  <li><code>!excecao</code> — o <code>!</code> faz uma exceção (ex.: ignorar todos os <code>*.md</code> menos o README: <code>*.md</code> + <code>!README.md</code>);</li>
+  <li><code>**/temp</code> — bate em qualquer nível de subpasta.</li>
+</ul>
+<pre class="file"># exemplo de .dockerignore
+node_modules/
+.git/
+*.log
+!importante.log      # exceção: este log entra
+**/tmp/
+</pre>
+
+<div class="tip"><strong>O .dockerignore vale para o COPY também:</strong> um arquivo ignorado <strong>não existe</strong> para o build — um <code>COPY arquivo-ignorado.txt .</code> falha com <code>not found</code>. Ou seja, o .dockerignore é a garantía de que o arquivo não entra na imagem nem por acidente.</div>
+
+<div class="warn"><strong>Erro comum: .dockerignore na pasta errada.</strong> O arquivo só funciona na <strong>raiz do contexto</strong> (onde você deu o <code>.</code>). Se a Ana coloca o <code>.dockerignore</code> dentro de <code>~/meusite/src/</code> e builda de <code>~/meusite</code>, ele é ignorado — e a linha <code>Sending build context</code> continua grande. O lugar certo é ao lado do <code>Dockerfile</code>, na raiz do contexto. (Com <code>-f</code> apontando para outro arquivo, o .dockerignore ainda é procurado na raiz do contexto, não ao lado do -f — detalhe que já confundiu muita gente.)</div>
+
+<hr>
+
+<h2>Por que isso importa (três motivos)</h2>
+<ol class="passo">
+  <li><strong>Contexto menor = build mais rápido.</strong> Cada build envia o contexto inteiro ao daemon. Um <code>node_modules</code> com 400MB vai junto a cada <code>docker build</code>, deixando tudo lento — e em CI, cada segundo conta.</li>
+  <li><strong>Cache mais estável.</strong> Arquivos que mudam toda hora (logs, build local, banco local) nem chegam a ser observados pelo cache — eles não quebram a sequência de camadas.</li>
+  <li><strong>Segurança.</strong> Se um arquivo com senhas entra no contexto e um <code>COPY . .</code> o copia para a imagem, o segredo fica <strong>gravado numa camada para sempre</strong> — mesmo que um <code>RUN rm</code> depois o apague, a camada anterior continua lá, legível.</li>
+</ol>
+<pre class="term" data-cwd="~/meusite">$ docker build -t site:1.0 .
+Sending build context to Docker daemon  4.096kB    « com .dockerignore</pre>
+<pre class="term" data-cwd="~/meusite">$ docker build -t site:1.0 .
+Sending build context to Docker daemon  482.4MB    « sem .dockerignore: node_modules e .git foram junto</pre>
+
+<div class="warn"><strong>Segredo na imagem: o vazamento real.</strong> Se o projeto da Ana tem um arquivo <code>.env</code> com <code>DB_PASSWORD=…</code> e o Dockerfile tem <code>COPY . .</code>, o <code>.env</code> entra na imagem. Qualquer pessoa com acesso à imagem consegue ler as camadas (basta <code>docker history</code> + inspeção, ou ferramentas como o dive — aula <a href="image-dive.html">Analisando camadas</a>). E publishar a imagem no registry publica o segredo junto. <strong>Regra de ouro:</strong> <code>.env</code> no <code>.dockerignore</code>, sempre. Passe segredos em runtime com <code>-e</code> ou <code>--env-file</code>, nunca no build.</div>
+
+<hr>
+
+<h2>Um .dockerignore pronto para projeto Node</h2>
+<pre class="file"># arquivo: .dockerignore  (fica na raiz do projeto, ao lado do Dockerfile)
+
+# dependências e controle de versão — nunca vão para a imagem
+node_modules/
+.git/
+.gitignore
+
+# segredos — NUNCA enviar ao build
+.env
+.env.*
+*.pem
+*.key
+id_rsa
+
+# build local, logs e testes
+coverage/
+dist/
+build/
+*.log
+npm-debug.log*
+.DS_Store
+
+# arquivos do próprio Docker (o Dockerfile ainda é lido; só não é copiado)
+Dockerfile
+.dockerignore
+docker-compose.yml
+.docker/
+README.md
+</pre>
+<p>Depois de criar o arquivo, o próximo <code>docker build</code> já sente a diferença no tamanho do contexto. Dá para testar sem buildar nada: <code>tar</code> simulando o envio, ou simplesmente observe a linha <code>Sending build context …</code> no próximo build.</p>
+
+<div class="tip"><strong>Por que o próprio Dockerfile entra na lista?</strong> Ele é lido pelo daemon (de fora do contexto), mas não precisa ser <em>copiado</em> para dentro da imagem — listar <code>Dockerfile</code> e <code>.dockerignore</code> evita que um <code>COPY . .</code> os ponha dentro da imagem sem querer.</div>
+
+<hr>
+
+<h2>Erros e pegadinhas reais</h2>
+
+<div class="warn"><strong>COPY de algo que o .dockerignore excluiu:</strong> se o .dockerignore tem <code>config/</code> e o Dockerfile tem <code>COPY config/ /app/config/</code>, o build falha com <code>failed to compute cache key: config/: not found</code>. O arquivo simplesmente não existe para o build. <strong>Como consertar:</strong> tire a linha do .dockerignore (e use <code>COPY config/producao.conf …</code> específico, se for o caso) ou ajuste a exceção com <code>!config/producao.conf</code>.</div>
+
+<div class="warn"><strong>Padrões que não batem:</strong> <code>node_modules</code> (sem barra) já ignora a pasta, mas <code>/node_modules</code> (com barra na frente) também funciona na raiz; o que <strong>não</strong> funciona é <code>src/node_modules</code> esperando pegar a raiz — os padrões são relativos à raiz do contexto. E <code>node_modules/</code> não ignora um <em>arquivo</em> chamado node_modules — para isso, sem a barra.</div>
+
+<div class="warn"><strong>.dockerignore não apaga nada do disco:</strong> ele só filtra o envio do build. Seus arquivos continuam na sua máquina, intactos. É filtro, não lixeira.</div>
+
+<div class="warn"><strong>Build de contexto remoto (git/URL):</strong> nesse caso o .dockerignore é lido do próprio repositório remoto (raiz do contexto remoto). Se o repositório não tiver .dockerignore, tudo vai.</div>
+
+<hr>
+
+<h2>Referência rápida</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Escrita no .dockerignore</th><th>Efeito</th></tr>
+<tr><td><code>pasta/</code></td><td>Ignora a pasta inteira (na raiz do contexto)</td></tr>
+<tr><td><code>*.log</code></td><td>Ignora todos os .log de qualquer nível</td></tr>
+<tr><td><code>**/tmp</code></td><td>Ignora qualquer pasta chamada tmp em qualquer nível</td></tr>
+<tr><td><code>!README.md</code></td><td>Exceção: esse arquivo entra mesmo com um <code>*.md</code> antes</td></tr>
+<tr><td><code># comentário</code></td><td>Linha de comentário</td></tr>
+</table>
+</div>
+
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Entrar no .dockerignore (quase sempre)</th><th>Por quê</th></tr>
+<tr><td><code>node_modules/</code>, <code>vendor/</code>, <code>venv/</code></td><td>Dependências são instaladas no build (<code>RUN npm install</code>), não copiadas</td></tr>
+<tr><td><code>.git/</code></td><td>Histórico não vai para imagem; vaza caminho interno e pesa</td></tr>
+<tr><td><code>.env</code>, <code>*.pem</code>, <code>*.key</code></td><td>Segredo: se entrar no contexto, pode parar numa camada</td></tr>
+<tr><td><code>dist/</code>, <code>build/</code>, <code>coverage/</code></td><td>Build local é refeito dentro da imagem</td></tr>
+<tr><td><code>*.log</code>, <code>.DS_Store</code></td><td>Lixo que muda toda hora e quebra cache</td></tr>
+<tr><td><code>Dockerfile</code>, <code>.dockerignore</code>, <code>docker-compose.yml</code></td><td>O daemon lê eles, mas não precisam estar dentro da imagem</td></tr>
+</table>
+</div>
+
+<div class="try" data-goal="Successfully tagged site:1.0" data-solucao="docker build -t site:1.0 .">
+<p class="try-task"><strong>Missão:</strong> monte uma imagem a partir de um projeto com <code>.dockerignore</code>: rode <code>docker build -t site:1.0 .</code> no terminal abaixo.</p>
+</div>
+
+<div class="try" data-goal="Build Cache" data-solucao="docker system df">
+<p class="try-task"><strong>Missão extra:</strong> rode <code>docker system df</code> no terminal abaixo e veja a linha <code>Build Cache</code> — o espaço que os builds já usaram em disco.</p>
+</div>
+
+<hr>
+
+<h2>Quiz rápido</h2>
+
+<div class="mc" data-answer="2">
+<p class="mc-q">1. Onde o arquivo <code>.dockerignore</code> precisa ficar para funcionar?</p>
+<label><input type="radio" name="q1"> Dentro de <code>node_modules</code></label>
+<label><input type="radio" name="q1"> Na raiz do contexto do build (ao lado do Dockerfile)</label>
+<label><input type="radio" name="q1"> Dentro de <code>/etc/docker</code></label>
+<label><input type="radio" name="q1"> Em qualquer subpasta do projeto</label>
+</div>
+
+<div class="mc" data-answer="3">
+<p class="mc-q">2. A Ana listou <code>node_modules/</code> no .dockerignore. O que acontece com a pasta no disco dela?</p>
+<label><input type="radio" name="q2"> É apagada do disco</label>
+<label><input type="radio" name="q2"> É renomeada para <code>node_modules.old</code></label>
+<label><input type="radio" name="q2"> Nada — o .dockerignore só impede que ela seja <strong>enviada no contexto do build</strong>; o disco continua igual</label>
+<label><input type="radio" name="q2"> Ela vai para a lixeira do Docker</label>
+</div>
+
+<div class="mc" data-answer="4">
+<p class="mc-q">3. Por que colocar <code>.env</code> no .dockerignore é questão de segurança?</p>
+<label><input type="radio" name="q3"> Porque o .env deixa o build lento</label>
+<label><input type="radio" name="q3"> Porque o .env ocupa muita memória</label>
+<label><input type="radio" name="q3"> Porque o .env pode ter senhas</label>
+<label><input type="radio" name="q3"> Porque um <code>COPY . .</code> colocaria o .env numa camada da imagem, legível por quem tem a imagem (e o segredo vazaria se a imagem for publicada)</label>
+</div>
+
+<div class="mc" data-answer="1">
+<p class="mc-q">4. O Dockerfile da Ana tem <code>COPY segredos/ /app/</code>, mas o .dockerignore lista <code>segredos/</code>. O que acontece no build?</p>
+<label><input type="radio" name="q4"> O build falha com <code>not found</code>, porque o .dockerignore faz a pasta não existir para o build</label>
+<label><input type="radio" name="q4"> O build funciona e copia os segredos</label>
+<label><input type="radio" name="q4"> O .dockerignore é ignorado quando existe COPY explícito</label>
+<label><input type="radio" name="q4"> A pasta é copiada mas apagada depois</label>
+</div>
+
+<hr>
+
+<h2>Resumo</h2>
+<ul>
+  <li>O <code>.dockerignore</code> fica na <strong>raiz do contexto do build</strong>, ao lado do Dockerfile, e usa a sintaxe do <code>.gitignore</code> (<code>pasta/</code>, <code>*.log</code>, <code>**/x</code>, <code>#</code>, exceção com <code>!</code>).</li>
+  <li>O que está na lista <strong>não é enviado ao daemon</strong> no <code>docker build</code> — e portanto não pode ser copiado com <code>COPY</code> nem atrapalha o cache.</li>
+  <li>Três motivos: build rápido (veja a linha <code>Sending build context …</code>), cache estável e <strong>segurança</strong> — <code>.env</code> e chaves nunca devem entrar no contexto.</li>
+  <li>Ele é filtro de envio, não apaga nada do disco.</li>
+  <li>Erros reais: arquivo na subpasta errada (só a raiz vale), <code>COPY</code> de algo ignorado (dá <code>not found</code>), padrão que não bate com o caminho real.</li>
+  <li>Kit mínimo: <code>node_modules/</code>, <code>.git/</code>, <code>.env*</code>, <code>*.pem</code>/<code>*.key</code>, <code>dist/</code>, <code>*.log</code>, <code>Dockerfile</code>, <code>.dockerignore</code>, <code>docker-compose.yml</code>.</li>
+</ul>
+
+<div class="tip"><strong>Próxima aula:</strong> <a href="camadas-cache.html">Camadas e cache do build</a> — por que cada instrução vira uma camada e como a ordem das instruções deixa o build quase instantâneo.</div>
+
+<div class="pager"></div>
+
+</div>
+</main>
+</div>
+<script src="assets/site.js?v=4"></script>
+</body>
+</html>

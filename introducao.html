@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>O que é Docker e Containers — a ideia por trás dos containers | Guia Docker</title>
+<meta name="description" content="O que é Docker, o que é um container e o que é uma imagem: a analogia da caixa de mudança, a história da Ana e o site que quebrou no servidor, a diferença entre container e máquina virtual, por que 'na minha máquina funciona' acaba, a história de 2013 até hoje, os erros reais de quem não instalou direito e o primeiro comando docker --version.">
+<link rel="stylesheet" href="assets/style.css?v=4">
+<script>try{var t=localStorage.getItem("tema");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<meta http-equiv="Cache-Control" content="no-store, must-revalidate">
+<script>try{history.scrollRestoration="manual"}catch(e){}(function(){var n=0;function t(){window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;if(++n<60)setTimeout(t,50)}t();window.addEventListener("pagehide",function(){window.scrollTo(0,0);document.documentElement.scrollTop=0;});window.addEventListener("pageshow",function(){window.scrollTo(0,0)});window.addEventListener("load",function(){window.scrollTo(0,0)});})();document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(a){var h=a.getAttribute("href")||"";if(/[.]html($|[?#])/.test(h)&&a.host===location.host){window.scrollTo(0,0);document.documentElement.scrollTop=0;}}});</script>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" id="sidebar" aria-label="Tópicos"></nav>
+<main class="main">
+<div class="content">
+
+<div class="pager"></div>
+
+<h1>O que é Docker <span class="hl">e Containers</span></h1>
+
+<p class="intro">Imagine que você vai se mudar. Em vez de colocar cada coisa solta no caminhão, você coloca tudo numa <strong>caixa padrão</strong>: louça numa caixa, livros noutra, roupa noutra. Qualquer caminhão carrega qualquer caixa, e na casa nova é só abrir. O Docker faz isso com programas: cada programa vai numa "caixa" chamada <strong>container</strong>, e essa caixa roda igual em qualquer computador.</p>
+
+<div class="note">
+<strong>Você vai aprender</strong>
+<ul>
+  <li>O que é um <strong>container</strong> e o que é uma <strong>imagem</strong>.</li>
+  <li>A história real do problema "na minha máquina funciona" — com a Ana e o site dela.</li>
+  <li>A diferença entre container e máquina virtual (VM), linha por linha.</li>
+  <li>As peças do Docker: Engine (daemon), CLI, Registry e Docker Hub.</li>
+  <li>Um pouco de história: de 2013 (dotCloud) até a OCI de hoje.</li>
+  <li>Seu primeiro comando real: <code>docker --version</code> — e os erros de quem ainda não instalou.</li>
+</ul>
+</div>
+
+<hr>
+
+<h2>O problema: "na minha máquina funciona"</h2>
+<p>A Ana é desenvolvedora web e fez um site novo no <strong>notebook</strong> dela. No computador da Ana, abre lindo no navegador: <code>http://localhost:3000</code>. Ela manda o endereço do servidor para o cliente e... nada. A página quebra. O servidor mostra um erro esquisito sobre uma biblioteca que "não existe".</p>
+
+<p>O que aconteceu? O notebook da Ana tem Python 3.12 instalado, com um pacote chamado <code>flask</code> na versão 3. No servidor, tinha Python 3.9 e o <code>flask</code> nem estava instalado. <strong>Cada máquina é um ambiente levemente diferente</strong> — sistema operacional, versões, bibliotecas, variáveis de configuração, permissões — e essas diferenças minúsculas quebram programas que pareciam prontos.</p>
+
+<p>Antes do Docker, a solução era: "instala aí no servidor a mesma coisa que eu tenho aqui" — e torcer. Deu tão errado que virou meme: <em>"works on my machine"</em> ("na minha máquina funciona").</p>
+
+<p>O Docker resolve isso empacotando o programa <strong>junto com o ambiente inteiro</strong>: o sistema operacional base, as bibliotecas, as versões exatas, as variáveis de configuração. Tudo dentro de uma unidade que roda <strong>igual em qualquer lugar</strong> — no notebook da Ana, no servidor do cliente, no computador Windows do amiga dela, na nuvem. A frase vira outra: <em>"roda em qualquer máquina"</em>.</p>
+
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Sem Docker (o drama da Ana)</th><th>Com Docker</th></tr>
+<tr><td>"Instala o Python 3.12 e o flask 3.0 no servidor, por favor"</td><td><code>docker run meu-site</code> — e pronto, é a mesma caixa em todo lugar</td></tr>
+<tr><td>Funciona no notebook, quebra no servidor</td><td>A caixa carrega o ambiente inteiro junto com o programa</td></tr>
+<tr><td>"Qual versão você instalou?" — horas de debug</td><td>A versão está escrita dentro da imagem, imutável</td></tr>
+<tr><td>Um projeto atrapalha o outro (versões diferentes)</td><td>Cada projeto roda isolado no seu próprio container</td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>Container × Máquina Virtual</h2>
+<p>Muita gente confunde container com máquina virtual (VM, tipo VirtualBox). A diferença é o peso:</p>
+
+<div class="table-wrap">
+<table class="ref">
+<tr><th></th><th>Máquina Virtual (VM)</th><th>Container Docker</th></tr>
+<tr><td><strong>O que é</strong></td><td>Um computador inteiro simulado dentro do seu</td><td>Um processo isolado que usa o sistema do hospedeiro</td></tr>
+<tr><td><strong>Peso</strong></td><td>GBs (tem um sistema operacional inteiro dentro)</td><td>MBs (compartilha o kernel do Linux hospedeiro)</td></tr>
+<tr><td><strong>Tempo para ligar</strong></td><td>Minutos</td><td>Segundos (ou menos)</td></tr>
+<tr><td><strong>Isolamento</strong></td><td>Total (hardware virtualizado)</td><td>De processos e rede (namespaces + cgroups)</td></tr>
+<tr><td><strong>Analogia</strong></td><td>Uma casa dentro do seu terreno</td><td>Um apartamento no seu prédio</td></tr>
+</table>
+</div>
+
+<p>Na analogia do prédio: a VM é uma casa própria — tem estrutura própria, demora para construir e ocupa terreno. O container é um apartamento — mora no mesmo prédio (sistema operacional hospedeiro), tem paredes próprias (isolamento de processos), mas divide o encanamento e a energia (o kernel do sistema). Por isso um servidor pequeno roda <strong>dezenas de containers</strong>, mas só 2 ou 3 VMs. Por isso containers viraram o padrão para rodar aplicações na nuvem.</p>
+
+<div class="warning">
+<strong>Mas e a segurança?</strong>
+<p>O isolamento do container é de <strong>processos</strong>, não de hardware. Por isso container <strong>não substitui VM</strong> quando você precisa de isolamento máximo (por exemplo, rodar código de cliente desconhecido com privilégios altos). Para o uso normal — rodar aplicações, bancos, sites — o isolamento do Docker é o padrão da indústria e é o que todo serviço de nuvem usa por baixo dos panos.</p>
+</div>
+
+<hr>
+
+<h2>Imagem: a receita. Container: o bolo pronto.</h2>
+<p>Os dois termos mais importantes do Docker:</p>
+<dl class="anatomy">
+  <dt>Imagem (image)</dt><dd>É a <strong>receita</strong>: um arquivo somente leitura, em camadas, com o sistema base e tudo instalado. Você não muda a imagem depois de pronta; ela é o molde. Fica guardada no disco e pode ser compartilhada no <strong>Docker Hub</strong> (um "supermercado" de imagens prontas).</dd>
+  <dt>Container</dt><dd>É o <strong>bolo pronto</strong>: uma instância viva da imagem, com uma camada gravável em cima (onde o programa salva arquivos). Vários containers podem nascer da mesma imagem — como assar vários bolos da mesma receita. Você pode parar, apagar e recriar containers à vontade — a imagem continua lá.</dd>
+</dl>
+
+<pre class="term">$ docker images          « lista as receitas (imagens) na máquina
+$ docker run nginx       « usa a receita nginx para assar um bolo (container)
+$ docker ps              « lista os bolos (containers) rodando agora</pre>
+
+<p>Essa é a ideia central de todo o guia: <strong>quem manda é a imagem; o container é só uma cópia viva e descartável dela.</strong> Por isso dá para apagar um container sem medo — a receita continua guardada. E por isso dá para rodar 10 containers da mesma imagem: 10 cópias do mesmo bolo.</p>
+
+<h3>De onde vêm as imagens? O anatomy de um nome</h3>
+<p>Uma imagem tem um nome completo, como um endereço:</p>
+
+<pre class="term">docker.io/library/nginx:alpine
+│         │       │      └── tag (versão/variante)
+│         │       └──────── repository (o nome da imagem)
+│         └──────────────── namespace (quem publica; "library" = oficial)
+└────────────────────────── registry (o depósito; docker.io = Docker Hub)</pre>
+
+<dl class="anatomy">
+  <dt>registry</dt><dd>O servidor que guarda e distribui imagens. O padrão é <code>docker.io</code> (o Docker Hub). Se você não escrever nada, o Docker completa com <code>docker.io</code>.</dd>
+  <dt>namespace</dt><dd>O "sobrenome" de quem publica. Imagens oficiais (nginx, postgres, node) moram em <code>library</code>. Usuários comuns usam o próprio nome de usuário: <code>docker.io/ana/meuapp</code>.</dd>
+  <dt>repository</dt><dd>O nome da imagem em si: <code>nginx</code>, <code>meuapp</code>.</dd>
+  <dt>tag</dt><dd>A versão ou variante: <code>:alpine</code>, <code>:latest</code>, <code>:22</code>. Se omitir, o Docker usa <code>:latest</code>. A aula <a href="tags.html">Tags e versões</a> detalha.</dd>
+</dl>
+
+<hr>
+
+<h2>As peças do Docker</h2>
+<p>Quando você digita <code>docker alguma-coisa</code>, várias peças trabajan juntas:</p>
+<ul>
+  <li><strong>Docker CLI</strong> (o comando <code>docker</code>): o programa de linha de comando que <em>você</em> digita; ele manda os pedidos para o Engine. É o controle remoto.</li>
+  <li><strong>Docker Engine</strong> (o "daemon", <code>dockerd</code>): o serviço que roda em segundo plano na máquina e faz o trabalho pesado — criar, rodar, parar e gerenciar containers. É a cozinha.</li>
+  <li><strong>Registry</strong>: um servidor que guarda e distribui imagens. O comando <code>docker pull</code> baixa de um registry; <code>docker push</code> envia para um.</li>
+  <li><strong>Docker Hub</strong> (hub.docker.com): o registry público oficial. Tem imagens oficiais (nginx, postgres, node…) e as da comunidade. O comando <code>docker pull nginx</code> baixa de lá por padrão.</li>
+</ul>
+
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Peça</th><th>Comando típico</th><th>Analogia</th></tr>
+<tr><td>Docker CLI</td><td><code>docker run …</code>, <code>docker ps</code></td><td>O controle remoto da TV</td></tr>
+<tr><td>Docker Engine (dockerd)</td><td>roda em segundo plano; não se digita</td><td>A TV em si, ligada na tomada</td></tr>
+<tr><td>Registry</td><td><code>docker pull</code>, <code>docker push</code></td><td>O depósito de fábricas</td></tr>
+<tr><td>Docker Hub</td><td><code>docker pull nginx</code> (padrão)</td><td>O supermercado público</td></tr>
+</table>
+</div>
+
+<p>Quando o Docker não está instalado ou o daemon está parado, a CLI avisa que não conseguiu falar com o Engine — é o erro <code>Cannot connect to the Docker daemon</code>, que você vai ver na aula <a href="instalar.html">Instalar o Docker</a>.</p>
+
+<hr>
+
+<h2>Um pouco de história</h2>
+<p>Em <strong>2013</strong>, a empresa dotCloud (que fazia uma plataforma de hospedagem chamada... dotCloud) liberou como código aberto a tecnologia interna que usava para isolar os apps dos clientes: o <strong>Docker</strong>. A ideia pegou rápido demais: em poucos meses, dezenas de milhares de pessoas já usavam. Em 2014 a empresa virou Docker Inc. e o projeto continuou crescendo.</p>
+<p>Hoje o Docker é padrão da indústria, e existe até a <strong>OCI</strong> (Open Container Initiative), um padrão aberto de imagens e containers que o Docker segue — ou seja, uma imagem feita com Docker roda em outras ferramentas compatíveis (Podman, containerd, Kubernetes). Aprender Docker é aprender o idioma padrão dos containers.</p>
+
+<hr>
+
+<h2>Seu primeiro comando</h2>
+<p>Com o Docker instalado (a aula <a href="instalar.html">Instalar o Docker</a> mostra como), abra o terminal e rode:</p>
+
+<div class="try" data-goal="Docker version" data-solucao="docker --version">
+<p class="try-task"><strong>Missão:</strong> digite <code>docker --version</code> e aperte <kbd>Enter</kbd>. O simulador imita o Docker Engine 27.</p>
+</div>
+
+<pre class="term">$ docker --version
+Docker version 27.3.1, build ce12f7b</pre>
+
+<dl class="anatomy">
+  <dt>docker</dt><dd>O programa (a CLI).</dd>
+  <dt>--version</dt><dd>A opção "mostre a versão" — começa com <code>--</code> porque é uma opção longa.</dd>
+</dl>
+
+<p>Se aparecer a versão, está tudo certo. Quem quiser ver mais detalhes (cliente <em>e</em> servidor) pode rodar <code>docker version</code> — sem o hífen duplo:</p>
+
+<pre class="term">$ docker version
+Client:
+  Version:   27.3.1
+  OS/Arch:   linux/amd64
+
+Server: Docker Engine 27.3.1
+  Storage Driver: overlay2
+  Operating System: Ubuntu 24.04 LTS</pre>
+
+<h3>Quando dá errado</h3>
+<div class="warning">
+<strong>Se aparecer <code>command not found</code></strong>
+<p>O Docker não está instalado ou não está no <code>PATH</code> — volte para a aula de <a href="instalar.html">instalação</a> e confira cada passo.</p>
+</div>
+<div class="warning">
+<strong>Se aparecer <code>Cannot connect to the Docker daemon</code></strong>
+<p>A CLI está instalada, mas o serviço (o daemon <code>dockerd</code>) não está rodando. No Linux: <code>sudo systemctl start docker</code> (e <code>sudo systemctl enable docker</code> para ligar sozinho no boot). No Docker Desktop: abra o aplicativo. A aula <a href="instalar.html">Instalar o Docker</a> cobre os dois casos.</p>
+</div>
+
+<div class="mc" data-answer="2">
+<p class="mc-q">A Ana fez um site no notebook dela e ele quebrou no servidor. Qual era a causa mais provável?</p>
+<label><input type="radio" name="q1"> O servidor estava desligado</label>
+<label><input type="radio" name="q1"> O ambiente do servidor era diferente (versões, bibliotecas) do notebook dela</label>
+<label><input type="radio" name="q1"> O navegador do cliente estava desatualizado</label>
+<label><input type="radio" name="q1"> O site foi feito em uma linguagem que o servidor não aceita</label>
+</div>
+
+<div class="mc" data-answer="3">
+<p class="mc-q">Qual destas afirmações sobre imagem e container está certa?</p>
+<label><input type="radio" name="q2"> A imagem é o programa rodando; o container é o arquivo guardado</label>
+<label><input type="radio" name="q2"> Imagem e container são apelidos para a mesma coisa</label>
+<label><input type="radio" name="q2"> A imagem é a receita (somente leitura); o container é uma instância viva dela</label>
+<label><input type="radio" name="q2"> O container é a receita; a imagem é o bolo pronto</label>
+</div>
+
+<div class="mc" data-answer="2">
+<p class="mc-q">Na máquina da Ana, o que acontece se ela apagar um container com <code>docker rm</code>?</p>
+<label><input type="radio" name="q3"> A imagem que originou o container também é apagada</label>
+<label><input type="radio" name="q3"> Só o container é apagado; a imagem continua na máquina</label>
+<label><input type="radio" name="q3"> Nada acontece, porque container e imagem são a mesma coisa</label>
+<label><input type="radio" name="q3"> O Docker não deixa apagar container</label>
+</div>
+
+<hr>
+
+<h2>Resumo</h2>
+<ul>
+  <li>O problema clássico: <strong>"na minha máquina funciona"</strong> — cada máquina tem um ambiente levemente diferente e isso quebra programas.</li>
+  <li>O Docker empacota o programa <strong>com o ambiente inteiro</strong> numa caixa chamada <strong>container</strong>, que roda igual em qualquer máquina.</li>
+  <li><strong>Imagem = receita</strong> (somente leitura, em camadas); <strong>container = bolo pronto</strong> (instância viva, descartável). Vários containers podem nascer da mesma imagem.</li>
+  <li>Container <strong>não é máquina virtual</strong>: VM tem sistema próprio (GBs, minutos); container compartilha o kernel do hospedeiro (MBs, segundos).</li>
+  <li>As peças: <strong>CLI</strong> (o que você digita), <strong>Engine/dockerd</strong> (o serviço que faz o trabalho), <strong>Registry</strong> (depósito de imagens) e <strong>Docker Hub</strong> (o registro público padrão).</li>
+  <li>O nome completo de uma imagem é <code>registry/namespace/repository:tag</code> — ex.: <code>docker.io/library/nginx:alpine</code>.</li>
+  <li>Primeiro comando: <code>docker --version</code>. Erros comuns: <code>command not found</code> (não instalou) e <code>Cannot connect to the Docker daemon</code> (daemon parado).</li>
+</ul>
+
+<div class="tip"><strong>Próxima aula:</strong> <a href="conceitos.html">Imagens, Containers, Registry e Docker Hub</a> aprofunda cada peça. Depois: <a href="primeiro-container.html">Seu Primeiro Container</a>.</div>
+
+</div>
+</main>
+</div>
+<script src="assets/site.js?v=4"></script>
+</body>
+</html>

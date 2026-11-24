@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>O que é Docker Compose — um comando para subir vários containers | Guia Docker</title>
+<meta name="description" content="Por que subir vários containers na mão com docker run dá trabalho e como o Docker Compose resolve isso com um arquivo YAML declarativo e o comando docker compose up. A história do Fig, do Compose v1 (docker-compose, com hífen) e do Compose v2 (plugin, docker compose, com espaço), como conferir a versão com docker compose version e os erros reais mais comuns.">
+<link rel="stylesheet" href="assets/style.css?v=4">
+<script>try{var t=localStorage.getItem("tema");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<meta http-equiv="Cache-Control" content="no-store, must-revalidate">
+<script>try{history.scrollRestoration="manual"}catch(e){}(function(){var n=0;function t(){window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;if(++n<60)setTimeout(t,50)}t();window.addEventListener("pagehide",function(){window.scrollTo(0,0);document.documentElement.scrollTop=0;});window.addEventListener("pageshow",function(){window.scrollTo(0,0)});window.addEventListener("load",function(){window.scrollTo(0,0)});})();document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(a){var h=a.getAttribute("href")||"";if(/[.]html($|[?#])/.test(h)&&a.host===location.host){window.scrollTo(0,0);document.documentElement.scrollTop=0;}}});</script>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" id="sidebar" aria-label="Tópicos"></nav>
+<main class="main">
+<div class="content">
+
+<div class="pager"></div>
+
+<h1><span class="hl">Docker Compose</span> — um comando para vários containers</h1>
+
+<p class="intro">Até aqui cada container foi criado com um <code>docker run</code> na mão. Numa aplicação de verdade raramente existe um container só: existe a página web, a API, o banco de dados, um cache... O <strong>Docker Compose</strong> é a ferramenta que descreve essa pilha inteira num único arquivo <strong>YAML</strong> e sobe tudo com um comando só: <code>docker compose up</code>.</p>
+
+<div class="note">
+<strong>Você vai aprender</strong>
+<ul>
+  <li>O problema de subir vários <code>docker run</code> na mão — e o que se esquece no caminho.</li>
+  <li>A ideia do arquivo declarativo <code>docker-compose.yml</code> ("estado desejado").</li>
+  <li><code>docker compose up -d</code> para subir tudo e <code>docker compose down</code> para derrubar.</li>
+  <li>Como ler a saída do <code>up</code> (rede, volumes, containers) e o <code>compose ps</code>.</li>
+  <li>A história: Fig → Compose v1 → Compose v2 (plugin do CLI).</li>
+  <li>Como conferir a instalação com <code>docker compose version</code> e os erros reais mais comuns.</li>
+</ul>
+</div>
+
+<hr>
+
+<h2>A cena: o projeto da Ana no notebook</h2>
+<p>A Ana está montando no <code>ana@notebook</code> a <strong>minhaloja</strong>, uma lojinha online de papelaria: um site feito em Nginx, um banco PostgreSQL com os produtos e um cache Redis para as consultas rápidas. No começo ela foi subindo tudo na mão, um comando por serviço, como aprendeu nas aulas anteriores (<a href="docker-run.html">docker run</a>, <a href="portas.html">portas</a>, <a href="volumes-intro.html">volumes</a>):</p>
+<pre class="term" data-cwd="~">$ docker run -d --name banco -e POSTGRES_PASSWORD=segredo -v dados-db:/var/lib/postgresql/data postgres:16-alpine
+a1b2c3d4e5f6
+$ docker run -d --name cache redis:7-alpine
+b2c3d4e5f6a1
+$ docker run -d --name web -p 8080:80 --link banco --link cache nginx:alpine   « e a rede? e a ordem de subida?
+c3d4e5f6a1b2</pre>
+<p>Funcionou. Mas olhe para esse caderno de comandos e pense no que acontece na prática:</p>
+<ul>
+  <li><strong>A ordem importa</strong>: se o banco subir depois da aplicação, a aplicação quebra na inicialização. O <code>--link</code> aqui é um improviso — o jeito certo é uma rede (aula <a href="redes-intro.html">Redes no Docker</a>).</li>
+  <li><strong>É fácil esquecer uma flag</strong>: trocou a senha do banco num comando e esqueceu no outro? pronto, dois bancos diferentes.</li>
+  <li><strong>Derrubar tudo depois</strong> vira <code>docker stop</code> e <code>docker rm</code> um por um — e se esquecer um, ele fica lá ocupando porta e memória.</li>
+  <li><strong>Passar para outra pessoa</strong> é pior: "roda esses 5 comandos na ordem" num README nunca dá certo. A colega da Ana rodou na ordem errada e conclusiu que "Docker não funciona no computador dela".</li>
+  <li><strong>O estado some</strong>: se a máquina da Ana desligar, os containers somem com ela; recriar tudo na mão de novo é retrabalho puro.</li>
+</ul>
+<p>Dá para automatizar com um script <code>subir.sh</code>... mas script é <strong>imperativo</strong>: "faça isso, depois aquilo, se der erro pare". Existe um jeito melhor de descrever a aplicação: dizer <strong>como ela deve ser</strong>, e deixar a ferramenta descobrir o que precisa ser feito. É essa a ideia do Compose.</p>
+
+<hr>
+
+<h2>A ideia: declarativo em vez de imperativo</h2>
+<p>Pense na diferença entre duas formas de pedir uma pizza. A forma <strong>imperativa</strong> é dar instruções passo a passo: "pegue a massa, espalhe o molho, coloque o queijo, bote a calabresa, asse por 12 minutos...". A forma <strong>declarativa</strong> é dizer o resultado desejado: <em>"quero uma pizza de calabresa média"</em> — e deixar o pizzaiolo decidir a ordem das etapas.</p>
+<p>O Compose funciona assim. Em vez de uma lista de comandos, você escreve um arquivo declarando o <strong>estado desejado</strong> do projeto: "quero um serviço <code>web</code> com a imagem <code>nginx:alpine</code> na porta 8080, um serviço <code>banco</code> com PostgreSQL e senha tal, e um volume para os dados". O Compose compara o declarado com o que existe na máquina e faz <strong>sozinho</strong> o que falta: cria a rede, cria o volume, baixa as imagens, cria os containers na ordem certa e inicia tudo:</p>
+<pre class="file" data-file="docker-compose.yml"># minhaloja/docker-compose.yml — o estado desejado do projeto
+services:
+  web:                          # um serviço = um container
+    image: nginx:alpine
+    ports:
+      - "8080:80"               # host 8080 -> container 80
+    depends_on:
+      - banco
+
+  banco:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_PASSWORD: segredo
+    volumes:
+      - dados-db:/var/lib/postgresql/data   # volume nomeado: os dados persistem
+
+  cache:
+    image: redis:7-alpine
+
+volumes:                        # declara os volumes nomeados usados acima
+  dados-db:</pre>
+<p>Com esse arquivo na pasta <code>~/minhaloja</code>, subir a aplicação inteira vira uma linha só:</p>
+<pre class="term" data-cwd="~/minhaloja">$ docker compose up -d
+[+] Running 5/5
+ ✔ Network minhaloja_default   Created                                  0.0s
+ ✔ Volume minhaloja_dados-db   Created                                  0.0s
+ ✔ Container minhaloja-banco-1 Started                                  0.6s
+ ✔ Container minhaloja-cache-1 Started                                  0.5s
+ ✔ Container minhaloja-web-1   Started                                  0.5s</pre>
+
+<dl class="anatomy">
+  <dt>docker</dt><dd>o CLI que você já conhece.</dd>
+  <dt>compose</dt><dd>o plugin do Compose v2 — <strong>com espaço</strong>, não com hífen.</dd>
+  <dt>up</dt><dd>"suba tudo" que está declarado no arquivo YAML: cria rede, volumes e containers, e inicia.</dd>
+  <dt>-d</dt><dd><em>detach</em>: roda em segundo plano e devolve o terminal na hora (sem ele, o terminal fica preso mostrando os logs de todos os serviços — útil para debugar).</dd>
+</dl>
+
+<p>Repare nos nomes: tudo ganhou o prefixo <code>minhaloja-</code>, que é o <strong>nome do projeto</strong> — por padrão, o nome da pasta onde está o <code>docker-compose.yml</code>. Foi o Compose quem criou a rede <code>minhaloja_default</code> e o volume <code>minhaloja_dados-db</code>, e quem ligou os três containers nessa rede, sem que a Ana pedisse nada disso explicitamente.</p>
+
+<hr>
+
+<h2>down, ps e logs: o ciclo do dia a dia</h2>
+<p>Quando a Ana termina de trabalhar, ela derruba o projeto inteiro com um comando — containers e rede somem, mas o volume com os dados do banco <strong>fica</strong> guardado:</p>
+<pre class="term" data-cwd="~/minhaloja">$ docker compose down
+[+] Running 4/4
+ ✔ Container minhaloja-web-1    Removed                                  0.2s
+ ✔ Container minhaloja-cache-1  Removed                                  0.1s
+ ✔ Container minhaloja-banco-1  Removed                                  0.1s
+ ✔ Network minhaloja_default   Removed                                  0.1s</pre>
+<p>No dia seguinte, um <code>docker compose up -d</code> de novo recria tudo e o banco continua com os mesmos dados. E para espiar o projeto sem sair do terminal:</p>
+<pre class="term" data-cwd="~/minhaloja">$ docker compose ps
+NAME               IMAGE              STATUS          PORTS
+minhaloja-web-1    nginx:alpine       Up 10 seconds   0.0.0.0:8080->80/tcp
+minhaloja-banco-1  postgres:16-alpine Up 10 seconds   5432/tcp
+minhaloja-cache-1  redis:7-alpine     Up 10 seconds   6379/tcp
+$ docker compose logs banco      « só os logs do serviço "banco"
+minhaloja-banco-1  | database system is ready to accept connections</pre>
+<p>Esses quatro comandos — <code>up -d</code>, <code>ps</code>, <code>logs</code>, <code>down</code> — são o ciclo de vida de 90% dos projetos Compose. A aula <a href="compose-up-down.html">docker compose up e down</a> detalha cada um.</p>
+
+<hr>
+
+<h2>A história: Fig, Compose v1 e Compose v2</h2>
+<p>O Compose não nasceu dentro da Docker. Em 2013, a empresa <strong>Fig</strong> (de Aneesh Chopra e outros fundadores) criou uma ferramenta de orquestração para desenvolvimento local que funcionava exatamente assim: um arquivo YAML descrevendo os serviços e um comando para subir tudo. A Docker gostou da ideia, comprou o projeto e em 2014 lançou o <strong>Docker Compose v1</strong> — escrito em Python, instalado à parte, com o comando <code>docker-compose</code> (com hífen).</p>
+<p>Em 2021 a Docker reescreveu tudo em Go e transformou o Compose no <strong>Compose v2</strong>: um <strong>plugin do próprio CLI</strong>, com o comando <code>docker compose</code> (com espaço). O v1 foi descontinuado em julho de 2023 e hoje não recebe mais correções. Se você digita <code>docker compose</code>, está usando o v2.</p>
+<div class="table-wrap">
+<table class="ref">
+<tr><th></th><th>Compose v1 (antigo)</th><th>Compose v2 (atual)</th></tr>
+<tr><td><strong>Comando</strong></td><td><code>docker-compose up</code> (hífen)</td><td><code>docker compose up</code> (espaço)</td></tr>
+<tr><td><strong>Linguagem</strong></td><td>Python (pacote <code>docker-compose</code>)</td><td>Go (binário único, mais rápido)</td></tr>
+<tr><td><strong>Instalação</strong></td><td>pacote separado via pip/apt</td><td>plugin do CLI — já vem no Docker Desktop; no Linux, pacote <code>docker-compose-plugin</code></td></tr>
+<tr><td><strong>Status</strong></td><td>descontinuado (fim do suporte em jul/2023)</td><td>o padrão hoje (ex.: v2.29.7)</td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>Conferindo a instalação</h2>
+<p>O jeito certo de saber se a máquina da Ana tem o Compose v2 é perguntar a versão:</p>
+<pre class="term" data-cwd="~">$ docker --version
+Docker version 27.3.1, build 5bcedbc
+$ docker compose version
+Docker Compose version v2.29.7</pre>
+<p>Se o primeiro comando funcionar mas o segundo não, o plugin do Compose não está instalado:</p>
+<div class="warn"><strong>Erro real quando o plugin v2 não está instalado:</strong>
+<pre class="term">$ docker compose version
+docker: 'compose' is not a docker command.
+See 'docker --help'</pre>
+No Docker Desktop (Mac/Windows) o plugin já vem pronto. No Linux, instale o pacote <code>docker-compose-plugin</code> (Debian/Ubuntu) ou <code>docker-compose-v2</code> (Fedora), seguindo a aula <a href="instalar.html">Instalar o Docker</a>. Depois da instalação, o comando certo é <strong>com espaço</strong>: <code>docker compose ...</code>.</div>
+<div class="warn"><strong>Cuidado com o comando antigo, com hífen:</strong> se na sua máquina existe <code>docker-compose</code> (v1, em Python), ele pode estar desatualizado ou nem existir mais:
+<pre class="term">$ docker-compose version
+docker-compose: command not found     « ou, pior, uma versão 1.x antiga</pre>
+Use sempre <code>docker compose</code> (espaço). Dica de ouro: se o seu teclado.autocomplete sugerir hífen, desconfie.</div>
+
+<div class="try" data-goal="Create and start containers" data-solucao="docker compose --help">
+<p class="try-task"><strong>Missão:</strong> explore o comando no simulador: rode <code>docker compose --help</code> e encontre na lista a linha do <code>up</code> ("Create and start containers").</p>
+</div>
+
+<div class="try" data-goal="Docker Compose version" data-solucao="docker compose version">
+<p class="try-task"><strong>Missão:</strong> confirme a versão no simulador: rode <code>docker compose version</code> e veja a linha <code>Docker Compose version v2.29.7</code>.</p>
+</div>
+
+<hr>
+
+<h2>Erros reais do primeiro contato</h2>
+<div class="warn"><strong>Rodou o comando na pasta errada:</strong>
+<pre class="term" data-cwd="~">$ docker compose up -d
+no configuration file provided: not found</pre>
+O Compose procura o <code>docker-compose.yml</code> na <strong>pasta atual</strong>. A Ana rodou de <code>~</code> em vez de <code>~/minhaloja</code>. Solução: <code>cd ~/minhaloja</code> ou aponte o arquivo com <code>-f</code>: <code>docker compose -f ~/minhaloja/docker-compose.yml up -d</code>.</div>
+<div class="warn"><strong>O daemon do Docker não está no ar (ou sem permissão):</strong>
+<pre class="term">$ docker compose up -d
+Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?</pre>
+Ou, em máquinas onde o socket é restrito a um grupo:
+<pre class="term">permission denied while trying to connect to the Docker daemon socket at unix:///var/run/docker.sock</pre>
+Solução: inicie o serviço (<code>sudo systemctl start docker</code>) e coloque seu usuário no grupo <code>docker</code> (<code>sudo usermod -aG docker $USER</code> — depois é preciso sair e entrar de novo na sessão). Veja <a href="instalar.html">Instalar o Docker</a> e <a href="problemas.html">Erros Comuns e Soluções</a>.</div>
+
+<hr>
+
+<h2>Quiz rápido</h2>
+<div class="mc" data-answer="2">
+<p class="mc-q">1. Qual destes comandos é o Compose v2 atual?</p>
+<label><input type="radio" name="q1"> <code>docker-compose up</code></label>
+<label><input type="radio" name="q1"> <code>docker compose up</code></label>
+<label><input type="radio" name="q1"> <code>docker up compose</code></label>
+<label><input type="radio" name="q1"> <code>docker run compose</code></label>
+</div>
+
+<div class="mc" data-answer="3">
+<p class="mc-q">2. No arquivo <code>docker-compose.yml</code>, para que serve declarar <code>services:</code>?</p>
+<label><input type="radio" name="q2"> Para dizer quais portas o firewall deve abrir</label>
+<label><input type="radio" name="q2"> Para escolher o tema do editor de YAML</label>
+<label><input type="radio" name="q2"> Cada entrada em <code>services:</code> vira um container quando você dá <code>up</code></label>
+<label><input type="radio" name="q2"> Para listar os comandos que você já rodou</label>
+</div>
+
+<div class="mc" data-answer="1">
+<p class="mc-q">3. O que o <code>docker compose down</code> <strong>não</strong> apaga por padrão?</p>
+<label><input type="radio" name="q3"> Os volumes nomeados (os dados persistem)</label>
+<label><input type="radio" name="q3"> Os containers do projeto</label>
+<label><input type="radio" name="q3"> A rede criada para o projeto</label>
+<label><input type="radio" name="q3"> As imagens baixadas</label>
+</div>
+
+<hr>
+
+<h2>Resumo</h2>
+<ul>
+  <li>Aplicações de verdade têm vários containers; subir tudo com <code>docker run</code> na mão dá trabalho e esquece fácil (rede, ordem, variáveis, derrubada).</li>
+  <li>O Compose é <strong>declarativo</strong>: o <code>docker-compose.yml</code> descreve o estado desejado (serviços, imagens, portas, volumes) e o comando descobre o que falta fazer.</li>
+  <li><code>docker compose up -d</code> cria e inicia rede + volumes + containers; <code>down</code> para e remove containers e a rede (volumes ficam).</li>
+  <li>O nome do projeto vem da pasta (prefixo dos containers: <code>minhaloja-web-1</code>); <code>ps</code> e <code>logs</code> mostram só o projeto.</li>
+  <li>Compose v1 (<code>docker-compose</code>, hífen, Python) está descontinuado; use o v2 (<code>docker compose</code>, espaço, plugin Go) e confirme com <code>docker compose version</code>.</li>
+  <li>Erros comuns: rodar fora da pasta do projeto (<code>no configuration file provided: not found</code>) e daemon parado/sem permissão no socket.</li>
+</ul>
+
+<div class="tip"><strong>Próxima aula:</strong> <a href="compose-yaml.html">O arquivo docker-compose.yml</a> — a anatomia completa do YAML, chave por chave.</div>
+
+</div>
+</main>
+</div>
+<script src="assets/site.js?v=4"></script>
+</body>
+</html>

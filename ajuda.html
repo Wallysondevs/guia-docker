@@ -1,0 +1,302 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Obtendo ajuda no Docker — docker --help e docker CMD --help | Guia Docker</title>
+<meta name="description" content="Como obter ajuda no Docker CLI: docker --help lista todos os comandos, docker COMANDO --help mostra as opções de um comando específico (ex.: docker run --help), a anatomia das páginas de ajuda, onde fica a documentação oficial (docs.docker.com), como ler a saída de um comando desconhecido, e um quiz para fixar. Missão no simulador.">
+<link rel="stylesheet" href="assets/style.css?v=4">
+<script>try{var t=localStorage.getItem("tema");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<meta http-equiv="Cache-Control" content="no-store, must-revalidate">
+<script>try{history.scrollRestoration="manual"}catch(e){}(function(){var n=0;function t(){window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;if(++n<60)setTimeout(t,50)}t();window.addEventListener("pagehide",function(){window.scrollTo(0,0);document.documentElement.scrollTop=0;});window.addEventListener("pageshow",function(){window.scrollTo(0,0)});window.addEventListener("load",function(){window.scrollTo(0,0)});})();document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(a){var h=a.getAttribute("href")||"";if(/[.]html($|[?#])/.test(h)&&a.host===location.host){window.scrollTo(0,0);document.documentElement.scrollTop=0;}}});</script>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" id="sidebar" aria-label="Tópicos"></nav>
+<main class="main">
+<div class="content">
+
+<div class="pager"></div>
+
+<h1>Obtendo <span class="hl">ajuda</span></h1>
+
+<p class="intro">O próprio comando <code>docker</code> tem um help completo. Você não precisa decorar nada: quando travar, pergunte ao próprio Docker. Nesta aula a Ana mostra os três jeitos de pedir ajuda — do geral ao específico.</p>
+
+<div class="note">
+<strong>Você vai aprender</strong>
+<ul>
+  <li><code>docker --help</code>: a lista de <strong>todos</strong> os comandos.</li>
+  <li><code>docker COMANDO --help</code>: as <strong>opções de um comando</strong> específico (ex.: <code>docker run --help</code>).</li>
+  <li>Como ler uma página de <code>--help</code> (Usage, Commands, Options).</li>
+  <li>O que acontece com um comando que não existe.</li>
+  <li>Onde fica a documentação oficial online (docs.docker.com).</li>
+</ul>
+</div>
+
+<hr>
+
+<h2>1. docker --help: todos os comandos</h2>
+<p>O primeiro lugar para procurar. Ele lista cada subcomando com uma frase do que faz:</p>
+
+<div class="try" data-goal="Commands:" data-solucao="docker --help"><p class="try-task"><strong>Missão:</strong> rode <code>docker --help</code>.</p></div>
+
+<pre class="term">$ docker --help
+Usage:  docker [OPTIONS] COMMAND
+
+A self-sufficient runtime for containers
+
+Commands:
+  run       Create and run a new container from an image
+  ps        List containers
+  images    List images
+  pull      Download an image from a registry
+  stop      Stop one or more running containers
+  start     Start one or more stopped containers
+  restart   Restart one or more containers
+  rm        Remove one or more containers
+  rmi       Remove one or more images
+  logs      Fetch the logs of a container
+  exec      Run a command in a running container
+  build     Build an image from a Dockerfile
+  tag       Create a tag TARGET_IMAGE that refers to SOURCE_IMAGE
+  network   Manage networks
+  volume    Manage volumes
+  compose   Docker Compose (v2)
+  system    Manage Docker
+  inspect   Display detailed information on one or more Docker objects
+  stats     Display a live stream of container(s) resource usage statistics
+  info      Display system-wide information
+  version   Show the Docker version information
+
+Run 'docker COMMAND --help' for more information on a command.</pre>
+
+<p>A última linha é a dica de ouro: <strong>para detalhar qualquer comando, acrescente <code>--help</code> no fim dele</strong>.</p>
+
+<hr>
+
+<h2>2. docker COMANDO --help: as opções de um comando</h2>
+<p>É aqui que mora o poder: cada subcomando tem dezenas de opções, todas listadas. Veja o <code>docker run --help</code> (resumido):</p>
+<pre class="term">$ docker run --help
+Usage:  docker run [OPTIONS] IMAGE [COMMAND] [ARG...]
+
+Create and run a new container from an image
+
+Options:
+      --name string         Assign a name to the container
+  -d, --detach              Run container in background and print container ID
+  -p, --publish list        Publish a container's port(s) to the host
+  -e, --env list            Set environment variables
+  -v, --volume list         Bind mount a volume
+  -i, --interactive         Keep STDIN open even if not attached
+  -t, --tty                 Allocate a pseudo-TTY
+      --rm                  Automatically remove the container when it exits
+      --restart string      Restart policy (no, always, on-failure, unless-stopped)
+      --network string      Connect a container to a network
+  …</pre>
+
+<h3>Anatomia de uma página de --help</h3>
+<dl class="anatomy">
+  <dt>Usage: docker run [OPTIONS] IMAGE [COMMAND] [ARG...]</dt><dd>A <strong>forma geral</strong> do comando: o que é obrigatório (<code>IMAGE</code>) e o que é opcional (entre <code>[]</code>).</dd>
+  <dt>Commands:</dt><dd>Nos helps de grupos (como o <code>docker --help</code>), a lista de subcomandos.</dd>
+  <dt>Options:</dt><dd>Todas as flags. Repare no padrão: a forma curta (<code>-d</code>), a longa (<code>--detach</code>) e o que cada uma recebe (<code>list</code>, <code>string</code>…).</dd>
+  <dt><code>list</code></dt><dd>Significa que a opção pode ser repetida: <code>-p 80:80 -p 443:443</code>, <code>-e A=1 -e B=2</code>.</dd>
+</dl>
+
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Você quer saber…</th><th>Comando</th></tr>
+<tr><td>Todos os comandos do docker</td><td><code>docker --help</code></td></tr>
+<tr><td>As opções do run</td><td><code>docker run --help</code></td></tr>
+<tr><td>As opções do ps</td><td><code>docker ps --help</code></td></tr>
+<tr><td>Os subcomandos de network</td><td><code>docker network --help</code></td></tr>
+<tr><td>Os subcomandos do compose</td><td><code>docker compose --help</code></td></tr>
+<tr><td>A versão instalada</td><td><code>docker --version</code> / <code>docker version</code></td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>3. Comando errado: o próprio erro ajuda</h2>
+<p>Digitou um comando que não existe? O Docker responde dizendo isso e apontando para o <code>--help</code>:</p>
+
+<div class="try" data-goal="is not a docker command" data-solucao="docker abracadabra">
+<p class="try-task"><strong>Missão:</strong> digite um comando que não existe (<code>docker abracadabra</code>) e veja a resposta.</p>
+</div>
+
+<pre class="term">$ docker abracadabra
+docker: 'abracadabra' is not a docker command.
+See 'docker --help'.</pre>
+
+<p>Erros assim são comuns quando a gente erra o nome do subcomando (ex.: <code>docker container ls</code> em vez de <code>docker ps</code> — nas versões novas, <code>docker container ls</code> ainda funciona como apelido, mas o padrão é o comando curto).</p>
+
+<div class="warning">
+<strong>Erros de digitação não quebram nada</strong>
+<p>O Docker valida o comando <strong>antes</strong> de tocar em qualquer container. Se ele disse <code>'x' is not a docker command</code>, pode ter certeza de que nada aconteceu na sua máquina.</p>
+</div>
+
+<hr>
+
+<h2>4. A documentação oficial online</h2>
+<p>O <code>--help</code> do terminal é rápido, mas a referência completa e comentada está na web:</p>
+<ul>
+  <li><strong><a href="https://docs.docker.com">docs.docker.com</a></strong> — a documentação oficial: guias, referência de cada comando (<code>docker run</code> tem uma página só com todas as opções), Dockerfile, Compose.</li>
+  <li>Cada imagem oficial no <strong>Docker Hub</strong> (hub.docker.com) traz a sua página com as variáveis de ambiente e portas que ela aceita — ex.: <a href="https://hub.docker.com/_/postgres">hub.docker.com/_/postgres</a>.</li>
+  <li>Este guia tem a sua própria cola rápida: <a href="ref-comandos.html">Todos os comandos docker</a> e <a href="ref-flags.html">Flags comuns do docker run</a>.</li>
+</ul>
+
+<h3>Fluxo recomendado quando travar</h3>
+<ol class="passo">
+  <li>Leia a mensagem de erro até o fim — o Docker quase sempre diz o que faltou.</li>
+  <li>Rode <code>docker COMANDO --help</code> para ver as opções corretas.</li>
+  <li>Se ainda travar, procure a mensagem de erro na documentação oficial (docs.docker.com) ou na página <a href="problemas.html">Erros comuns e soluções</a> deste guia.</li>
+</ol>
+
+<div class="mc" data-answer="2">
+<p class="mc-q">Como você descobre todas as opções do <code>docker run</code>?</p>
+<label><input type="radio" name="q1"> Decorando a documentação</label>
+<label><input type="radio" name="q1"> <code>docker run --help</code></label>
+<label><input type="radio" name="q1"> <code>docker help run</code></label>
+<label><input type="radio" name="q1"> Procurando no Google toda vez</label>
+</div>
+
+<div class="mc" data-answer="3">
+<p class="mc-q">O que significa <code>list</code> ao lado de uma opção no --help (ex.: <code>-p, --publish list</code>)?</p>
+<label><input type="radio" name="q2"> Que a opção imprime uma lista na tela</label>
+<label><input type="radio" name="q2"> Que a opção é obrigatória</label>
+<label><input type="radio" name="q2"> Que a opção pode ser repetida várias vezes (<code>-p 80:80 -p 443:443</code>)</label>
+<label><input type="radio" name="q2"> Que a opção só aceita números</label>
+</div>
+
+<div class="mc" data-answer="1">
+<p class="mc-q">Você digitou <code>docker abracadabra</code> e recebeu <code>'abracadabra' is not a docker command</code>. O que aconteceu com seus containers?</p>
+<label><input type="radio" name="q3"> Nada — o comando foi recusado antes de executar</label>
+<label><input type="radio" name="q3"> Todos os containers foram parados</label>
+<label><input type="radio" name="q3"> Todas as imagens foram apagadas</label>
+<label><input type="radio" name="q3"> O daemon reiniciou</label>
+</div>
+
+<hr>
+
+<h2>Exemplo completo: docker run --help inteiro</h2>
+<p>Vale a pena ver a página inteira uma vez — é o mapa de tudo o que o <code>run</code> aceita (a aula <a href="docker-run.html">docker run</a> explica as principais; a cola completa está em <a href="ref-flags.html">flags comuns</a>):</p>
+<pre class="term">$ docker run --help
+
+Usage:  docker run [OPTIONS] IMAGE [COMMAND] [ARG...]
+
+Create and run a new container from an image
+
+Aliases:
+  run, create, start  (create+start é o que o run faz junto)
+
+Options:
+      --add-host list             Add a custom host-to-IP mapping (host:ip)
+  -a, --attach list               Attach to STDIN, STDOUT or STDERR
+      --blkio-weight uint16       Block IO (relative weight), between 10 and 1000
+      --cpu-shares int            CPU shares (relative weight)
+  -d, --detach                    Run container in background and print container ID
+      --detach-keys string        Override the key sequence for detaching a container
+  -e, --env list                  Set environment variables
+      --env-file list             Read in a file of environment variables
+      --expose list               Expose a port or a range of ports
+      --name string               Assign a name to the container
+  -p, --publish list              Publish a container's port(s) to the host
+  -P, --publish-all               Publish all exposed ports to random ports
+  -i, --interactive               Keep STDIN open even if not attached
+  -t, --tty                       Allocate a pseudo-TTY
+      --rm                        Automatically remove the container when it exits
+      --restart string            Restart policy: no, always, on-failure, unless-stopped
+  -v, --volume list               Bind mount a volume
+  -w, --workdir string            Working directory inside the container
+      --network string            Connect a container to a network
+      --memory string             Memory limit (ex.: 512m, 2g)
+      --cpus decimal              Number of CPUs (ex.: 1.5)
+  …</pre>
+
+<p>Não se assuste com tanta opção: no dia a dia você usaumas cinco (<code>-d</code>, <code>--name</code>, <code>-p</code>, <code>-e</code>, <code>-v</code>, <code>--rm</code>). O resto você consulta quando precisar — e agora sabe onde.</p>
+
+<hr>
+
+<h2>Help dos grupos de comandos</h2>
+<p>Comandos que têm subcomandos (network, volume, system, compose, image, container) também têm o próprio help:</p>
+<pre class="term">$ docker network --help
+Usage:  docker network COMMAND
+
+Manage networks
+
+Commands:
+  connect     Connect a container to a network
+  create      Create a network
+  disconnect  Disconnect a container from a network
+  inspect     Display detailed information on one or more networks
+  ls          List networks
+  prune       Remove all unused networks
+  rm          Remove one or more networks
+
+Run 'docker network COMMAND --help' for more information on a command.
+$ docker volume --help
+Usage:  docker volume COMMAND
+
+Manage volumes
+
+Commands:
+  create      Create a volume
+  inspect     Display detailed information on one or more volumes
+  ls          List volumes
+  prune       Remove all unused local volumes
+  rm          Remove one or more volumes</pre>
+
+<hr>
+
+<h2>Diferença entre --help, -h e "help"</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Você digita</th><th>O que acontece</th></tr>
+<tr><td><code>docker --help</code></td><td>Lista geral de comandos (o padrão recomendado)</td></tr>
+<tr><td><code>docker run --help</code></td><td>Opções do subcomando <code>run</code></td></tr>
+<tr><td><code>docker run -h</code></td><td>O mesmo que <code>--help</code> (forma curta, aceita na maioria dos comandos)</td></tr>
+<tr><td><code>docker network ls --help</code></td><td>Opções do sub-subcomando <code>ls</code> (sim, dá para descer nível)</td></tr>
+</table>
+</div>
+
+<div class="tip"><strong>Macete de memória:</strong> na dúvida, termine o comando com <code>--help</code>. Se você lembra o nome do comando, o próprio Docker te conta o resto.</div>
+
+<hr>
+
+<h2>Atalhos de memória muscular</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Situação</th><th>O que digitar</th></tr>
+<tr><td>"Quais comandos existem?"</td><td><code>docker --help</code></td></tr>
+<tr><td>"Quais opções o run tem?"</td><td><code>docker run --help</code> (ou <code>-h</code>)</td></tr>
+<tr><td>"Cadê a doc disso?"</td><td><code>docs.docker.com</code> → Reference → CLI → o comando</td></tr>
+<tr><td>"Qual versão eu tenho?"</td><td><code>docker --version</code> (rápido) ou <code>docker version</code> (cliente + servidor)</td></tr>
+<tr><td>"Tem alias/apelido?"</td><td>Sim: <code>docker container ls</code> = <code>docker ps</code>; <code>docker image ls</code> = <code>docker images</code>; <code>docker container rm</code> = <code>docker rm</code></td></tr>
+</table>
+</div>
+
+<h3>Ajuda também existe fora do terminal</h3>
+<ul>
+  <li><strong>docs.docker.com</strong> — a referência oficial completa (cada comando com exemplos).</li>
+  <li><strong>hub.docker.com</strong> — a página de cada imagem explica as variáveis e portas dela.</li>
+  <li><strong>Este guia</strong> — <a href="ref-comandos.html">cola de todos os comandos</a>, <a href="ref-flags.html">flags do run</a>, <a href="problemas.html">erros comuns</a>, <a href="glossario.html">glossário</a>.</li>
+  <li>Comunidade: Stack Overflow, Reddit r/docker, Discord oficial — procure a mensagem de erro exata entre aspas.</li>
+</ul>
+
+<hr>
+
+<h2>Resumo</h2>
+<ul>
+  <li><code>docker --help</code> lista todos os comandos; <code>docker COMANDO --help</code> detalha as opções de um comando (é a última linha do help geral que manda fazer isso).</li>
+  <li>Anatomia do help: <code>Usage:</code> mostra a sintaxe; <code>Options:</code> lista as flags (curta, longa, e se aceita valor / pode repetir — <code>list</code>).</li>
+  <li>Comando inexistente → <code>'x' is not a docker command. See 'docker --help'</code> — e nada acontece com seus containers.</li>
+  <li>Documentação oficial: <a href="https://docs.docker.com">docs.docker.com</a>; por imagem: a página dela no Docker Hub. Neste guia: <a href="ref-comandos.html">cola de comandos</a> e <a href="problemas.html">erros comuns</a>.</li>
+</ul>
+
+<div class="tip"><strong>Próxima aula:</strong> <a href="docker-images.html">docker images: listando imagens</a> — agora que você sabe se virar no <code>--help</code>, vamos ver as "receitas" guardadas na máquina da Ana.</div>
+
+</div>
+</main>
+</div>
+<script src="assets/site.js?v=4"></script>
+</body>
+</html>

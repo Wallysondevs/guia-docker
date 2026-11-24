@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Serviços, portas, variáveis e volumes no docker-compose.yml | Guia Docker</title>
+<meta name="description" content="Dentro de cada serviço do Compose: ports \"8080:80\" e suas variações (127.0.0.1:8080:80, porta aleatória, /udp), environment em lista ou mapa (e arquivo .env com interpolação ${VAR}), volumes nomeados vs bind mounts (:ro), depends_on (lista e forma longa com condition), networks, restart e command. Exemplo completo de web + banco com DNS interno e erros reais (porta ocupada, pasta de bind inexistente).">
+<link rel="stylesheet" href="assets/style.css?v=4">
+<script>try{var t=localStorage.getItem("tema");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<meta http-equiv="Cache-Control" content="no-store, must-revalidate">
+<script>try{history.scrollRestoration="manual"}catch(e){}(function(){var n=0;function t(){window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;if(++n<60)setTimeout(t,50)}t();window.addEventListener("pagehide",function(){window.scrollTo(0,0);document.documentElement.scrollTop=0;});window.addEventListener("pageshow",function(){window.scrollTo(0,0)});window.addEventListener("load",function(){window.scrollTo(0,0)});})();document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(a){var h=a.getAttribute("href")||"";if(/[.]html($|[?#])/.test(h)&&a.host===location.host){window.scrollTo(0,0);document.documentElement.scrollTop=0;}}});</script>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" id="sidebar" aria-label="Tópicos"></nav>
+<main class="main">
+<div class="content">
+
+<div class="pager"></div>
+
+<h1><span class="hl">Serviços</span>, portas, variáveis e volumes no Compose</h1>
+
+<p class="intro">Cada entrada em <code>services:</code> é um serviço — e cada serviço vira um container. As chaves dentro dele fazem o mesmo papel das flags do <code>docker run</code>: <code>ports</code> é o <code>-p</code>, <code>environment</code> é o <code>-e</code>, <code>volumes</code> é o <code>-v</code>. Se você já entendeu o <code>docker run</code>, aqui é só transcrever — desta vez num arquivo que dá para versionar e compartilhar.</p>
+
+<div class="note">
+<strong>Você vai aprender</strong>
+<ul>
+  <li>Como o nome do serviço vira o nome do container (<code>projeto-servico-1</code>) e vira <strong>hostname</strong> na rede interna.</li>
+  <li><code>ports</code> nos formatos <code>"8080:80"</code>, <code>"127.0.0.1:8080:80"</code>, <code>"8080"</code> e <code>"53:53/udp"</code> — sempre com aspas.</li>
+  <li><code>environment</code> em lista e em mapa, <code>env_file</code> e interpolação <code>${VAR}</code> com arquivo <code>.env</code>.</li>
+  <li><code>volumes</code>: nomeados (persistem) e bind (pasta da máquina), com <code>:ro</code>.</li>
+  <li><code>depends_on</code> (ordem de subida), <code>networks</code>, <code>restart</code> e <code>command</code>.</li>
+</ul>
+</div>
+
+<hr>
+
+<h2>Cada serviço vira um container — e um hostname</h2>
+<p>Numa pasta <code>meuapp</code>, o serviço <code>web</code> vira o container <code>meuapp-web-1</code> (nome do projeto + nome do serviço + número da réplica):</p>
+<pre class="term" data-cwd="~/meuapp">$ docker compose up -d
+$ docker compose ps
+NAME            IMAGE              STATUS          PORTS
+meuapp-web-1    nginx:alpine       Up 20 seconds   0.0.0.0:8080->80/tcp
+meuapp-banco-1  postgres:16-alpine Up 20 seconds   5432/tcp</pre>
+<p>A mágica acontece na rede: o Compose cria uma rede interna para o projeto e coloca cada serviço nela com um <strong>DNS automático</strong>. Dentro do container <code>web</code>, o banco responde simplesmente pelo nome <code>banco</code> — sem IP, sem porta publicada:</p>
+<pre class="term" data-cwd="~/meuapp">$ docker exec meuapp-web-1 ping -c 1 banco
+PING banco (172.18.0.3): 56 data bytes
+64 bytes from 172.18.0.3: seq=0 ttl=64 time=0.123 ms</pre>
+<p>É o mesmo mecanismo da aula <a href="containers-conversando.html">Containers se comunicando por nome</a>, agora criado automaticamente pelo Compose. Por isso a aplicação da Ana configura a conexão com o banco como <code>postgres://ana:segredo@banco:5432/app</code> — <code>@banco</code> é o nome do serviço.</p>
+
+<hr>
+
+<h2>ports: o -p escrito no YAML</h2>
+<dl class="anatomy">
+  <dt>ports:</dt><dd>Lista de portas publicadas — equivalente ao <code>-p</code> do <code>docker run</code> (aula <a href="portas.html">Publicando portas</a>).</dd>
+  <dt>"8080:80"</dt><dd>Porta <strong>8080 da sua máquina</strong> → porta <strong>80 do container</strong>. <strong>Sempre com aspas</strong>: sem elas o YAML pode ler <code>8080:80</code> como número (base 60) e o Compose quebra (aula <a href="compose-yaml.html">docker-compose.yml</a>).</dd>
+</dl>
+<pre class="file" data-file="docker-compose.yml (trecho)">services:
+  web:
+    image: nginx:alpine
+    ports:
+      - "8080:80"              # http://localhost:8080 abre o container
+      - "127.0.0.1:443:443"    # só o localhost da máquina alcança (mais seguro que 0.0.0.0)
+      - "9000"                 # porta aleatória do host -> 9000 do container
+      - "53:53/udp"            # também dá para publicar UDP</pre>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Formato</th><th>Significado</th></tr>
+<tr><td><code>"8080:80"</code></td><td>Host 8080 → container 80, em todas as interfaces da máquina</td></tr>
+<tr><td><code>"127.0.0.1:8080:80"</code></td><td>Só o localhost da máquina alcança (nada de rede externa)</td></tr>
+<tr><td><code>"8080:80/udp"</code></td><td>Publica UDP em vez de TCP</td></tr>
+<tr><td><code>"9000"</code></td><td>Só o container; o Docker escolhe uma porta livre no host</td></tr>
+</table>
+</div>
+<div class="warn"><strong>Erro real quando a porta do host já está ocupada</strong> (outro programa usando a 8080, ou outro projeto Compose seu):
+<pre class="term" data-cwd="~/meuapp">$ docker compose up -d
+Error response from daemon: driver failed programming external connectivity on endpoint meuapp-web-1 (a1b2c3d4e5f6…): Bind for 0.0.0.0:8080 failed: port is already allocated</pre>
+Solução: troque a porta do host no YAML (ex.: <code>"8081:80"</code>), ache o culpado com <code>sudo ss -ltnp | grep 8080</code>, ou derrube o outro projeto com <code>docker compose down</code> nele.</div>
+
+<hr>
+
+<h2>environment: lista ou mapa — e o arquivo .env</h2>
+<p>As variáveis de ambiente aceitam dois formatos — o resultado é o mesmo (mesmo <code>-e</code> do <code>docker run</code>, aula <a href="variaveis-ambiente.html">Variáveis de ambiente</a>):</p>
+<pre class="file" data-file="docker-compose.yml (trecho)">services:
+  banco:
+    image: postgres:16-alpine
+    environment:
+      # formato lista:
+      - POSTGRES_USER=ana
+      - POSTGRES_PASSWORD=segredo
+  # ...ou formato mapa (equivalente, mais comum em Compose):
+  # environment:
+  #   POSTGRES_USER: ana
+  #   POSTGRES_PASSWORD: segredo</pre>
+<p>E para não deixar senhas no YAML (que vai para o git), o Compose lê um arquivo <code>.env</code> na mesma pasta e interpola <code>${VAR}</code>:</p>
+<pre class="file" data-file="~/meuapp/.env">POSTGRES_PASSWORD=segredo
+POSTGRES_USER=ana</pre>
+<pre class="file" data-file="~/meuapp/docker-compose.yml (trecho)">services:
+  banco:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}</pre>
+<div class="warn"><strong>Aviso real quando a variável não existe:</strong>
+<pre class="term" data-cwd="~/meuapp">$ docker compose up -d
+WARN[0000] The "POSTGRES_PASSWORD" variable is not set. Defaulting to a blank string.</pre>
+O Compose avisa e segue com a string vazia — no caso do PostgreSQL, o banco sobe <strong>sem senha</strong>. Sempre confira o <code>.env</code> (e coloque <code>.env</code> no <code>.gitignore</code>!).</div>
+<p>Também dá para carregar um arquivo inteiro de variáveis com <code>env_file: ./config.env</code> dentro do serviço.</p>
+
+<hr>
+
+<h2>volumes: nomeado (persiste) e bind (pasta da máquina)</h2>
+<pre class="file" data-file="docker-compose.yml (trecho)">services:
+  banco:
+    image: postgres:16-alpine
+    volumes:
+      - dados-db:/var/lib/postgresql/data   # volume NOMEADO: o Docker gerencia e os dados persistem ao "down"
+  web:
+    image: nginx:alpine
+    volumes:
+      - ./site:/usr/share/nginx/html:ro     # BIND: monta a pasta ./site da máquina (ro = somente leitura)
+
+volumes:
+  dados-db:                                 # declara o volume nomeado usado acima</pre>
+<p>A regra é a mesma do <code>-v</code> (aula <a href="volumes-tipos.html">Volumes nomeados, bind mounts e tmpfs</a>):</p>
+<ul>
+  <li><code>dados-db:/var/lib/postgresql/data</code> — <strong>volume nomeado</strong>: o Docker cria e gerencia; sobrevive ao <code>docker compose down</code> (só some com <code>down -v</code>). Use para dados (banco, uploads).</li>
+  <li><code>./site:/usr/share/nginx/html:ro</code> — <strong>bind mount</strong>: um atalho para uma pasta da sua máquina. Use para código em desenvolvimento (editou o arquivo, o container já vê). O <code>:ro</code> no fim deixa o container somente ler.</li>
+</ul>
+<div class="warn"><strong>Armadilha real do bind mount:</strong> se a pasta do host <strong>não existe</strong>, o Docker <em>cria uma pasta vazia</em> no lugar (no Linux) — e o site parece "vazio" dentro do container:
+<pre class="term" data-cwd="~/meuapp">$ ls
+Dockerfile  docker-compose.yml        « esqueci a pasta site/
+$ docker compose up -d
+$ docker compose exec web ls /usr/share/nginx/html
+                                          « vazio! a pasta ./site foi criada vazia pela engine</pre>
+Conferira o caminho relativo (sempre relativo à pasta do <code>docker-compose.yml</code>) antes de subir.</div>
+
+<hr>
+
+<h2>depends_on: a ordem de subida</h2>
+<p>O <code>depends_on</code> diz ao Compose para <strong>criar e iniciar o serviço depois</strong> dos que estão listados — útil para o banco subir antes da aplicação:</p>
+<pre class="file" data-file="docker-compose.yml (trecho)">services:
+  web:
+    image: nginx:alpine
+    depends_on:
+      - banco</pre>
+<p>Forma longa, com condição de saúde (o serviço só sobe quando o banco estiver <em>saudável</em>, não apenas iniciado):</p>
+<pre class="file" data-file="docker-compose.yml (trecho)">services:
+  web:
+    depends_on:
+      banco:
+        condition: service_healthy   # espera o HEALTHCHECK do banco passar
+  banco:
+    image: postgres:16-alpine
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ana"]
+      interval: 5s
+      retries: 5</pre>
+<div class="warn"><strong>Atenção:</strong> o <code>depends_on</code> simples só garante a <em>ordem</em>, não que o banco já esteja pronto para receber conexões. Sem <code>service_healthy</code>, é comum ver <code>Error: connect ECONNREFUSED 172.18.0.3:5432</code> na primeira subida — a API tentou conectar antes de o PostgreSQL terminar de inicializar. Solução: healthcheck + <code>condition: service_healthy</code> (aula <a href="healthcheck.html">HEALTHCHECK e restart policies</a>) ou simplesmente rode o <code>up -d</code> de novo depois de alguns segundos.</div>
+
+<hr>
+
+<h2>networks, restart e command</h2>
+<pre class="file" data-file="docker-compose.yml (trecho)">services:
+  web:
+    image: nginx:alpine
+    restart: unless-stopped     # se cair, o Docker reinicia (aula de políticas de restart)
+    command: nginx -g "daemon off;"   # sobrescreve o CMD da imagem
+    networks:
+      - frontend                # este serviço entra na rede "frontend"
+  banco:
+    image: postgres:16-alpine
+    networks:
+      - frontend
+      - backend
+
+networks:                       # declara as redes nomeadas usadas acima
+  frontend:
+  backend:</pre>
+<p>Se não declarar <code>networks:</code>, todos os serviços entram na rede <code>&lt;projeto&gt;_default</code> criada automaticamente. Com redes próprias, dá para isolar: o <code>web</code> fala com o banco, mas o banco não é alcançável de fora (sem porta publicada).</p>
+
+<hr>
+
+<h2>Exemplo completo: web + banco</h2>
+<pre class="file" data-file="~/meuapp/docker-compose.yml"># docker-compose.yml — web + banco com tudo que vimos nesta aula
+services:
+  web:
+    image: nginx:alpine
+    ports:
+      - "8080:80"
+    volumes:
+      - ./site:/usr/share/nginx/html:ro   # os arquivos do site ficam na sua máquina
+    environment:
+      - NGINX_HOST=localhost
+    depends_on:
+      - banco
+    restart: unless-stopped
+
+  banco:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}          # vem do .env
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}  # vem do .env
+    volumes:
+      - dados-db:/var/lib/postgresql/data      # dados persistem no volume
+    # sem ports: só os outros containers alcançam o banco pela rede interna
+
+volumes:
+  dados-db:</pre>
+<pre class="term" data-cwd="~/meuapp">$ docker compose up -d
+[+] Running 4/4
+ ✔ Network meuapp_default  Created
+ ✔ Volume meuapp_dados-db  Created
+ ✔ Container meuapp-banco-1  Started
+ ✔ Container meuapp-web-1    Started
+$ docker compose ps
+NAME            IMAGE              STATUS          PORTS
+meuapp-web-1    nginx:alpine       Up 10 seconds   0.0.0.0:8080->80/tcp
+meuapp-banco-1  postgres:16-alpine Up 10 seconds   5432/tcp
+$ curl -s http://localhost:8080 | head -3   « o site da pasta ./site responde
+&lt;h1&gt;Minha loja da Ana&lt;/h1&gt;</pre>
+
+<div class="try" data-goal="projeto iniciado" data-solucao="docker compose up -d">
+<p class="try-task"><strong>Missão:</strong> suba esse projeto web + banco com <code>docker compose up -d</code>.</p>
+</div>
+
+<div class="try" data-goal="logs do compose" data-solucao="docker compose logs">
+<p class="try-task"><strong>Missão:</strong> depois veja os logs dos dois serviços de uma vez com <code>docker compose logs</code>.</p>
+</div>
+
+<div class="try" data-goal="CONTAINER ID" data-solucao="docker compose ps">
+<p class="try-task"><strong>Missão:</strong> confira os containers do projeto com <code>docker compose ps</code> (procure a coluna <code>CONTAINER ID</code>).</p>
+</div>
+
+<hr>
+
+<h2>Tabela de referência das chaves</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Chave</th><th>Exemplo</th><th>O que faz</th></tr>
+<tr><td><code>image</code></td><td><code>nginx:alpine</code></td><td>Usa imagem pronta do registry</td></tr>
+<tr><td><code>build</code></td><td><code>build: .</code></td><td>Constrói a imagem do Dockerfile local</td></tr>
+<tr><td><code>ports</code></td><td><code>"8080:80"</code></td><td>Publica porta do host → container (sempre aspas)</td></tr>
+<tr><td><code>environment</code></td><td><code>CHAVE: valor</code></td><td>Variável de ambiente (lista ou mapa)</td></tr>
+<tr><td><code>env_file</code></td><td><code>env_file: .env</code></td><td>Carrega variáveis de um arquivo</td></tr>
+<tr><td><code>volumes</code></td><td><code>dados:/caminho</code></td><td>Volume nomeado ou bind mount (<code>./pasta:/caminho:ro</code>)</td></tr>
+<tr><td><code>depends_on</code></td><td><code>- banco</code></td><td>Só sobe depois do serviço listado</td></tr>
+<tr><td><code>networks</code></td><td><code>- frontend</code></td><td>Entra na rede declarada (ou na <code>default</code>)</td></tr>
+<tr><td><code>restart</code></td><td><code>unless-stopped</code></td><td>Reinicia o container se ele cair</td></tr>
+<tr><td><code>command</code></td><td><code>node app.js</code></td><td>Sobrescreve o comando padrão da imagem</td></tr>
+</table>
+</div>
+
+<h2>Quiz rápido</h2>
+<div class="mc" data-answer="1">
+<p class="mc-q">1. Dentro da rede do projeto, como o serviço <code>web</code> alcança o serviço <code>banco</code>?</p>
+<label><input type="radio" name="q1"> Pelo nome <code>banco</code> (DNS interno do Compose), sem IP</label>
+<label><input type="radio" name="q1"> Pelo IP 127.0.0.1</label>
+<label><input type="radio" name="q1"> Só com <code>--link</code> no docker run</label>
+<label><input type="radio" name="q1"> Pela porta 8080 do host</label>
+</div>
+
+<div class="mc" data-answer="4">
+<p class="mc-q">2. Qual destas portas está escrita do jeito certo no YAML?</p>
+<label><input type="radio" name="q2"> <code>- 8080:80</code></label>
+<label><input type="radio" name="q2"> <code>- 8080::80</code></label>
+<label><input type="radio" name="q2"> <code>- "8080":80</code></label>
+<label><input type="radio" name="q2"> <code>- "8080:80"</code></label>
+</div>
+
+<hr>
+
+<h2>Resumo</h2>
+<ul>
+  <li>Cada serviço vira um container <code>projeto-servico-1</code> e um <strong>hostname</strong> na rede interna do projeto — os serviços se alcançam pelo nome (<code>@banco</code>).</li>
+  <li><code>ports</code>: <code>"8080:80"</code> (host→container), <code>"127.0.0.1:443:443"</code> (só localhost), <code>"9000"</code> (porta aleatória no host), <code>"53:53/udp"</code>; sempre com aspas. Porta ocupada dá <code>port is already allocated</code>.</li>
+  <li><code>environment</code> em lista (<code>- NOME=valor</code>) ou mapa; senhas vão no <code>.env</code> e entram com <code>${VAR}</code> — variável faltando gera <code>WARN ... Defaulting to a blank string</code>.</li>
+  <li><code>volumes</code>: nomeado (persiste ao <code>down</code>) vs bind <code>./pasta:/caminho:ro</code> (pasta da máquina; se não existe, o Docker cria vazia — conferira o caminho).</li>
+  <li><code>depends_on</code> só ordena a subida; para esperar o banco de verdade, use <code>condition: service_healthy</code> com <code>healthcheck</code>.</li>
+  <li>Também dá para declarar <code>networks:</code> próprias, <code>restart:</code> e <code>command:</code> (sobrescreve o CMD da imagem).</li>
+</ul>
+
+<div class="tip"><strong>Próxima aula:</strong> <a href="compose-build.html">Build de imagens no Compose</a> — quando o serviço é a sua própria aplicação, com Dockerfile.</div>
+
+</div>
+</main>
+</div>
+<script src="assets/site.js?v=4"></script>
+</body>
+</html>

@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Todos os comandos docker (cola) — tabela completa por categoria | Guia Docker</title>
+<meta name="description" content="Cola de consulta rápida com todos os comandos do Docker CLI por categoria: containers (run, ps, start, stop, restart, rm, logs, exec, inspect, stats, cp, rename), imagens (images, pull, rmi, build, tag, push, history, save, load), redes, volumes, sistema e Compose — sintaxe, exemplo e o que cada um faz. Inclui o fluxo típico de um dia de trabalho, exemplos de uso com saída real do Docker Engine 27.x e o atalho docker COMANDO --help.">
+<link rel="stylesheet" href="assets/style.css?v=4">
+<script>try{var t=localStorage.getItem("tema");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<meta http-equiv="Cache-Control" content="no-store, must-revalidate">
+<script>try{history.scrollRestoration="manual"}catch(e){}(function(){var n=0;function t(){window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;if(++n<60)setTimeout(t,50)}t();window.addEventListener("pagehide",function(){window.scrollTo(0,0);document.documentElement.scrollTop=0;});window.addEventListener("pageshow",function(){window.scrollTo(0,0)});window.addEventListener("load",function(){window.scrollTo(0,0)});})();document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(a){var h=a.getAttribute("href")||"";if(/[.]html($|[?#])/.test(h)&&a.host===location.host){window.scrollTo(0,0);document.documentElement.scrollTop=0;}}});</script>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" id="sidebar" aria-label="Tópicos"></nav>
+<main class="main">
+<div class="content">
+
+<div class="pager"></div>
+
+<h1>Todos os <span class="hl">comandos docker</span> (cola)</h1>
+
+<p class="intro">Esta é a sua <strong>cola de consulta rápida</strong>: todos os comandos do Docker CLI separados por categoria, com sintaxe, exemplo prático e o que cada um faz. Não decore nada — guarde esta página nos favoritos e volte aqui toda vez que travar. A regra de bolso da Ana: quando um comando parecer estranho, ela digita <code>docker COMANDO --help</code> e o próprio Docker lista as flags daquele comando. Todas as saídas de terminal abaixo seguem o formato real do Docker Engine 27.x.</p>
+
+<div class="note">
+<strong>Você vai aprender</strong>
+<ul>
+  <li>Os comandos de <strong>container</strong>, <strong>imagem</strong>, <strong>rede</strong>, <strong>volume</strong>, <strong>sistema</strong> e <strong>Compose</strong> — com exemplo de cada.</li>
+  <li>O fluxo típico de um dia de trabalho (a sequência que você mais vai usar).</li>
+  <li>Como é a saída real dos principais no terminal.</li>
+  <li>O atalho de ouro: <code>docker COMANDO --help</code> abre a ajuda daquele comando.</li>
+  <li>Referências cruzadas: <a href="ref-dockerfile.html">instruções do Dockerfile</a>, <a href="ref-compose.html">campos do compose</a>, <a href="ref-flags.html">flags do docker run</a>.</li>
+</ul>
+</div>
+
+<hr>
+
+<h2>O fluxo de um dia de trabalho</h2>
+<p>Antes das tabelas, a sequência que a Ana usa o dia inteiro no notebook — memorize essa ordem, ela resolve 90% das situações:</p>
+<pre class="term">$ docker pull nginx:alpine                 « 1. baixa a imagem (uma vez só)
+$ docker run -d --name web -p 8080:80 nginx:alpine   « 2. cria e inicia o container
+$ docker ps                                 « 3. confirma que está no ar
+$ docker logs web                           « 4. vê o que o app imprimiu
+$ docker exec -it web sh                    « 5. entra no container para debugar
+$ docker stop web                           « 6. para quando acabar
+$ docker rm web                             « 7. apaga o container parado
+$ docker rmi nginx:alpine                   « 8. (opcional) apaga a imagem se não for usar mais</pre>
+<p>Se algo der errado no meio, o trio de diagnóstico é sempre: <code>docker ps -a</code> → <code>docker logs NOME</code> → <code>docker inspect NOME</code>. A página <a href="problemas.html">Erros comuns</a> lista o que cada um revela.</p>
+
+<hr>
+
+<h2>Containers</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Sintaxe</th><th>Exemplo</th><th>O que faz</th></tr>
+<tr><td><code>docker run [OPÇÕES] IMAGEM [COMANDO]</code></td><td><code>docker run -d --name web -p 8080:80 nginx:alpine</code></td><td>Cria e inicia um container a partir de uma imagem. Devolve o ID completo (64 hex); no <code>ps</code> aparecem os 12 primeiros. As opções principais estão na cola de <a href="ref-flags.html">flags do docker run</a>.</td></tr>
+<tr><td><code>docker ps [-a] [-q]</code></td><td><code>docker ps -a</code></td><td>Lista containers: só os rodando, ou todos com <code>-a</code> (inclui parados); <code>-q</code> devolve só os IDs (útil em scripts: <code>docker rm $(docker ps -aq)</code>).</td></tr>
+<tr><td><code>docker start NOME</code></td><td><code>docker start web</code></td><td>Inicia um container que está parado. Devolve o nome do container.</td></tr>
+<tr><td><code>docker stop [-t N] NOME</code></td><td><code>docker stop web</code></td><td>Para um container rodando: manda SIGTERM, espera <code>-t</code> segundos (padrão 10) e manda SIGKILL se não parar.</td></tr>
+<tr><td><code>docker restart NOME</code></td><td><code>docker restart web</code></td><td>Para e inicia o mesmo container de novo (é um <code>stop</code> + <code>start</code>).</td></tr>
+<tr><td><code>docker rm [-f] NOME</code></td><td><code>docker rm web</code></td><td>Apaga um container <strong>parado</strong>. Com <code>-f</code>, apaga mesmo rodando (manda SIGKILL).</td></tr>
+<tr><td><code>docker logs [-f] [--tail N] NOME</code></td><td><code>docker logs -f web</code></td><td>Mostra a saída (stdout/stderr) que o container produziu. <code>-f</code> acompanha ao vivo; <code>--tail 100</code> mostra só as últimas 100 linhas.</td></tr>
+<tr><td><code>docker exec [-it] NOME COMANDO</code></td><td><code>docker exec -it web sh</code></td><td>Roda um comando dentro de um container que <strong>já está rodando</strong> (diferente do <code>run</code>, que cria um novo).</td></tr>
+<tr><td><code>docker inspect NOME</code></td><td><code>docker inspect web</code></td><td>Devolve todos os detalhes em JSON: rede, volumes, imagem, estado, variáveis. Com <code>--format</code> dá para extrair um campo só (ver exemplos abaixo).</td></tr>
+<tr><td><code>docker stats [NOME]</code></td><td><code>docker stats</code></td><td>Uso de CPU, memória, rede e disco dos containers rodando, atualizando ao vivo (Ctrl+C sai).</td></tr>
+<tr><td><code>docker cp NOME:/caminho ./local</code></td><td><code>docker cp web:/var/log/nginx/access.log .</code></td><td>Copia arquivos <strong>de dentro do container</strong> para o host (e o inverso: <code>docker cp ./local web:/caminho</code>).</td></tr>
+<tr><td><code>docker rename ANTIGO NOVO</code></td><td><code>docker rename web site</code></td><td>Troca o nome de um container (útil quando o nome antigo está "preso" num container parado que você quer remover).</td></tr>
+</table>
+</div>
+
+<pre class="term">$ docker run -d --name web nginx:alpine
+a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6
+$ docker ps
+CONTAINER ID   IMAGE          COMMAND                  CREATED          STATUS          PORTS     NAMES
+a1b2c3d4e5f6   nginx:alpine   "/docker-entrypoint.…"   10 seconds ago   Up 10 seconds   80/tcp    web
+$ docker stop web
+web
+$ docker ps -a
+CONTAINER ID   IMAGE          STATUS                       PORTS     NAMES
+a1b2c3d4e5f6   nginx:alpine   Exited (0) 5 seconds ago               web</pre>
+
+<p>Exemplos de <code>inspect</code> com <code>--format</code> (o canivete suisse do diagnóstico):</p>
+<pre class="term">$ docker inspect web --format '{{.State.Status}}'
+exited
+$ docker inspect web --format '{{range .NetworkSettings.Ports}}{{.HostPort}}{{end}}'
+8080
+$ docker inspect web --format '{{json .Mounts}}' | python3 -m json.tool
+[]</pre>
+
+<div class="try" data-goal="nginx:alpine" data-solucao="docker run -d nginx:alpine">
+<p class="try-task"><strong>Missão:</strong> suba um container <code>nginx:alpine</code> em segundo plano e confirme com <code>docker ps</code> que a imagem aparece na listagem.</p>
+</div>
+
+<hr>
+
+<h2>Imagens</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Sintaxe</th><th>Exemplo</th><th>O que faz</th></tr>
+<tr><td><code>docker images</code></td><td><code>docker images</code></td><td>Lista as imagens locais (repositório, tag, ID, data, tamanho).</td></tr>
+<tr><td><code>docker pull IMAGEM[:tag]</code></td><td><code>docker pull nginx:alpine</code></td><td>Baixa uma imagem de um registry (o padrão é o Docker Hub). Sem tag, baixa <code>:latest</code>.</td></tr>
+<tr><td><code>docker rmi [-f] IMAGEM</code></td><td><code>docker rmi nginx:alpine</code></td><td>Apaga uma imagem local (só se nenhum container, mesmo parado, estiver usando ela).</td></tr>
+<tr><td><code>docker build [-t NOME:tag] CAMINHO</code></td><td><code>docker build -t meuapp:1.0 .</code></td><td>Cria uma imagem nova executando as instruções do Dockerfile encontrado no CAMINHO (o <code>.</code> é a pasta atual). A cola de instruções está em <a href="ref-dockerfile.html">ref-dockerfile</a>.</td></tr>
+<tr><td><code>docker tag ORIGEM DESTINO</code></td><td><code>docker tag meuapp:1.0 ana/meuapp:1.0</code></td><td>Cria uma nova tag (apelido) apontando para a mesma imagem — é assim que se prepara o push para o seu usuário no Hub.</td></tr>
+<tr><td><code>docker push IMAGEM</code></td><td><code>docker push ana/meuapp:1.0</code></td><td>Envia a imagem para o registry (precisa de <code>docker login</code> antes).</td></tr>
+<tr><td><code>docker login [-u USUARIO]</code></td><td><code>docker login -u ana</code></td><td>Autentica num registry (pede a senha/token no terminal; no CI use token).</td></tr>
+<tr><td><code>docker history IMAGEM</code></td><td><code>docker history meuapp:1.0</code></td><td>Mostra as camadas da imagem, o comando que criou cada uma e o tamanho — ótimo para ver por que a imagem está grande (aula <a href="image-dive.html">Analisando camadas</a>).</td></tr>
+<tr><td><code>docker save -o arquivo.tar IMAGEM</code></td><td><code>docker save -o backup.tar meuapp:1.0</code></td><td>Exporta a imagem para um arquivo .tar (backup/offline).</td></tr>
+<tr><td><code>docker load -i arquivo.tar</code></td><td><code>docker load -i backup.tar</code></td><td>Importa uma imagem de um .tar salvo com <code>save</code>.</td></tr>
+</table>
+</div>
+
+<pre class="term">$ docker images
+REPOSITORY   TAG          IMAGE ID       CREATED        SIZE
+nginx        alpine       b2c3d4e5f6a1   5 days ago     48.2MB
+node         22-alpine    c3d4e5f6a1b2   1 week ago     189MB
+$ docker build -t meuapp:1.0 .
+[+] Building 12.4s (8/8) FINISHED
+ => [1/4] FROM docker.io/library/node:22-alpine
+ => [4/4] RUN npm install
+ => exporting to image
+ => => writing image sha256:c3d4e5f6a1b2…
+ => => naming to meuapp:1.0
+Successfully built c3d4e5f6a1b2
+Successfully tagged meuapp:1.0
+$ docker history meuapp:1.0 | head -5
+IMAGE          CREATED       CREATED BY                                      SIZE
+c3d4e5f6a1b2   2 minutes ago "node app.js"                                   0B
+&lt;missing&gt;    2 minutes ago "COPY . . # buildkit"                          12kB
+&lt;missing&gt;    2 minutes ago "RUN /bin/sh -c npm install # buildkit"       6.2MB</pre>
+
+<hr>
+
+<h2>Redes</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Sintaxe</th><th>Exemplo</th><th>O que faz</th></tr>
+<tr><td><code>docker network ls</code></td><td><code>docker network ls</code></td><td>Lista as redes (as padrão <code>bridge</code>, <code>host</code> e <code>none</code> já vêm prontas — aula <a href="redes-intro.html">Redes no Docker</a>).</td></tr>
+<tr><td><code>docker network create NOME</code></td><td><code>docker network create minha-rede</code></td><td>Cria uma rede nova do tipo bridge. Devolve o ID da rede.</td></tr>
+<tr><td><code>docker network rm NOME</code></td><td><code>docker network rm minha-rede</code></td><td>Apaga uma rede criada por você (as padrão não podem ser apagadas).</td></tr>
+<tr><td><code>docker network connect REDE CONTAINER</code></td><td><code>docker network connect minha-rede web</code></td><td>Liga um container já existente a uma rede (um container pode estar em várias redes).</td></tr>
+<tr><td><code>docker network inspect NOME</code></td><td><code>docker network inspect minha-rede</code></td><td>Mostra os containers ligados à rede e os IPs internos em JSON.</td></tr>
+</table>
+</div>
+
+<pre class="term">$ docker network ls
+NETWORK ID     NAME      DRIVER    SCOPE
+aabbccddeeff   bridge    bridge    local
+bbccddeeff11   host      host      local
+ccddeeff1122   none      null      local
+$ docker network create minha-rede
+f6a1b2c3d4e5a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6
+$ docker run -d --name web --network minha-rede nginx:alpine   « nasce já na rede nova
+$ docker run -d --name api --network minha-rede node:22-alpine
+$ docker exec web ping -c 1 api   « dentro da rede, os containers se acham PELO NOME
+PING api (172.18.0.3): 56 data bytes
+64 bytes from 172.18.0.3: seq=0 ttl=64 time=0.123 ms</pre>
+<p>Esse <code>ping api</code> funcionando é a prova de que o DNS interno do Docker traduz o nome do container para o IP dele na rede — a base da comunicação entre containers (aula <a href="containers-conversando.html">Containers se comunicando por nome</a>).</p>
+
+<hr>
+
+<h2>Volumes</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Sintaxe</th><th>Exemplo</th><th>O que faz</th></tr>
+<tr><td><code>docker volume ls</code></td><td><code>docker volume ls</code></td><td>Lista os volumes nomeados criados na máquina.</td></tr>
+<tr><td><code>docker volume create NOME</code></td><td><code>docker volume create dados</code></td><td>Cria um volume nomeado (pasta gerenciada pelo Docker em <code>/var/lib/docker/volumes</code>). Devolve o nome.</td></tr>
+<tr><td><code>docker volume rm NOME</code></td><td><code>docker volume rm dados</code></td><td>Apaga um volume (só se nenhum container estiver usando).</td></tr>
+<tr><td><code>docker volume inspect NOME</code></td><td><code>docker volume inspect dados</code></td><td>Mostra detalhes em JSON, inclusive o <code>Mountpoint</code> (caminho real no host).</td></tr>
+<tr><td><code>docker volume prune</code></td><td><code>docker volume prune</code></td><td>Apaga todos os volumes que não estão em uso por nenhum container.</td></tr>
+</table>
+</div>
+
+<pre class="term">$ docker volume create dados
+dados
+$ docker volume ls
+DRIVER    VOLUME NAME
+local     dados
+$ docker run -d --name db -v dados:/var/lib/postgresql/data postgres:16-alpine
+b2c3d4e5f6a1…
+$ docker volume inspect dados --format '{{.Mountpoint}}'
+/var/lib/docker/volumes/dados/_data</pre>
+<p>Três formas de montar dados num container (aula <a href="volumes-tipos.html">Volumes a fundo</a>): volume nomeado (<code>-v dados:/…</code>), bind mount (<code>-v /home/ana/site:/…</code>) e tmpfs (<code>--tmpfs /tmp</code>).</p>
+
+<hr>
+
+<h2>Sistema</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Sintaxe</th><th>Exemplo</th><th>O que faz</th></tr>
+<tr><td><code>docker system df [-v]</code></td><td><code>docker system df</code></td><td>Quanto espaço em disco imagens, containers, volumes e cache de build ocupam. <code>-v</code> detalha item por item.</td></tr>
+<tr><td><code>docker system prune [-a] [--volumes]</code></td><td><code>docker system prune -a</code></td><td>Apaga tudo que não está em uso: containers parados, imagens soltas, redes não usadas, cache de build. <code>-a</code> inclui imagens sem tag; <code>--volumes</code> inclui volumes não usados. Devolve o espaço liberado.</td></tr>
+<tr><td><code>docker info</code></td><td><code>docker info</code></td><td>Informações gerais: quantos containers/imagens existem, driver de armazenamento, SO do host, warnings de configuração.</td></tr>
+<tr><td><code>docker version</code></td><td><code>docker version</code></td><td>Versão do CLI (cliente) e do Engine (servidor) — útil para saber se o servidor está no ar.</td></tr>
+</table>
+</div>
+
+<pre class="term">$ docker system df
+TYPE            TOTAL     ACTIVE    SIZE      RECLAIMABLE
+Images          6         2         900MB     900MB (100%)
+Containers      2         1         10MB      5MB (50%)
+Local Volumes   1         0         0B        0B (0%)
+Build Cache     0         0         0B        0B
+$ docker version
+Client:
+  Version:   27.3.1
+Server: Docker Engine 27.3.1</pre>
+
+<hr>
+
+<h2>Compose (vários containers de uma vez)</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Sintaxe</th><th>Exemplo</th><th>O que faz</th></tr>
+<tr><td><code>docker compose version</code></td><td><code>docker compose version</code></td><td>Mostra a versão do plugin Compose (v2.x).</td></tr>
+<tr><td><code>docker compose up [-d] [--build]</code></td><td><code>docker compose up -d --build</code></td><td>Cria e inicia todos os serviços do <code>docker-compose.yml</code> da pasta atual (rede e volumes também). <code>--build</code> reconstrói as imagens com <code>build:</code>.</td></tr>
+<tr><td><code>docker compose down [-v]</code></td><td><code>docker compose down</code></td><td>Para e remove os containers e a rede do projeto. Com <code>-v</code>, remove também os volumes nomeados (cuidado com dados!).</td></tr>
+<tr><td><code>docker compose ps</code></td><td><code>docker compose ps</code></td><td>Lista os containers do projeto Compose.</td></tr>
+<tr><td><code>docker compose logs [-f] [serviço]</code></td><td><code>docker compose logs -f api</code></td><td>Logs de todos os serviços, ou de um só; <code>-f</code> acompanha ao vivo.</td></tr>
+<tr><td><code>docker compose build</code></td><td><code>docker compose build</code></td><td>Reconstrói só as imagens dos serviços que têm <code>build</code> no YAML.</td></tr>
+<tr><td><code>docker compose exec SERVIÇO COMANDO</code></td><td><code>docker compose exec db psql -U postgres</code></td><td>Roda um comando dentro de um serviço rodando (atalho para <code>docker exec</code> no container do serviço).</td></tr>
+<tr><td><code>docker compose -f ARQUIVO up</code></td><td><code>docker compose -f prod.yml up -d</code></td><td>Usa outro arquivo em vez do <code>docker-compose.yml</code> padrão (dá para passar vários <code>-f</code>, que são mesclados).</td></tr>
+</table>
+</div>
+
+<pre class="term">$ docker compose up -d
+[+] Running 2/2
+ ✔ Container meuapp-db-1   Started
+ ✔ Container meuapp-web-1  Started
+$ docker compose ps
+CONTAINER ID   IMAGE              STATUS          PORTS                  NAMES
+c3d4e5f6a1b2   postgres:16-alpine Up 30 seconds   5432/tcp               meuapp-db-1
+d4e5f6a1b2c3   meuapp-web:1.0     Up 30 seconds   0.0.0.0:8080->80/tcp   meuapp-web-1</pre>
+<p>A cola completa dos campos do arquivo YAML está em <a href="ref-compose.html">ref-compose</a>.</p>
+
+<hr>
+
+<h2>Atalho universal: --help</h2>
+<p>Nenhum comando ficou claro? O próprio Docker explica — e essa é a melhor fonte, porque a ajuda é da versão exata que você está rodando:</p>
+<pre class="term">$ docker --help
+Usage:  docker [OPTIONS] COMMAND
+Commands:
+  run       Create and run a new container from an image
+  ps        List containers
+  images    List images
+  pull      Download an image from a registry
+  …
+Run 'docker COMMAND --help' for more information on a command.
+$ docker run --help
+Usage:  docker run [OPTIONS] IMAGE [COMMAND] [ARG...]
+Options:
+  -d, --detach          Run container in background and print container ID
+  -p, --publish list    Publish a container's port(s) to the host
+  -v, --volume list     Bind mount a volume
+  --rm                  Automatically remove the container when it exits
+  …</pre>
+
+<div class="try" data-goal="Commands:" data-solucao="docker --help">
+<p class="try-task"><strong>Missão:</strong> rode <code>docker --help</code> no terminal simulado e veja a lista completa de comandos.</p>
+</div>
+
+<hr>
+
+<h2>Mapa rápido: situação → comando</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Quero…</th><th>Comando</th></tr>
+<tr><td>Subir um container rapidinho</td><td><code>docker run -d --name web -p 8080:80 nginx:alpine</code></td></tr>
+<tr><td>Ver o que está rodando / o que já parou</td><td><code>docker ps</code> / <code>docker ps -a</code></td></tr>
+<tr><td>Ver por que o app não responde</td><td><code>docker logs NOME</code> (e <code>docker ps -a</code> para ver se já saiu)</td></tr>
+<tr><td>Entrar dentro do container</td><td><code>docker exec -it NOME sh</code></td></tr>
+<tr><td>Criar minha imagem</td><td><code>docker build -t nome:tag .</code></td></tr>
+<tr><td>Subir vários serviços de uma vez</td><td><code>docker compose up -d</code></td></tr>
+<tr><td>Ver quanto disco o Docker está usando</td><td><code>docker system df</code></td></tr>
+<tr><td>Limpar a bagunça</td><td><code>docker system prune -a</code></td></tr>
+<tr><td>Publicar minha imagem</td><td><code>docker login</code> → <code>docker tag</code> → <code>docker push</code></td></tr>
+<tr><td>Ver detalhes de qualquer coisa</td><td><code>docker inspect NOME</code></td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>Resumo</h2>
+<ul>
+  <li>O dia a dia gira em torno de poucos comandos: <code>run</code>, <code>ps</code>, <code>logs</code>, <code>exec</code>, <code>stop</code>, <code>rm</code>, <code>build</code>, <code>compose up/down</code>.</li>
+  <li>Diagnóstico em 3 passos: <code>ps -a</code> → <code>logs</code> → <code>inspect</code>.</li>
+  <li>Imagens: <code>pull</code>/<code>images</code>/<code>build</code>/<code>tag</code>/<code>push</code>; containers: <code>run</code>/<code>ps</code>/<code>stop</code>/<code>rm</code>.</li>
+  <li>Redes e volumes têm comandos próprios (<code>docker network …</code>, <code>docker volume …</code>) e o Compose orquestra tudo com <code>docker compose …</code>.</li>
+  <li>Não lembra uma flag? <code>docker COMANDO --help</code> responde na hora.</li>
+</ul>
+
+<div class="tip"><strong>Próxima aula:</strong> <a href="ref-dockerfile.html">Instruções do Dockerfile (cola)</a></div>
+
+</div>
+</main>
+</div>
+<script src="assets/site.js?v=4"></script>
+</body>
+</html>

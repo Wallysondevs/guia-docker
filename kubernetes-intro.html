@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>E Kubernetes? Quando usar | Guia Docker</title>
+<meta name="description" content="Docker Swarm vs Kubernetes: tabela comparativa completa (instalação, unidade mínima Pod, arquivo de config, escala, atualização, rede/storage, ecossistema, curva de aprendizado, tamanho ideal), quando o Swarm basta, quando ir para K8s, as plataformas gerenciadas (EKS, GKE, AKS, ECS/Fargate, Cloud Run, DOKS, OKE), o que muda no dia a dia com kubectl, kompose para converter compose, e o fato de que o Docker continua lá dentro (containerd nos nós).">
+<link rel="stylesheet" href="assets/style.css?v=4">
+<script>try{var t=localStorage.getItem("tema");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<meta http-equiv="Cache-Control" content="no-store, must-revalidate">
+<script>try{history.scrollRestoration="manual"}catch(e){}(function(){var n=0;function t(){window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;if(++n<60)setTimeout(t,50)}t();window.addEventListener("pagehide",function(){window.scrollTo(0,0);document.documentElement.scrollTop=0;});window.addEventListener("pageshow",function(){window.scrollTo(0,0)});window.addEventListener("load",function(){window.scrollTo(0,0)});})();document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(a){var h=a.getAttribute("href")||"";if(/[.]html($|[?#])/.test(h)&&a.host===location.host){window.scrollTo(0,0);document.documentElement.scrollTop=0;}}});</script>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" id="sidebar" aria-label="Tópicos"></nav>
+<main class="main">
+<div class="content">
+
+<div class="pager"></div>
+
+<h1><span class="hl">E Kubernetes?</span> — quando usar</h1>
+
+<p class="intro">Depois do <a href="swarm-intro.html">Swarm</a>, a pergunta natural da Ana foi: "e o Kubernetes?". O K8s é o orquestrador que virou <strong>padrão da indústria</strong> — mais complexo, mas com um ecossistema enorme e suporte de todas as nuvens. Nesta aula: a comparação honesta entre os dois (sem torcida), quando cada um basta, as opções gerenciadas na nuvem e a verdade sobre o Docker dentro do K8s — porque ele não some.</p>
+
+<div class="note">
+<strong>Você vai aprender</strong>
+<ul>
+  <li>Swarm vs Kubernetes: diferenças reais, não de torcida.</li>
+  <li>Quando o Swarm basta (e por que ele é subestimado).</li>
+  <li>Quando o Kubernetes passa a valer a pena.</li>
+  <li>Plataformas gerenciadas: EKS, GKE, AKS, ECS/Fargate — sem instalar nada.</li>
+  <li>O que muda no dia a dia: <code>kubectl</code> no lugar de <code>docker service</code>.</li>
+  <li>Que o Docker continua lá dentro: imagens, Dockerfile e containerd nos nós.</li>
+</ul>
+</div>
+
+<hr>
+
+<h2>A ideia: Swarm é a Kombi, K8s é o caminhão</h2>
+<p>O Swarm é como uma Kombi: cabe no bolso, faz o serviço, dá para dirigir em qualquer lugar — serve para a loja inteira da Ana. O Kubernetes é como um caminhão de frota: precisa de estrada boa (infra), de motorista especializado (time de plataforma), mas carrega milhares de caixas com escala automática. Não existe "melhor" absoluto — existe o certo para o tamanho do problema.</p>
+
+<hr>
+
+<h2>Swarm vs Kubernetes</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th></th><th>Docker Swarm</th><th>Kubernetes (K8s)</th></tr>
+<tr><td>Instalação</td><td><code>docker swarm init</code> — já vem no Docker</td><td>Cluster próprio (kubeadm, minikube, kind…) ou gerenciado (EKS/GKE/AKS)</td></tr>
+<tr><td>Unidade mínima</td><td>Service (com réplicas)</td><td><strong>Pod</strong> (um ou mais containers que compartilham rede/IP)</td></tr>
+<tr><td>Arquivo de config</td><td><code>docker-compose.yml</code> com seção <code>deploy</code></td><td>Manifestos YAML próprios: Deployment, Service, Ingress, ConfigMap, Secret, HPA…</td></tr>
+<tr><td>Escala</td><td>Manual: <code>docker service scale web=5</code></td><td>Manual (<code>kubectl scale</code>) <strong>ou automática</strong> (HPA por CPU/memória/métricas custom)</td></tr>
+<tr><td>Atualização</td><td>Rolling update simples</td><td>Rolling, blue/green, canary — controlados por configuração</td></tr>
+<tr><td>Descoberta de serviço/DNS</td><td>DNS interno do Swarm (nome do service)</td><td>CoreDNS + Services (ClusterIP, NodePort, LoadBalancer)</td></tr>
+<tr><td>Rede e storage</td><td>Overlay simples, volumes locais</td><td>CNI intercambiável (Calico, Cilium, Weave) e CSI para dezenas de storages</td></tr>
+<tr><td>Segredos e config</td><td><code>docker secret</code> / <code>docker config</code></td><td>Secrets e ConfigMaps (com integração a Vault, AWS SM…)</td></tr>
+<tr><td>Ecossistema</td><td>Pequeno (é só o Docker)</td><td>Enorme: Helm (pacotes), Istio (service mesh), ArgoCD (GitOps), Prometheus, operators…</td></tr>
+<tr><td>Curva de aprendizado</td><td>Baixa — horas</td><td>Alta — semanas/meses</td></tr>
+<tr><td>Tamanho ideal</td><td>Até dezenas de serviços, times pequenos</td><td>Dezenas a milhares de microsserviços, times dedicados</td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>Quando o Swarm basta</h2>
+<ul>
+  <li>Você tem <strong>alguns poucos serviços</strong> (site + API + banco + redis, como nos <a href="compose-up-down.html">projetos do guia</a>).</li>
+  <li>A equipe é pequena e o <code>docker-compose.yml</code> já descreve tudo — com a seção <code>deploy</code> vira stack no Swarm sem reescrever nada.</li>
+  <li>Você quer alta disponibilidade simples (réplicas em 2-3 máquinas) sem aprender um ecossistema novo.</li>
+  <li>Simplicidade operacional pesa mais que sofisticação: menos peças = menos pane.</li>
+</ul>
+<p>Muitas empresas rodam Swarm em produção por anos com zero drama. Não pule etapas: domine Compose e Swarm antes de encarar o K8s.</p>
+
+<hr>
+
+<h2>Quando ir para Kubernetes</h2>
+<ul>
+  <li>Muitos microsserviços (dezenas ou mais) com donos diferentes e deploys independentes.</li>
+  <li>Precisa de <strong>autoscaling</strong> por métricas (HPA/VPA), filas, jobs batch e políticas de rede (NetworkPolicy).</li>
+  <li>Rolling updates sofisticados (canary, blue/green) e service mesh (Istio, Linkerd).</li>
+  <li>Multi-cloud ou hybrid cloud de verdade (o mesmo manifesto roda em AWS, GCP e Azure).</li>
+  <li>Existe time/orçamento para operar o cluster — ou você usa um <strong>gerenciado</strong> (abaixo).</li>
+</ul>
+
+<hr>
+
+<h2>Opções gerenciadas: K8s sem instalar nada</h2>
+<p>Quase ninguém hoje instala o K8s na mão em produção — usa o serviço gerenciado da nuvem, onde o "plano de controle" (os masters) é cuidado pelo provedor e você só gerencia os nós workers (e paga por eles):</p>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Serviço</th><th>Nuvem</th><th>Observação</th></tr>
+<tr><td><strong>EKS</strong> (Elastic Kubernetes Service)</td><td>AWS</td><td>O mais usado; integra com Fargate (containers serverless, sem nós).</td></tr>
+<tr><td><strong>GKE</strong> (Google Kubernetes Engine)</td><td>Google Cloud</td><td>Pioneiro em K8s gerenciado; modo Autopilot (sem nós para cuidar).</td></tr>
+<tr><td><strong>AKS</strong> (Azure Kubernetes Service)</td><td>Azure</td><td>Plano de controle gratuito; boa integração com Entra ID (Azure AD).</td></tr>
+<tr><td><strong>ECS + Fargate</strong></td><td>AWS</td><td><strong>Não é K8s</strong>: é o orquestrador próprio da AWS, mais simples — um bom meio-termo entre Compose e K8s.</td></tr>
+<tr><td><strong>Cloud Run</strong></td><td>Google Cloud</td><td>Serverless total: você manda a imagem, o Google escala de 0 a N.</td></tr>
+<tr><td><strong>DOKS / OKE / outros</strong></td><td>DigitalOcean / Oracle / outros provedores</td><td>Opções menores de K8s gerenciado.</td></tr>
+</table>
+</div>
+<p>Para aprender K8s no notebook sem gastar nada: <strong>kind</strong> (Kubernetes in Docker — roda um cluster K8s dentro de containers Docker) ou <strong>minikube</strong>. A Ana começou com kind: <code>kind create cluster</code> e já tinha um cluster de 1 nó para practicar.</p>
+
+<hr>
+
+<h2>E o Docker continua lá dentro</h2>
+<p>K8s <strong>não substitui o Docker</strong>: as imagens continuam sendo buildadas com Dockerfile e publicadas em registry (aulas <a href="multi-stage.html">multi-stage</a>, <a href="docker-tag-push.html">tag/push</a>, <a href="registry-privado.html">registry privado</a>). Nos nós do cluster, quem roda os containers geralmente é o <strong>containerd</strong> (o mesmo runtime que o Docker usa por baixo) — o K8s conversa direto com ele via CRI. O que muda é a camada de cima: em vez de <code>docker service</code>, você aplica manifestos com <code>kubectl</code>:</p>
+<pre class="term">$ kubectl get pods
+NAME                    READY   STATUS    RESTARTS   AGE
+web-6d5f4b8c7-x2abc    1/1     Running   0          3m
+web-6d5f4b8c7-k9xyz    1/1     Running   0          3m
+
+$ kubectl apply -f deployment.yaml
+deployment.apps/web created
+
+$ kubectl scale deployment web --replicas=5
+deployment.apps/web scaled
+
+$ kubectl rollout status deployment/web
+deployment "web" successfully rolled out</pre>
+<p>Em dev, dá para continuar usando Compose normalmente — e ferramentas como o <strong>kompose</strong> convertem o <code>docker-compose.yml</code> em manifestos do K8s automaticamente (<code>kompose convert -f docker-compose.yml</code>), o que facilita a migração quando chegar a hora.</p>
+
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Tarefa</th><th>Swarm</th><th>Kubernetes</th></tr>
+<tr><td>Criar o cluster</td><td><code>docker swarm init</code></td><td><code>kind create cluster</code> / gerenciado na nuvem</td></tr>
+<tr><td>Subir serviço com réplicas</td><td><code>docker service create --replicas 3 …</code></td><td><code>kubectl apply -f deployment.yaml</code></td></tr>
+<tr><td>Ver o que está rodando</td><td><code>docker service ps web</code></td><td><code>kubectl get pods</code></td></tr>
+<tr><td>Escalar</td><td><code>docker service scale web=5</code></td><td><code>kubectl scale deployment web --replicas=5</code></td></tr>
+<tr><td>Atualizar imagem</td><td><code>docker service update --image …</code></td><td><code>kubectl set image deployment/web web=…</code></td></tr>
+<tr><td>Ver logs</td><td><code>docker service logs web</code></td><td><code>kubectl logs deployment/web</code></td></tr>
+<tr><td>Arquivo de definição</td><td><code>docker-compose.yml</code> + <code>deploy</code></td><td>YAML próprio (Deployment, Service, Ingress…)</td></tr>
+</table>
+</div>
+
+<div class="warning"><strong>Não adote K8s por modismo:</strong> para a maioria dos projetos pequenos, Swarm (ou até um Compose bem escrito num servidor só, com backup e <code>--restart</code>) resolve. K8s cobra um preço real em complexidade — só vale quando essa complexidade se paga (escala automática, muitos serviços, multi-cloud). Comece simples e migre quando doer.</div>
+
+<div class="try" data-goal="REPOSITORY" data-solucao="docker images">
+<p class="try-task"><strong>Missão:</strong> rode <code>docker images</code> no simulador e pense: quais dessas imagens você publicaria num Pod do Kubernetes? (No K8s você referencia a mesma imagem do registry — o Docker continua lá.)</p>
+</div>
+
+<div class="try" data-goal="CONTAINER ID" data-solucao="docker ps">
+<p class="try-task"><strong>Missão extra:</strong> suba um container com <code>docker run -d --name web nginx:alpine</code> e rode <code>docker ps</code>. Num cluster K8s, esse container seria um <strong>Pod</strong> gerenciado pelo K8s — aqui no simulador dá para treinar a inspeção.</p>
+</div>
+
+<hr>
+
+<h2>Caminho de aprendizado sugerido</h2>
+<p>Se você está seguindo o guia do começo, a escada que faz sentido é:</p>
+<ol class="passo">
+  <li><strong>Fundamentos</strong>: containers e imagens no dia a dia (Nível 1: <a href="docker-run.html">docker run</a>, <a href="docker-ps.html">docker ps</a>, <a href="docker-logs.html">docker logs</a>…).</li>
+  <li><strong>Suas imagens</strong>: Dockerfile, build, camadas (Nível 2: <a href="dockerfile-intro.html">Dockerfile</a>, <a href="camadas-cache.html">cache</a>).</li>
+  <li><strong>Aplicações multi-container</strong>: Compose (projetos <a href="projeto-fullstack.html">fullstack</a>, <a href="projeto-wordpress.html">WordPress</a>).</li>
+  <li><strong>Produção numa máquina</strong>: segurança (USER, cap-drop, seccomp), limites, healthcheck, logs — as aulas deste nível.</li>
+  <li><strong>Mais de uma máquina</strong>: Swarm (esta seção) — réplicas, stacks, alta disponibilidade simples.</li>
+  <li><strong>Cluster grande</strong>: Kubernetes, de preferência num gerenciado (EKS/GKE/AKS) e praticando antes com kind/minikube.</li>
+  <li><strong>Automação</strong>: CI/CD com Docker (<a href="docker-ci.html">docker-ci</a>, <a href="build-otimizado.html">build-otimizado</a>).</li>
+</ol>
+<p>Não pule degraus: cada um usa o anterior. O K8s no fim da escada faz sentido porque você já sabe o que é uma imagem, um container, uma rede e um volume.</p>
+
+<hr>
+
+<h2>Quiz rápido</h2>
+<div class="mc" data-answer="2">
+<p class="mc-q">1. Qual é a unidade mínima de execução no Kubernetes?</p>
+<label><input type="radio" name="q1"> O service</label>
+<label><input type="radio" name="q1"> O <strong>Pod</strong> (um ou mais containers que compartilham rede/IP)</label>
+<label><input type="radio" name="q1"> O nó</label>
+<label><input type="radio" name="q1"> O Dockerfile</label>
+</div>
+
+<div class="mc" data-answer="3">
+<p class="mc-q">2. O que o Kubernetes tem que o Swarm não tem nativamente?</p>
+<label><input type="radio" name="q2"> Réplicas</label>
+<label><input type="radio" name="q2"> Logs</label>
+<label><input type="radio" name="q2"> Autoscaling por métricas (HPA), service mesh, Ingress sofisticado e ecossistema enorme</label>
+<label><input type="radio" name="q2"> Imagens Docker</label>
+</div>
+
+<div class="mc" data-answer="4">
+<p class="mc-q">3. O K8s substitui o Docker?</p>
+<label><input type="radio" name="q3"> Sim, totalmente</label>
+<label><input type="radio" name="q3"> Não: as imagens continuam sendo Dockerfile + registry; nos nós roda o containerd (o runtime do Docker)</label>
+<label><input type="radio" name="q4"> Não, mas o K8s não usa imagens</label>
+<label><input type="radio" name="q4"> Só no Windows</label>
+</div>
+
+<div class="mc" data-answer="1">
+<p class="mc-q">4. Qual ferramenta converte um docker-compose.yml em manifestos do Kubernetes?</p>
+<label><input type="radio" name="q5"> <code>kompose convert</code></label>
+<label><input type="radio" name="q5"> <code>docker stack deploy</code></label>
+<label><input type="radio" name="q5"> <code>kubectl convert</code> (não existe)</label>
+<label><input type="radio" name="q5"> <code>docker compose up</code></label>
+</div>
+
+<hr>
+
+<h2>Resumo</h2>
+<ul>
+  <li>Swarm = orquestrador nativo e simples (horas para aprender); K8s = padrão da indústria, poderoso e complexo (semanas/meses).</li>
+  <li>Swarm basta para até dezenas de serviços com compose + <code>deploy</code>; K8s vale para muitos microsserviços, autoscaling (HPA), canary e multi-cloud.</li>
+  <li>Gerenciados: EKS (AWS), GKE (Google), AKS (Azure), ECS+Fargate (AWS, não é K8s), Cloud Run (serverless).</li>
+  <li>No K8s a unidade é o <strong>Pod</strong>; no Swarm é o <strong>service</strong>. Comandos viram <code>kubectl get/scale/apply/logs/rollout</code>.</li>
+  <li>O Docker continua lá dentro: imagens com Dockerfile, registry privado, e o containerd (runtime do Docker) rodando os Pods nos nós.</li>
+  <li>kompose converte <code>docker-compose.yml</code> em manifestos K8s; para practicar local: <code>kind</code> ou <code>minikube</code>.</li>
+  <li>Regra prática: comece simples (Compose → Swarm) e migre para K8s quando a complexidade se pagar — não por modismo.</li>
+</ul>
+
+<div class="tip"><strong>Próxima aula:</strong> <a href="docker-ci.html">Docker em pipelines de CI (GitHub Actions)</a>.</div>
+
+<div class="pager"></div>
+
+</div>
+</main>
+</div>
+<script src="assets/site.js?v=4"></script>
+</body>
+</html>

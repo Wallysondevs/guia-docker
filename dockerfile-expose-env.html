@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EXPOSE, ENV e ARG — portas e variáveis no Dockerfile | Guia Docker</title>
+<meta name="description" content="As instruções EXPOSE, ENV e ARG do Dockerfile: EXPOSE só documenta a porta (não publica nada — precisa de -p no docker run, ou -P para publicar todas as declaradas), ENV grava variáveis de ambiente permanentes na imagem (visíveis no build e no runtime, sobrescrevíveis com -e), e ARG recebe valores na hora do build com --build-arg (sumindo depois, bom para versões e flags). Tabela comparativa ENV vs ARG vs -e, exemplo completo com NODE_ENV=production pela Ana no notebook, o erro real de achar que EXPOSE publica porta, o aviso de que ARG não é segredo (docker history entrega), quiz e resumo. Docker Engine 27.x.">
+<link rel="stylesheet" href="assets/style.css?v=4">
+<script>try{var t=localStorage.getItem("tema");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<meta http-equiv="Cache-Control" content="no-store, must-revalidate">
+<script>try{history.scrollRestoration="manual"}catch(e){}(function(){var n=0;function t(){window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;if(++n<60)setTimeout(t,50)}t();window.addEventListener("pagehide",function(){window.scrollTo(0,0);document.documentElement.scrollTop=0;});window.addEventListener("pageshow",function(){window.scrollTo(0,0)});window.addEventListener("load",function(){window.scrollTo(0,0)});})();document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(a){var h=a.getAttribute("href")||"";if(/[.]html($|[?#])/.test(h)&&a.host===location.host){window.scrollTo(0,0);document.documentElement.scrollTop=0;}}});</script>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" id="sidebar" aria-label="Tópicos"></nav>
+<main class="main">
+<div class="content">
+
+<div class="pager"></div>
+
+<h1><span class="hl">EXPOSE</span>, <span class="hl">ENV</span> e <span class="hl">ARG</span></h1>
+
+<p class="intro">Três instruções que configuram a imagem sem copiar nenhum arquivo: <code>EXPOSE</code> documenta qual porta a aplicação usa, <code>ENV</code> grava <strong>variáveis de ambiente permanentes</strong> na imagem e o <code>ARG</code> recebe <strong>valores na hora do build</strong> (via <code>--build-arg</code>), sumindo depois. Juntas elas respondem às três perguntas: "que porta minha app usa?", "quais variáveis ela precisa para funcionar?" e "qual versão estou buildando?".</p>
+
+<div class="note">
+<strong>Você vai aprender</strong>
+<ul>
+  <li><code>EXPOSE 3000</code>: documentação da porta — e por que ela <strong>não publica</strong> nada sozinha (só <code>-p</code> publica; <code>-P</code> publica todas as declaradas).</li>
+  <li><code>ENV</code>: variáveis fixas na imagem, visíveis no build (nos <code>RUN</code>) e no runtime — e sobrescrevíveis com <code>-e</code> no <code>docker run</code>.</li>
+  <li>Os dois formatos do ENV: <code>ENV chave=valor</code> (recomendado) e o antigo <code>ENV chave valor</code>.</li>
+  <li><code>ARG</code>: argumento de build com valor padrão, entregue por <code>--build-arg</code> — e o truque <code>ENV X=$ARG</code> para gravá-lo.</li>
+  <li>A diferença entre ENV, ARG e o <code>-e</code> do <code>docker run</code> (tabela comparativa).</li>
+  <li>Por que ARG <strong>não serve para senhas</strong> (<code>docker history</code> entrega o valor).</li>
+</ul>
+</div>
+
+<hr>
+
+<h2>A cena: a API da Ana precisa de configuração</h2>
+<p>A API da Ana ouve na porta 3000, precisa saber que está em produção (<code>NODE_ENV=production</code>) e recebe a versão do app na hora do build (para logar "versão 2.3 no ar"). No Dockerfile dela, isso vira <code>EXPOSE</code>, <code>ENV</code> e <code>ARG</code> — três linhas que não copiam arquivo nenhum, mas mudam o comportamento da imagem.</p>
+
+<hr>
+
+<h2>EXPOSE: documentar a porta (não publicar!)</h2>
+<p>Dentro do container, a sua aplicação ouve numa porta (a API Node ouve na 3000, o Nginx na 80). O <code>EXPOSE</code> serve para <strong>documentar</strong> isso na imagem — quem lê o Dockerfile ou faz <code>docker inspect</code> vê a porta declarada:</p>
+<pre class="file">EXPOSE 3000</pre>
+<p>Você pode declarar várias de uma vez: <code>EXPOSE 3000 8080</code>. E dá para informar o protocolo: <code>EXPOSE 3000/tcp</code> (tcp é o padrão; <code>/udp</code> existe para jogos e DNS).</p>
+
+<div class="warn"><strong>Erro comum: achar que EXPOSE publica a porta para fora. Não publica.</strong> A porta só fica acessível de fora com <code>-p</code> no <code>docker run</code> (aula <a href="portas.html">Publicando portas</a>). A Ana já caiu nessa:
+<pre class="term" data-cwd="~/minha-api">$ docker run -d --name api api:1.0
+$ curl http://localhost:3000
+curl: (7) Failed to connect to localhost port 3000   « o EXPOSE não publicou nada
+$ docker run -d -p 3000:3000 --name api2 api:1.0     « agora sim: host 3000 → container 3000
+$ curl http://localhost:3000
+{"mensagem":"olá do container!"}</pre>
+A única exceção é <code>docker run -P</code> (P maiúsculo), que publica automaticamente <strong>todas</strong> as portas declaradas com EXPOSE em portas aleatórias do host — útil para testes rápidos:
+<pre class="term">$ docker run -d -P --name api3 api:1.0
+$ docker ps
+…  0.0.0.0:32768->3000/tcp   api3   « o host escolheu a 32768 para a 3000 do container</pre></div>
+
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Situação</th><th>Comando</th><th>Porta no host</th></tr>
+<tr><td>Nada publicado (só EXPOSE)</td><td><code>docker run -d api:1.0</code></td><td>nenhuma — só dentro da rede do Docker</td></tr>
+<tr><td>Porta fixa publicada</td><td><code>docker run -d -p 3000:3000 api:1.0</code></td><td>3000</td></tr>
+<tr><td>Todas as portas do EXPOSE, em portas aleatórias</td><td><code>docker run -d -P api:1.0</code></td><td>aleatória (ex.: 32768)</td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>ENV: variáveis de ambiente fixas na imagem</h2>
+<p>O <code>ENV</code> grava uma variável dentro da imagem. Ela fica disponível <strong>durante o build</strong> (os comandos <code>RUN</code> enxergam) e <strong>durante a execução</strong> (o <code>CMD</code> e qualquer <code>docker exec</code> enxergam):</p>
+<pre class="file">FROM node:22-alpine
+ENV NODE_ENV=production
+ENV APP_NAME="minha-api"</pre>
+<p>Formatos aceitos: <code>ENV chave=valor</code> (recomendado, e permite várias na mesma linha: <code>ENV A=1 B=2</code>) e o formato antigo <code>ENV chave valor</code> (onde tudo depois do espaço vira o valor — por isso evite: <code>ENV NOME Ana Beatriz</code> vira valor "Ana Beatriz", com espaço).</p>
+<p>A Ana confirma que a variável chegou dentro do container:</p>
+<pre class="term" data-cwd="~/minha-api">$ docker run --rm api:1.0 node -e "console.log(process.env.NODE_ENV)"
+production</pre>
+<p>Variáveis do <code>ENV</code> podem ser sobrescritas na hora do <code>docker run</code> com <code>-e</code> (aula <a href="variaveis-ambiente.html">Variáveis de ambiente</a>): <code>docker run -e NODE_ENV=development api:1.0</code> — o valor do <code>-e</code> ganha do valor do <code>ENV</code>.</p>
+
+<dl class="anatomy">
+  <dt>ENV</dt><dd>"grave esta variável na imagem".</dd>
+  <dt>NODE_ENV=production</dt><dd>formato chave=valor. Em Node, <code>NODE_ENV=production</code> ativa otimizações (menos logs, cache de views etc.).</dd>
+  <dt>APP_NAME="minha-api"</dt><dd>valores com espaço vão entre aspas duplas.</dd>
+</dl>
+
+<div class="warn"><strong>Erro comum: aspas no lugar errado.</strong> <code>ENV NODE_ENV="production"</code> (aspas só no valor) funciona, mas <code>ENV "NODE_ENV=production"</code> (aspas em volta de tudo) grava uma variável de nome estranho. A forma segura é sem aspas quando não tem espaço: <code>ENV NODE_ENV=production</code>.</div>
+
+<hr>
+
+<h2>ARG: argumento que só existe durante o build</h2>
+<p>O <code>ARG</code> declara um <strong>parâmetro do build</strong>. Ele recebe valor com <code>--build-arg</code> no <code>docker build</code> e <strong>não fica gravado como variável</strong> na imagem final — some depois do build. Perfeito para versões, flags de compilação e coisas que mudam entre builds mas não entre runs:</p>
+<pre class="file">FROM node:22-alpine
+ARG VERSAO=1.0
+ENV APP_VERSION=$VERSAO
+WORKDIR /app
+COPY . .
+CMD ["node", "server.js"]</pre>
+<p>A Ana builda passando a versão real do release:</p>
+<pre class="term" data-cwd="~/minha-api">$ docker build --build-arg VERSAO=2.3 -t api:2.3 .
+…
+Successfully tagged api:2.3
+$ docker run --rm api:2.3 node -e "console.log(process.env.APP_VERSION)"
+2.3</pre>
+<dl class="anatomy">
+  <dt>docker build</dt><dd>o comando de build.</dd>
+  <dt>--build-arg VERSAO=2.3</dt><dd>entrega o valor 2.3 para o ARG chamado <code>VERSAO</code> declarado no Dockerfile.</dd>
+  <dt>-t api:2.3</dt><dd>nome e tag da imagem gerada.</dd>
+  <dt>.</dt><dd>o contexto do build.</dd>
+</dl>
+<p>Se o <code>--build-arg</code> não for passado, vale o padrão declarado no Dockerfile (<code>ARG VERSAO=1.0</code> → 1.0). Truque comum: <code>ENV APP_VERSION=$VERSAO</code> copia o valor do ARG para uma variável permanente da imagem, como no exemplo acima — o ARG em si some, o ENV fica.</p>
+
+<div class="warn"><strong>ARG não é segredo:</strong> o valor passado com <code>--build-arg</code> fica registrado no histórico da imagem — <code>docker history api:2.3</code> mostra a instrução com o valor. Nunca use ARG para senhas ou tokens: qualquer um que baixa a imagem vê o histórico. Para segredos de build existem os <em>build secrets</em> (<code>RUN --mount=type=secret</code>, nível 3); para segredos de runtime, use <code>-e</code> ou volumes de tmpfs.</div>
+
+<hr>
+
+<h2>ENV vs. ARG vs. -e: a tabela que salva</h2>
+<p>As três formas de passar variáveis confundem porque todas parecem "colocar uma variável no container". A diferença é <strong>quando</strong> e <strong>onde</strong> cada uma existe:</p>
+<div class="table-wrap">
+<table class="ref">
+<tr><th></th><th>ARG (Dockerfile)</th><th>ENV (Dockerfile)</th><th>-e (docker run)</th></tr>
+<tr><td><strong>Quando existe</strong></td><td>Só durante o build</td><td>Build e runtime</td><td>Só no runtime</td></tr>
+<tr><td><strong>Como define</strong></td><td><code>--build-arg NOME=valor</code></td><td><code>ENV NOME=valor</code></td><td><code>-e NOME=valor</code></td></tr>
+<tr><td><strong>Fica na imagem?</strong></td><td>O valor não (só o histórico)</td><td>Sim</td><td>Não — só no container</td></tr>
+<tr><td><strong>Quem vê o valor</strong></td><td>Quem builda (e o docker history)</td><td>Qualquer um com a imagem</td><td>Só quem deu o comando</td></tr>
+<tr><td><strong>Uso típico</strong></td><td>Versão do release, flags de compilação</td><td><code>NODE_ENV=production</code>, caminhos fixos</td><td>Senhas, config por ambiente (dev/prod)</td></tr>
+<tr><td><strong>Pode mudar sem rebuild?</strong></td><td>Não</td><td>Não (mas <code>-e</code> sobrescreve no run)</td><td>Sim, a cada run</td></tr>
+</table>
+</div>
+
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Situação da Ana</th><th>Solução</th></tr>
+<tr><td>"Quero que a imagem já nasça em modo produção"</td><td><code>ENV NODE_ENV=production</code></td></tr>
+<tr><td>"Quero buildar a versão 2.3 e gravar na imagem"</td><td><code>ARG VERSAO</code> + <code>ENV APP_VERSION=$VERSAO</code> + <code>--build-arg VERSAO=2.3</code></td></tr>
+<tr><td>"A senha do banco muda por ambiente e não pode ir na imagem"</td><td><code>docker run -e DB_PASS=…</code> (ou arquivo <code>.env</code> com <code>--env-file</code>)</td></tr>
+<tr><td>"Quero rodar local em modo desenvolvimento, sem rebuild"</td><td><code>docker run -e NODE_ENV=development api:1.0</code> (o -e ganha do ENV)</td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>Exemplo completo: o Dockerfile da api:2.3</h2>
+<pre class="file"># Dockerfile completo da minha-api (~/minha-api da Ana)
+FROM node:22-alpine
+
+# argumento de build: versão do release (padrão 1.0)
+ARG VERSAO=1.0
+# grava a versão como variável permanente da imagem
+ENV APP_VERSION=$VERSAO
+# modo produção fixo na imagem
+ENV NODE_ENV=production
+
+WORKDIR /app
+COPY package*.json ./
+RUN npm install --omit=dev
+COPY . .
+
+# documentação: a app ouve na 3000 (publicar é com -p no run)
+EXPOSE 3000
+
+CMD ["node", "server.js"]</pre>
+<pre class="term" data-cwd="~/minha-api">$ docker build --build-arg VERSAO=2.3 -t api:2.3 .
+Sending build context to Docker daemon  58.37kB
+Step 1/8 : FROM node:22-alpine
+ ---> c3d4e5f6a1b2
+Step 2/8 : ARG VERSAO=1.0
+ ---> Using cache
+Step 3/8 : ENV APP_VERSION=$VERSAO
+ ---> Using cache
+Step 4/8 : ENV NODE_ENV=production
+ ---> Using cache
+Step 5/8 : WORKDIR /app
+ ---> Using cache
+Step 6/8 : COPY package*.json ./
+ ---> Using cache
+Step 7/8 : RUN npm install --omit=dev
+ ---> Using cache
+Step 8/8 : COPY . .
+ ---> 3c4d5e6f7a8b
+Successfully built 3c4d5e6f7a8b
+Successfully tagged api:2.3
+$ docker run -d -p 3000:3000 --name api api:2.3
+$ docker exec api node -e "console.log(process.env.APP_VERSION, process.env.NODE_ENV)"
+2.3 production</pre>
+
+<div class="try" data-goal="Successfully tagged api:1.0" data-solucao="docker build --build-arg VERSAO=1.0 -t api:1.0 .">
+<p class="try-task"><strong>Missão:</strong> faça um build passando um argumento de build: rode <code>docker build --build-arg VERSAO=1.0 -t api:1.0 .</code> no terminal abaixo.</p>
+</div>
+
+<div class="try" data-goal="REPOSITORY" data-solucao="docker images">
+<p class="try-task"><strong>Missão extra:</strong> depois do build, confirme que a imagem entrou na lista: rode <code>docker images</code> e ache a linha da sua <code>api:1.0</code>.</p>
+</div>
+
+<hr>
+
+<h2>Quando dá errado</h2>
+
+<div class="warn"><strong>Achar que EXPOSE publica a porta:</strong> rodar <code>docker run -d api:1.0</code> sem <code>-p</code> e tentar acessar de fora dá <code>curl: (7) Failed to connect</code>. EXPOSE é só documentação (metadado da imagem). <strong>Como consertar:</strong> publique com <code>-p 3000:3000</code> ou deixe todas pública com <code>-P</code>.</div>
+
+<div class="warn"><strong>ARG sem valor e sem padrão:</strong> se o Dockerfile declara <code>ARG VERSAO</code> (sem <code>=1.0</code>) e o build não passa <code>--build-arg</code>, a variável fica <strong>vazia</strong> — e <code>ENV APP_VERSION=$VERSAO</code> grava string vazia, sem erro. A app pode quebrar só no runtime com "versão vazia". <strong>Como consertar:</strong> sempre dê um padrão (<code>ARG VERSAO=1.0</code>) ou valide no build.</div>
+
+<div class="warn"><strong>Usar ARG para senha:</strong> <code>ARG DB_PASSWORD</code> + <code>--build-arg DB_PASSWORD=123456</code> parece prático, mas o valor fica no <code>docker history</code> da imagem para sempre — e a imagem pode ser publicada no registry. <strong>Como consertar:</strong> senha nunca vai em ARG/ENV do Dockerfile: use <code>-e</code> no run, <code>--env-file</code>, ou build secrets (<code>RUN --mount=type=secret</code>).</div>
+
+<div class="warn"><strong>ENV com espaço sem aspas:</strong> <code>ENV MSG olá mundo</code> (formato antigo) grava <code>MSG</code> com valor "olá mundo" — mas no formato <code>ENV MSG=olá mundo</code> (com igual), o Docker lê <code>MSG=olá</code> e trata <code>mundo</code> como outra instrução — erro de parse. <strong>Como consertar:</strong> valor com espaço vai entre aspas: <code>ENV MSG="olá mundo"</code>.</div>
+
+<hr>
+
+<h2>Referência rápida</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Escrita</th><th>O que faz</th></tr>
+<tr><td><code>EXPOSE 3000</code></td><td>Documenta que o container ouve na 3000 (metadado; não publica)</td></tr>
+<tr><td><code>EXPOSE 3000 8080/udp</code></td><td>Várias portas, com protocolo opcional (<code>/tcp</code> padrão, <code>/udp</code>)</td></tr>
+<tr><td><code>ENV CHAVE=valor</code></td><td>Grava a variável na imagem (build + runtime)</td></tr>
+<tr><td><code>ENV CHAVE valor</code></td><td>Formato antigo (evite: valor com espaço quebra)</td></tr>
+<tr><td><code>ARG NOME=padrao</code></td><td>Declara argumento de build com valor padrão</td></tr>
+<tr><td><code>docker build --build-arg NOME=valor .</code></td><td>Entrega o valor para o ARG no build</td></tr>
+<tr><td><code>ENV X=$ARG</code></td><td>Copia o valor do ARG para uma variável permanente</td></tr>
+<tr><td><code>docker run -e CHAVE=valor img</code></td><td>Define/sobrescreve variável só naquele container</td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>Quiz rápido</h2>
+
+<div class="mc" data-answer="2">
+<p class="mc-q">1. A Ana pôs <code>EXPOSE 3000</code> no Dockerfile e rodou <code>docker run -d api:1.0</code>, mas não conseguiu acessar <code>localhost:3000</code>. Por quê?</p>
+<label><input type="radio" name="q1"> Porque a porta 3000 está errada</label>
+<label><input type="radio" name="q1"> Porque o EXPOSE só documenta a porta — para publicar precisa de <code>-p 3000:3000</code> (ou <code>-P</code>)</label>
+<label><input type="radio" name="q1"> Porque o container não subiu</label>
+<label><input type="radio" name="q1"> Porque falta o ENV PORT=3000</label>
+</div>
+
+<div class="mc" data-answer="3">
+<p class="mc-q">2. Qual a diferença entre <code>ARG</code> e <code>ENV</code> no Dockerfile?</p>
+<label><input type="radio" name="q2"> Nenhuma, são sinônimos</label>
+<label><input type="radio" name="q2"> ARG é só para portas, ENV para variáveis</label>
+<label><input type="radio" name="q2"> ARG existe só durante o build (vem de <code>--build-arg</code>); ENV fica gravado na imagem (build + runtime)</label>
+<label><input type="radio" name="q2"> ENV existe só no build; ARG fica na imagem</label>
+</div>
+
+<div class="mc" data-answer="4">
+<p class="mc-q">3. A Ana quer que a imagem já nasça com <code>NODE_ENV=production</code>, mas que dê para trocar na hora do run. Como ela faz?</p>
+<label><input type="radio" name="q3"> <code>ARG NODE_ENV=production</code> só</label>
+<label><input type="radio" name="q3"> <code>CMD NODE_ENV=production</code></label>
+<label><input type="radio" name="q3"> <code>RUN NODE_ENV=production</code></label>
+<label><input type="radio" name="q3"> <code>ENV NODE_ENV=production</code> no Dockerfile — e <code>docker run -e NODE_ENV=development …</code> sobrescreve no run</label>
+</div>
+
+<div class="mc" data-answer="1">
+<p class="mc-q">4. Por que não se deve passar senhas com <code>--build-arg</code>?</p>
+<label><input type="radio" name="q4"> Porque o valor do build-arg fica no <code>docker history</code> da imagem — qualquer um que baixa a imagem lê</label>
+<label><input type="radio" name="q4"> Porque o build trava com senhas</label>
+<label><input type="radio" name="q4"> Porque ARG só aceita números</label>
+<label><input type="radio" name="q4"> Porque não dá para usar aspas no valor</label>
+</div>
+
+<hr>
+
+<h2>Resumo</h2>
+<ul>
+  <li><code>EXPOSE 3000</code> é <strong>documentação</strong>: diz que o container ouve na 3000, aparece no <code>docker inspect</code>, e serve para o <code>-P</code> publicar tudo — mas sozinho não abre porta nenhuma. Publicar é com <code>-p</code> no <code>docker run</code>.</li>
+  <li><code>ENV CHAVE=valor</code> grava a variável na imagem: visível no build (nos <code>RUN</code>) e no runtime; o <code>-e</code> do <code>docker run</code> sobrescreve.</li>
+  <li><code>ARG NOME=padrao</code> é argumento de build, entregue por <code>--build-arg</code>; não fica na imagem (só no histórico). O truque <code>ENV X=$ARG</code> grava o valor de vez.</li>
+  <li>Regra de escolha: valor fixo da imagem → <code>ENV</code>; valor que muda por build → <code>ARG</code>; valor que muda por ambiente/senha → <code>-e</code> no run (nunca no Dockerfile).</li>
+  <li>Erros reais: achar que EXPOSE publica porta; ARG sem padrão virando variável vazia; senha em ARG (fica no <code>docker history</code>); valor com espaço sem aspas no ENV.</li>
+</ul>
+
+<div class="tip"><strong>Próxima aula:</strong> <a href="docker-build.html">docker build: criando a imagem</a> — a sintaxe completa do comando, o contexto de build e o cache.</div>
+
+<div class="pager"></div>
+
+</div>
+</main>
+</div>
+<script src="assets/site.js?v=4"></script>
+</body>
+</html>

@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Remover capabilities (--cap-drop, --cap-add) | Guia Docker</title>
+<meta name="description" content="Linux capabilities: o poder do root dividido em ~40 pedaços (CAP_NET_BIND_SERVICE, CAP_SYS_ADMIN…). O container padrão recebe um conjunto de capabilities; com --cap-drop ALL você remove todas e com --cap-add devolve só o necessário (ex.: NET_BIND_SERVICE para abrir a porta 80 como usuário comum). Tabela das capabilities mais comuns, como ver as caps com docker inspect e /proc/self/status, por que --privileged é o último recurso e cenário real de produção.">
+<link rel="stylesheet" href="assets/style.css?v=4">
+<script>try{var t=localStorage.getItem("tema");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<meta http-equiv="Cache-Control" content="no-store, must-revalidate">
+<script>try{history.scrollRestoration="manual"}catch(e){}(function(){var n=0;function t(){window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;if(++n<60)setTimeout(t,50)}t();window.addEventListener("pagehide",function(){window.scrollTo(0,0);document.documentElement.scrollTop=0;});window.addEventListener("pageshow",function(){window.scrollTo(0,0)});window.addEventListener("load",function(){window.scrollTo(0,0)});})();document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(a){var h=a.getAttribute("href")||"";if(/[.]html($|[?#])/.test(h)&&a.host===location.host){window.scrollTo(0,0);document.documentElement.scrollTop=0;}}});</script>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" id="sidebar" aria-label="Tópicos"></nav>
+<main class="main">
+<div class="content">
+
+<div class="pager"></div>
+
+<h1><span class="hl">--cap-drop</span> — remover capabilities</h1>
+
+<p class="intro">Na aula <a href="usuario-nao-root.html">USER</a> a Ana aprendeu a não rodar o processo como root. Só que tem um detalhe: <strong>root dentro do container ainda tem poderes demais</strong>. No Linux moderno, o poder do root foi quebrado em <strong>capabilities</strong> — cerca de 40 "pedaços" de privilégio (abrir porta baixa, mudar a rede, montar discos…). O container padrão recebe um conjunto dessas capabilities mesmo sem ser root de verdade. Nesta aula você aprende a tirar todas com <code>--cap-drop ALL</code> e devolver <strong>só o que a app precisa</strong> com <code>--cap-add</code> — o princípio do menor privilégio.</p>
+
+<div class="note">
+<strong>Você vai aprender</strong>
+<ul>
+  <li>O que são Linux capabilities e por que "root de container" ainda é perigoso.</li>
+  <li>A combinação clássica de produção: <code>--cap-drop ALL</code> + <code>--cap-add NET_BIND_SERVICE</code>.</li>
+  <li>Tabela das capabilities mais comuns e quando cada uma é necessária.</li>
+  <li>Como inspecionar as capabilities de um container (<code>docker inspect</code>, <code>/proc/self/status</code>).</li>
+  <li>Por que <code>--privileged</code> é o último recurso — e quais alternativas usar.</li>
+</ul>
+</div>
+
+<hr>
+
+<h2>A ideia: o molho de chaves do root</h2>
+<p>Antigamente, no Linux, root era "tudo ou nada": ou você tinha todos os poderes, ou nenhum. Hoje o poder foi dividido em <strong>capabilities</strong> — pense num molho de chaves: cada chave abre uma porta diferente. <code>CAP_NET_BIND_SERVICE</code> abre a porta de "usar portas abaixo de 1024" (80, 443). <code>CAP_SYS_ADMIN</code> é a chave mestra — abre mount, namespaces e muita coisa perigosa.</p>
+<p>Um processo comum (usuário sem privilégios) não tem chave nenhuma. O root tem o molho inteiro. E o container padrão do Docker? Ele não é root de verdade, mas ganha um <strong>molho parcial</strong> — dá para ver na prática. No notebook da Ana, um usuário comum tentando abrir a porta 80 dentro de um container falha:</p>
+<pre class="term">$ docker run --rm --user 1000 python:3.12-slim python -c "import socket; s=socket.socket(); s.bind(('0.0.0.0', 80))"
+Traceback (most recent call last):
+  …
+PermissionError: [Errno 13] Permission denied</pre>
+<p>Mas o container padrão (como root, com o molho parcial) consegue. Com a capability <code>CAP_NET_BIND_SERVICE</code>, <strong>até um usuário comum</strong> consegue abrir a porta 80 — é por isso que dá para rodar um servidor web na porta baixa sem ser root. É exatamente essa a jogada de produção: usuário comum + só a chave de que precisa.</p>
+
+<hr>
+
+<h2>--cap-drop ALL + --cap-add só o necessário</h2>
+<p>A combinação clássica: remove <strong>todas</strong> as capabilities e devolve somente a que a app usa:</p>
+<pre class="term">$ docker run -d --name api -p 80:8080 \
+>     --user 1000:1000 \
+>     --cap-drop ALL \
+>     --cap-add NET_BIND_SERVICE \
+>     minha-api:segura
+c3d4e5f6a1b2…</pre>
+<dl class="anatomy">
+  <dt>--cap-drop ALL</dt><dd>Remove todas as capabilities do conjunto padrão — o container fica "desarmado", sem nenhuma chave.</dd>
+  <dt>--cap-add NET_BIND_SERVICE</dt><dd>Devolve uma só chave: permite abrir portas abaixo de 1024 (80, 443).</dd>
+  <dt>--user 1000:1000</dt><dd>Roda como usuário comum (aula <a href="usuario-nao-root.html">USER</a>) — com as duas coisas juntas, nem root nem portas baixas são problema.</dd>
+  <dt>-p 80:8080</dt><dd>Publica a porta 8080 do container na 80 do host. Repare: quem precisa da porta baixa é o <em>daemon</em> do Docker (lá fora), não o processo de dentro — mas a app também pode querer abrir a 80 direto.</dd>
+</dl>
+<p>Se a app não precisa de nenhuma capability (a maioria não precisa), basta <code>--cap-drop ALL</code> sozinho — e se a app usa porta alta (8080, 3000), nem isso precisa.</p>
+
+<div class="try" data-goal="--cap-drop" data-solucao="docker run --rm --cap-drop=ALL --cap-add=NET_BIND_SERVICE -p 8080:80 nginx:alpine">
+<p class="try-task"><strong>Missão:</strong> rode um container sem nenhuma capability e devolvendo só <code>NET_BIND_SERVICE</code>: <code>docker run --rm --cap-drop ALL --cap-add NET_BIND_SERVICE -p 8080:80 nginx:alpine</code> (no simulador, use <code>=</code> nas flags).</p>
+</div>
+
+<div class="try" data-goal="CONTAINER ID" data-solucao="docker ps">
+<p class="try-task"><strong>Missão extra:</strong> suba um container qualquer com <code>docker run -d --name web nginx:alpine</code> e rode <code>docker ps</code> para ver o cabeçalho <code>CONTAINER ID</code> — depois use <code>docker inspect web</code> para ver os detalhes dele.</p>
+</div>
+
+<hr>
+
+<h2>Tabela: capabilities comuns</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Capability</th><th>O que permite</th><th>Uso típico em container</th></tr>
+<tr><td><code>NET_BIND_SERVICE</code></td><td>Abrir portas abaixo de 1024 (80, 443).</td><td>Servidor web rodando como usuário comum.</td></tr>
+<tr><td><code>NET_RAW</code></td><td>Usar sockets raw (ex.: <code>ping</code>).</td><td>Ferramentas de diagnóstico de rede.</td></tr>
+<tr><td><code>NET_ADMIN</code></td><td>Mudar IPs, rotas e regras de firewall do container.</td><td>Quase nunca em app; sidecars de rede (VPN, mesh).</td></tr>
+<tr><td><code>SYS_ADMIN</code></td><td>A "chave mestra": mount, namespaces e mais.</td><td><strong>Evite</strong> — é a capability que mais ajuda em escapes de container.</td></tr>
+<tr><td><code>SYS_CHROOT</code></td><td>Mudar a raiz com <code>chroot</code>.</td><td>Algumas apps legadas.</td></tr>
+<tr><td><code>SYS_PTRACE</code></td><td>Debugar outros processos (<code>strace</code>, <code>gdb</code>).</td><td>Só em imagens de debug, nunca em produção.</td></tr>
+<tr><td><code>MKNOD</code></td><td>Criar device nodes em <code>/dev</code>.</td><td>Raro; geralmente desnecessário.</td></tr>
+<tr><td><code>SETUID</code> / <code>SETGID</code></td><td>Trocar de usuário (o que o <code>sudo</code> faz).</td><td>Evite — combine com <code>no-new-privileges</code> (aula <a href="seccomp.html">seccomp</a>).</td></tr>
+<tr><td><code>DAC_OVERRIDE</code></td><td>Passar por cima de permissões de arquivos.</td><td>Perigosa; remova com <code>--cap-drop</code>.</td></tr>
+<tr><td><code>CHOWN</code> / <code>FOWNER</code></td><td>Mudar o dono de arquivos.</td><td>Às vezes necessário em apps que gerenciam próprios arquivos.</td></tr>
+</table>
+</div>
+<p>O conjunto padrão do Docker inclui ainda <code>FSETID</code>, <code>KILL</code>, <code>SETPCAP</code>, <code>SETFCAP</code>, <code>AUDIT_WRITE</code> e <code>NET_RAW</code>, além das citadas acima. Dá para remover uma a uma com <code>--cap-drop NOME</code> (sem o prefixo <code>CAP_</code>) — por exemplo, <code>--cap-drop SYS_PTRACE --cap-drop NET_RAW</code> tira só essas duas e deixa o resto.</p>
+
+<hr>
+
+<h2>Como ver as capabilities de um container</h2>
+<p>Dentro do próprio container, o arquivo <code>/proc/self/status</code> mostra as máscaras de capabilities em hexadecimal. Depois de subir o container com só <code>NET_BIND_SERVICE</code>:</p>
+<pre class="term">$ docker exec api grep Cap /proc/self/status
+CapInh: 0000000000000000
+CapPrm: 0000000000000400
+CapEff: 0000000000000400
+CapBnd: 00000000a80425fb</pre>
+<p>O valor <code>0000000000000400</code> (bit 10 ligado) é exatamente a <code>NET_BIND_SERVICE</code>. Compare com um container padrão, que mostra bem mais bits ligados. Pelo lado de fora, sem entrar no container:</p>
+<pre class="term">$ docker inspect api --format '{{json .HostConfig.CapDrop}} {{json .HostConfig.CapAdd}}'
+["ALL"] ["NET_BIND_SERVICE"]</pre>
+<p>Esse <code>docker inspect</code> é a forma rápida de auditar: se a coluna <code>CapDrop</code> não tiver <code>ALL</code> (ou a lista de permissões esperadas), o container está mais poderoso do que deveria. O <code>docker inspect</code> tem aula própria: <a href="docker-inspect.html">docker inspect a fundo</a>.</p>
+
+<hr>
+
+<h2>--privileged: o último recurso</h2>
+<p>Existe uma flag que <strong>devolve tudo</strong>: todas as capabilities, acesso a todos os dispositivos em <code>/dev</code> e as proteções de seccomp/AppArmor desativadas:</p>
+<pre class="term">$ docker run -d --privileged …   « equivalente a --cap-add ALL + /dev liberado + sem seccomp</pre>
+<div class="warning"><strong>Nunca use <code>--privileged</code> em produção.</strong> Com ela, um escape de container vira root no host na hora — é como deixar a chave mestra no capacho. Use só em casos muito específicos e temporários — Docker-in-Docker num CI, mexer em módulos do kernel, acesso a hardware dedicado — e, mesmo assim, restrito à máquina de teste. Prefira alternativas pontuais: em vez de <code>--privileged</code>, tente <code>--device /dev/x</code> (libera só um dispositivo), <code>--cap-add NOME</code> (só uma chave) ou <code>-v</code> do que precisar.</div>
+
+<div class="cenario">
+<strong>Cenário real: "precisa de privileged para funcionar"</strong>
+<p>Um colega da Ana disse que a app dele "só sobe com <code>--privileged</code>". Investigando, descobriram que a app só precisava de <code>NET_ADMIN</code> para configurar uma interface de rede virtual — e de um dispositivo específico em <code>/dev</code>. Trocaram <code>--privileged</code> por <code>--cap-add NET_ADMIN --device /dev/net/tun</code> e a app continuou funcionando, só que agora com o resto do molho de chaves trancado. Quase sempre dá para ser específico: o <code>--privileged</code> é a desculpa preguiçosa, não a necessidade real.</p>
+</div>
+
+<hr>
+
+<h2>Montando o comando seguro completo</h2>
+<p>Juntando as três aulas de segurança até aqui, o comando de produção da API da Loja Aurora fica assim:</p>
+<pre class="term">$ docker run -d --name api \
+>     --user 1000:1000 \
+>     --read-only \
+>     --tmpfs /tmp:size=32m,noexec,nosuid \
+>     --cap-drop ALL \
+>     --cap-add NET_BIND_SERVICE \
+>     --security-opt no-new-privileges \
+>     -v api-dados:/app/dados \
+>     -p 3000:3000 \
+>     ana/minha-api:1.0
+f3a1b2c3d4e5…</pre>
+<p>Cada flag cobre um tipo de ataque diferente: usuário comum (aula <a href="usuario-nao-root.html">USER</a>), sistema de arquivos fechado (<a href="read-only.html">--read-only</a>), sem capabilities (<code>--cap-drop ALL</code>), sem ganhar privilégios novos (<code>no-new-privileges</code>, aula <a href="seccomp.html">seccomp</a>). Em produção, use as camadas <em>juntas</em>.</p>
+
+<hr>
+
+<h2>As mesmas flags no docker-compose.yml</h2>
+<p>Em produção a Ana não usa <code>docker run</code> solto: ela descreve tudo no <code>docker-compose.yml</code> (aula <a href="compose-yaml.html">O arquivo docker-compose.yml</a>). Lá, as capabilities entram em <code>cap_drop</code> / <code>cap_add</code>, como <code>read_only</code> e <code>security_opt</code>:</p>
+<pre class="file" data-file="docker-compose.yml">services:
+  api:
+    image: ana/minha-api:1.0
+    user: "1000:1000"
+    read_only: true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    security_opt:
+      - no-new-privileges
+    tmpfs:
+      - /tmp:size=32m,noexec,nosuid
+    volumes:
+      - api-dados:/app/dados
+    ports:
+      - "3000:3000"
+
+volumes:
+  api-dados:</pre>
+<p>Com <code>docker compose up -d</code>, o Docker aplica exatamente as mesmas proteções do <code>docker run</code> — e o arquivo fica versionado no repositório, então a configuração de segurança não depende da memória de ninguém.</p>
+
+<hr>
+
+<h2>Quiz rápido</h2>
+<div class="mc" data-answer="2">
+<p class="mc-q">1. O que são Linux capabilities?</p>
+<label><input type="radio" name="q1"> Um tipo de criptografia de arquivos</label>
+<label><input type="radio" name="q1"> O poder do root dividido em ~40 "pedaços" de privilégio, cada um controlando uma operação</label>
+<label><input type="radio" name="q1"> Um antivírus para containers</label>
+<label><input type="radio" name="q1"> Uma forma de limitar a memória do container</label>
+</div>
+
+<div class="mc" data-answer="3">
+<p class="mc-q">2. Para que serve <code>--cap-drop ALL --cap-add NET_BIND_SERVICE</code>?</p>
+<label><input type="radio" name="q2"> Para deixar o container mais leve</label>
+<label><input type="radio" name="q2"> Para trocar a imagem base</label>
+<label><input type="radio" name="q2"> Para remover todas as capabilities e devolver só a de abrir portas abaixo de 1024</label>
+<label><input type="radio" name="q2"> Para apagar o container depois de rodar</label>
+</div>
+
+<div class="mc" data-answer="4">
+<p class="mc-q">3. Qual destas capabilities é a "chave mestra" que mais ajuda em escapes de container?</p>
+<label><input type="radio" name="q3"> <code>NET_BIND_SERVICE</code></label>
+<label><input type="radio" name="q3"> <code>CHOWN</code></label>
+<label><input type="radio" name="q3"> <code>AUDIT_WRITE</code></label>
+<label><input type="radio" name="q3"> <code>SYS_ADMIN</code></label>
+</div>
+
+<div class="mc" data-answer="1">
+<p class="mc-q">4. Onde se veem as capabilities atuais de um container?</p>
+<label><input type="radio" name="q4"> Em <code>/proc/self/status</code> (dentro do container, campos <code>Cap*</code>) ou no <code>docker inspect</code> (<code>.HostConfig.CapDrop/CapAdd</code>)</label>
+<label><input type="radio" name="q4"> No <code>docker logs</code></label>
+<label><input type="radio" name="q4"> No arquivo <code>/etc/passwd</code> do host</label>
+<label><input type="radio" name="q4"> Não dá para ver</label>
+</div>
+
+<hr>
+
+<h2>Resumo</h2>
+<ul>
+  <li>Capabilities são os ~40 "pedaços" em que o poder do root foi dividido; o container padrão recebe um molho parcial mesmo sem ser root.</li>
+  <li><code>--cap-drop ALL</code> remove todas; <code>--cap-add NOME</code> devolve só uma (sem o prefixo <code>CAP_</code>).</li>
+  <li>Caso clássico: usuário comum + <code>--cap-drop ALL --cap-add NET_BIND_SERVICE</code> para servidor web na porta 80/443.</li>
+  <li>Veja as caps em <code>/proc/self/status</code> (dentro) ou <code>docker inspect --format '{{json .HostConfig.CapDrop}}'</code> (fora).</li>
+  <li><code>--privileged</code> devolve tudo (caps + /dev + sem seccomp) — nunca em produção; prefira <code>--cap-add</code> e <code>--device</code> pontuais.</li>
+  <li><code>SYS_ADMIN</code>, <code>SYS_PTRACE</code> e <code>DAC_OVERRIDE</code> são as mais perigosas: mantenha fora do conjunto do container.</li>
+</ul>
+
+<div class="tip"><strong>Próxima aula:</strong> <a href="seccomp.html">Perfis de segurança (seccomp, AppArmor)</a> — filtrar as chamadas de sistema que o container pode fazer.</div>
+
+<div class="pager"></div>
+
+</div>
+</main>
+</div>
+<script src="assets/site.js?v=4"></script>
+</body>
+</html>

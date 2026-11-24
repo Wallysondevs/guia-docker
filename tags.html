@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tags e versões de imagens (:latest, :alpine, :3.12…) | Guia Docker</title>
+<meta name="description" content="Como funcionam as tags no Docker: :latest como padrão quando você não escreve nada, tags de versão (node:22, python:3.12), variantes (alpine, slim, bookworm, jammy), tags de sistema operacional (windowsservercore), por que evitar :latest em produção, como fixar a versão pelo digest (sha256) e como listar todas as tags de uma imagem no Docker Hub. Missão no simulador.">
+<link rel="stylesheet" href="assets/style.css?v=4">
+<script>try{var t=localStorage.getItem("tema");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<meta http-equiv="Cache-Control" content="no-store, must-revalidate">
+<script>try{history.scrollRestoration="manual"}catch(e){}(function(){var n=0;function t(){window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;if(++n<60)setTimeout(t,50)}t();window.addEventListener("pagehide",function(){window.scrollTo(0,0);document.documentElement.scrollTop=0;});window.addEventListener("pageshow",function(){window.scrollTo(0,0)});window.addEventListener("load",function(){window.scrollTo(0,0)});})();document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(a){var h=a.getAttribute("href")||"";if(/[.]html($|[?#])/.test(h)&&a.host===location.host){window.scrollTo(0,0);document.documentElement.scrollTop=0;}}});</script>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" id="sidebar" aria-label="Tópicos"></nav>
+<main class="main">
+<div class="content">
+
+<div class="pager"></div>
+
+<h1><span class="hl">Tags</span> e versões</h1>
+
+<p class="intro">Uma imagem pode ter várias <strong>tags</strong> — pense nelas como apelidos para versões diferentes da mesma receita. Sem tag, o Docker usa <code>:latest</code>. Nesta aula você aprende a ler uma tag, escolher a certa e evitar a armadilha do <code>:latest</code>.</p>
+
+<div class="note">
+<strong>Você vai aprender</strong>
+<ul>
+  <li>A anatomia de <code>repositório:tag</code> e a regra do <code>:latest</code>.</li>
+  <li>Os tipos de tag: versão maior (<code>:22</code>), versão+variante (<code>:22-alpine</code>), variante só (<code>:alpine</code>), codinome do Debian (<code>:bookworm</code>).</li>
+  <li>Por que <code>:latest</code> é perigoso em produção.</li>
+  <li>Como fixar a versão <strong>de verdade</strong> com o digest <code>@sha256:…</code>.</li>
+  <li>Como descobrir todas as tags disponíveis de uma imagem (no Hub).</li>
+</ul>
+</div>
+
+<hr>
+
+<h2>A anatomia de uma tag</h2>
+<pre class="term">node : 22 - alpine
+ │      └────────── a tag (versão/variante), depois dos dois pontos
+ └───────────────── o repositório (nome da imagem)</pre>
+<dl class="anatomy">
+  <dt>node</dt><dd>O repositório: a imagem oficial do Node.js (namespace <code>library</code> implícito).</dd>
+  <dt>:22-alpine</dt><dd>A tag: versão <strong>22</strong> do Node, variante <strong>Alpine</strong> (Linux minúsculo).</dd>
+  <dt>sem tag</dt><dd><code>docker pull node</code> = <code>node:latest</code> — a tag padrão, que aponta para "a mais recente".</dd>
+</dl>
+
+<pre class="term">$ docker pull node          « é exatamente isto:
+Using default tag: latest
+… docker.io/library/node:latest</pre>
+
+<hr>
+
+<h2>Exemplos de tags comuns</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Tag</th><th>Significado</th><th>Exemplo</th></tr>
+<tr><td><code>:latest</code></td><td>A mais recente (padrão se omitir)</td><td><code>docker pull node</code> = <code>node:latest</code></td></tr>
+<tr><td><code>:22</code>, <code>:22-alpine</code></td><td>Versão específica da linguagem</td><td><code>node:22-alpine</code> (leve, ~189MB)</td></tr>
+<tr><td><code>:3.12-slim</code></td><td>Versão + variante slim (enxuta, sem ferramentas de build)</td><td><code>python:3.12-slim</code> (~132MB)</td></tr>
+<tr><td><code>:alpine</code></td><td>Baseada no Alpine Linux (~5MB, musl libc)</td><td><code>nginx:alpine</code> (~48MB)</td></tr>
+<tr><td><code>:bookworm</code>, <code>:bookworm-slim</code></td><td>Baseada no Debian 12 (glibc, mais ferramentas)</td><td><code>node:22-bookworm</code> (~1GB)</td></tr>
+<tr><td><code>:jammy</code></td><td>Baseada no Ubuntu 22.04</td><td><code>mysql:8.0-jammy</code></td></tr>
+<tr><td><code>:1.27</code>, <code>:1.27.3</code></td><td>Versão do software (maior.menor[.patch])</td><td><code>nginx:1.27.3</code></td></tr>
+<tr><td><code>:3.9-windowsservercore-ltsc2022</code></td><td>Windows Server (imagens grandes, só no Windows)</td><td>uso em host Windows</td></tr>
+</table>
+</div>
+
+<h3>Como escolher a variante?</h3>
+<ul>
+  <li><strong>alpine</strong>: menor imagem, menos ferramentas dentro (bom para produção enxuta). Atenção: usa <code>musl</code> em vez de <code>glibc</code> — raríssimas bibliotecas nativas quebram; teste antes.</li>
+  <li><strong>slim</strong>: Debian enxuto, com glibc — compatibilidade quase total, tamanho médio.</li>
+  <li><strong>bookworm / padrão (sem sufixo)</strong>: Debian/Ubuntu completo, com compilador e ferramentas — bom para desenvolvimento e para imagens que precisam instalar pacotes (<code>apt install</code>).</li>
+</ul>
+
+<hr>
+
+<h2>Por que evitar :latest em produção</h2>
+<p>O <code>:latest</code> <strong>muda sem avisar</strong> — hoje pode ser a versão 22, amanhã a 23, e seu app pode quebrar com a mudança. A cena clássica da Ana: o app dela rodava com <code>node:latest</code>; numa madrugada o Hub atualizou a tag para o Node 23, o servidor fez pull automático e o deploy novo quebrou. O fix foi trocar para <code>node:22-alpine</code>.</p>
+
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Ambiente</th><th>Tag recomendada</th><th>Por quê</th></tr>
+<tr><td>Estudo / teste local</td><td><code>:latest</code> ou só o nome</td><td>Conveniente; você quer ver o que tem de novo</td></tr>
+<tr><td>Desenvolvimento em equipe</td><td><code>node:22-alpine</code> (versão fixa)</td><td>Todo mundo usa a mesma versão — adeus "na minha máquina"</td></tr>
+<tr><td>Produção</td><td>versão fixa, de preferência por <strong>digest</strong></td><td>Nada muda sem você mandar</td></tr>
+</table>
+</div>
+
+<div class="warning">
+<strong>Even com versão fixa, a tag ainda pode mudar</strong>
+<p><code>node:22</code> não é 100% imutável: quem publica pode (por engano ou arquitetura nova) trocar o conteúdo da tag <code>22</code>. A trava de verdade é o <strong>digest</strong>: <code>node:22-alpine@sha256:abc123…</code>. O digest é o hash do conteúdo — se mudar uma vírgula, muda o hash. Para achar o digest: na página da tag no Docker Hub, ou no resultado do seu <code>docker pull</code> (linha <code>Digest: sha256:…</code>).</p>
+</div>
+
+<hr>
+
+<h2>Ver todas as tags de uma imagem</h2>
+<p>No Docker Hub (hub.docker.com), na página da imagem oficial, a aba <strong>Tags</strong> lista todas as versões disponíveis, com o sistema de cada uma e a data de atualização. Exemplos reais:</p>
+<ul>
+  <li><a href="https://hub.docker.com/_/node/tags">hub.docker.com/_/node/tags</a> — dezenas: <code>22</code>, <code>22-alpine</code>, <code>22-bookworm</code>, <code>22-slim</code>, <code>20</code>…</li>
+  <li><a href="https://hub.docker.com/_/python/tags">hub.docker.com/_/python/tags</a> — <code>3.12</code>, <code>3.12-slim</code>, <code>3.12-alpine</code>, <code>3.13</code>…</li>
+  <li><a href="https://hub.docker.com/_/nginx/tags">hub.docker.com/_/nginx/tags</a> — <code>alpine</code>, <code>1.27</code>, <code>1.27-alpine</code>, <code>stable</code>…</li>
+</ul>
+<p>No terminal, dá para listar as suas locais com <code>docker images nginx</code> (todas as tags que você tem daquele repositório).</p>
+
+<h2>Pratique no simulador</h2>
+<div class="try" data-goal="Downloaded" data-solucao="docker pull python:3.13-slim">
+<p class="try-task"><strong>Missão:</strong> baixe uma tag diferente de Python: <code>docker pull python:3.13-slim</code>. Depois rode <code>docker images</code> e veja as duas versões de python lado a lado.</p>
+</div>
+
+<pre class="term">$ docker pull python:3.13-slim
+Trying to pull python:3.13-slim...
+3.13-slim: Pulling from library/python
+Status: Downloaded newer image for python:3.13-slim
+$ docker images python
+REPOSITORY   TAG         IMAGE ID       CREATED       SIZE
+python       3.12-slim   f6a1b2c3d4e5   4 days ago    132MB
+python       3.13-slim   a9b8c7d6e5f4   1 day ago     139MB</pre>
+
+<div class="mc" data-answer="2">
+<p class="mc-q"><code>docker pull node</code> baixa, na verdade, qual imagem?</p>
+<label><input type="radio" name="q1"> <code>node:alpine</code></label>
+<label><input type="radio" name="q1"> <code>node:latest</code> (a tag padrão quando nenhuma é escrita)</label>
+<label><input type="radio" name="q1"> todas as tags do node</label>
+<label><input type="radio" name="q1"> a versão mais antiga</label>
+</div>
+
+<div class="mc" data-answer="1">
+<p class="mc-q">Em <code>python:3.12-slim</code>, o que significam <code>3.12</code> e <code>slim</code>?</p>
+<label><input type="radio" name="q2"> 3.12 = versão do Python; slim = variante enxuta do Debian</label>
+<label><input type="radio" name="q2"> 3.12 = tamanho em GB; slim = o registry</label>
+<label><input type="radio" name="q2"> 3.12 = o ID; slim = o autor</label>
+<label><input type="radio" name="q2"> Não significam nada, é só um nome</label>
+</div>
+
+<div class="mc" data-answer="1">
+<p class="mc-q">Por que evitar <code>:latest</code> em produção?</p>
+<label><input type="radio" name="q3"> Porque o <code>:latest</code> pode mudar de conteúdo sem avisar e quebrar o deploy</label>
+<label><input type="radio" name="q3"> Porque <code>:latest</code> não funciona no Docker</label>
+<label><input type="radio" name="q3"> Porque ocupa mais espaço</label>
+<label><input type="radio" name="q3"> Porque é pago</label>
+</div>
+
+<hr>
+
+<h2>Tags no dia a dia: onde mais elas aparecem</h2>
+<p>A tag não aparece só no <code>pull</code> — ela está em todo lugar onde você escreve o nome de uma imagem:</p>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Onde</th><th>Exemplo</th></tr>
+<tr><td>No <code>docker run</code></td><td><code>docker run -d -p 8080:80 nginx:alpine</code></td></tr>
+<tr><td>No <code>docker pull</code> / <code>rmi</code></td><td><code>docker pull postgres:16-alpine</code> / <code>docker rmi postgres:16-alpine</code></td></tr>
+<tr><td>No Dockerfile (aula <a href="dockerfile-from.html">FROM</a>)</td><td><code>FROM node:22-alpine</code></td></tr>
+<tr><td>No docker-compose.yml (aula <a href="compose-yaml.html">compose</a>)</td><td><code>image: redis:7-alpine</code></td></tr>
+<tr><td>No <code>docker tag</code> (apelido)</td><td><code>docker tag meuapp:latest ana/meuapp:1.0</code></td></tr>
+</table>
+</div>
+
+<h3>As imagens que o guia usa (e por que essas tags)</h3>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Imagem</th><th>Tag usada</th><th>Por quê</th></tr>
+<tr><td><code>hello-world</code></td><td><code>latest</code></td><td>É só um teste; qualquer versão serve</td></tr>
+<tr><td><code>nginx</code></td><td><code>alpine</code></td><td>Servidor web leve e estável para exemplos de site</td></tr>
+<tr><td><code>node</code></td><td><code>22-alpine</code></td><td>LTS atual do Node, imagem pequena</td></tr>
+<tr><td><code>python</code></td><td><code>3.12-slim</code></td><td>Python atual, variante slim (boa pra scripts e APIs)</td></tr>
+<tr><td><code>postgres</code></td><td><code>16-alpine</code></td><td>Banco relacional oficial, versão 16 fixa</td></tr>
+<tr><td><code>redis</code></td><td><code>7-alpine</code></td><td>Cache/fila em memória, versão 7</td></tr>
+<tr><td><code>alpine</code></td><td><code>latest</code></td><td>O Linux mínimo para rodar comandos soltos (<code>echo</code>, <code>ls</code>…)</td></tr>
+</table>
+</div>
+
+<div class="warning">
+<strong>Erro comum: escrever a tag no lugar errado</strong>
+<pre class="term">$ docker pull alpine:latest:3.18        « errado: duas tags?
+docker: invalid reference format.
+$ docker pull alpine 3.18              « errado: espaço = outro argumento
+Usage:  docker pull [OPTIONS] NAME[:TAG|@DIGEST]</pre>
+<p>A forma certa é <strong>tudo junto, depois dos dois pontos</strong>: <code>alpine:3.18</code>. E se quiser o digest no lugar da tag, é com <code>@</code>: <code>alpine@sha256:…</code>.</p>
+</div>
+
+<hr>
+
+<h2>Tags que você vai encontrar por aí</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Padrão de tag</th><th>Exemplo</th><th>Significado</th></tr>
+<tr><td>versão maior</td><td><code>node:22</code></td><td>Canal 22 (recebe patches: 22.1, 22.2…)</td></tr>
+<tr><td>versão completa</td><td><code>nginx:1.27.3</code></td><td>Patch exato — mais previsível</td></tr>
+<tr><td>variante</td><td><code>nginx:alpine</code>, <code>nginx:stable</code></td><td>Tipo de build (leve / estável)</td></tr>
+<tr><td>versão+variante</td><td><code>python:3.12-slim</code></td><td>O mais comum hoje em produção</td></tr>
+<tr><td>codinome do SO</td><td><code>node:22-bookworm</code>, <code>mysql:8-jammy</code></td><td>Debian 12 / Ubuntu 22.04 como base</td></tr>
+<tr><td>data / build</td><td><code>app:2025-11-24</code>, <code>app:nightly</code></td><td>Build diário — só para testar, nunca em produção</td></tr>
+<tr><td>sha (digest)</td><td><code>app@sha256:abc…</code></td><td>Imutável — a trava de verdade</td></tr>
+</table>
+</div>
+
+<h3>Como escolher a tag certa (checklist da Ana)</h3>
+<ol class="passo">
+  <li>Entre na página da imagem no Hub → aba <strong>Tags</strong>.</li>
+  <li>Prefira a <strong>versão maior fixa</strong> da linguagem que seu projeto usa (ex.: se o projeto é Node 22, use <code>22-…</code>, não <code>latest</code> nem <code>23-…</code>).</li>
+  <li>Escolha a variante: <code>alpine</code>/<code>slim</code> para produção enxuta; padrão (bookworm) se precisar instalar pacotes ou debugar.</li>
+  <li>Se o projeto já tem Dockerfile/Compose, copie a tag de lá — consistência entre máquinas é o ponto do Docker.</li>
+  <li>Em produção, considere travar pelo <strong>digest</strong> (<code>@sha256:…</code>).</li>
+</ol>
+
+<hr>
+
+<h2>Ver a tag padrão de verdade: docker image inspect</h2>
+<p>Quer saber para qual imagem uma tag está apontando agora? O <code>docker image inspect</code> mostra os metadados, incluindo o digest:</p>
+<pre class="term">$ docker image inspect nginx:alpine --format '{{.RepoDigests}}'
+[nginx@sha256:b2c3d4e5f6a1…]
+$ docker image inspect nginx:alpine --format '{{.Os}}/{{.Architecture}}'
+linux/amd64</pre>
+<p>Útil também para saber se a imagem serve para o seu chip (amd64 = Intel/AMD; arm64 = Apple Silicon/Mac M1-M3 e Raspberry Pi — se a tag não tiver variante para arm64, o Docker baixa a amd64 e roda com emulação, mais lento).</p>
+
+<div class="warning">
+<strong>Erro de tag: "manifest unknown"</strong>
+<pre class="term">$ docker pull nginx:nao-existe
+docker: manifest for nginx:nao-existe not found: manifest unknown: manifest unknown</pre>
+<p>A tag não existe (nome errado ou a versão não foi publicada). Veja as tags válidas na aba Tags do Hub ou com <code>docker images nginx</code> (as que você já tem).</p>
+</div>
+
+<hr>
+
+<h2>Resumo</h2>
+<ul>
+  <li>Toda imagem é <code>repositório:tag</code>; sem tag, vale <code>:latest</code> (a mais recente).</li>
+  <li>Tipos de tag: versão (<code>:22</code>, <code>:1.27.3</code>), variante (<code>:alpine</code>, <code>:slim</code>), versão+variante (<code>:22-alpine</code>), codinome Debian/Ubuntu (<code>:bookworm</code>, <code>:jammy</code>).</li>
+  <li>Variantes: <strong>alpine</strong> (mínima, musl), <strong>slim</strong> (Debian enxuta), <strong>padrão/bookworm</strong> (completa, com ferramentas).</li>
+  <li><code>:latest</code> em produção é roleta: a tag pode mudar de conteúdo. Prefira versão fixa e, no limite, o <strong>digest</strong> <code>@sha256:…</code> (imutável).</li>
+  <li>Todas as tags disponíveis de uma imagem: aba <strong>Tags</strong> da página dela no Docker Hub; as que você tem local: <code>docker images NOME</code>.</li>
+</ul>
+
+<div class="tip"><strong>Próxima aula:</strong> <a href="imagens-oficiais.html">Imagens oficiais e verificadas</a> — no Hub qualquer um pode publicar; aprenda a ler os selos (Official Image, Verified Publisher) e escolher imagem segura.</div>
+
+</div>
+</main>
+</div>
+<script src="assets/site.js?v=4"></script>
+</body>
+</html>

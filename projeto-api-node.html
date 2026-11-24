@@ -1,0 +1,342 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Projeto 2: API Node.js com Dockerfile | Guia Docker</title>
+<meta name="description" content="Projeto completo passo a passo: a Ana empacota uma API Node.js + Express numa imagem Docker própria. Ela cria app.js, package.json, .dockerignore e o Dockerfile (FROM node:22-alpine, WORKDIR, COPY, RUN npm install, EXPOSE, CMD), faz docker build -t api, roda com -p 3000:3000 -e NODE_ENV=production, testa com curl e vê os logs. Anatomia do Dockerfile linha a linha, ciclo build→run→test, erros reais (porta ocupada, imagem não encontrada, listen em 127.0.0.1) e checklist final. Missões no simulador.">
+<link rel="stylesheet" href="assets/style.css?v=4">
+<script>try{var t=localStorage.getItem("tema");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<meta http-equiv="Cache-Control" content="no-store, must-revalidate">
+<script>try{history.scrollRestoration="manual"}catch(e){}(function(){var n=0;function t(){window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;if(++n<60)setTimeout(t,50)}t();window.addEventListener("pagehide",function(){window.scrollTo(0,0);document.documentElement.scrollTop=0;});window.addEventListener("pageshow",function(){window.scrollTo(0,0)});window.addEventListener("load",function(){window.scrollTo(0,0)});})();document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(a){var h=a.getAttribute("href")||"";if(/[.]html($|[?#])/.test(h)&&a.host===location.host){window.scrollTo(0,0);document.documentElement.scrollTop=0;}}});</script>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" id="sidebar" aria-label="Tópicos"></nav>
+<main class="main">
+<div class="content">
+
+<div class="pager"></div>
+
+<h1>Projeto 2: <span class="hl">API Node.js</span> com Dockerfile</h1>
+
+<p class="intro">No projeto 1 o container servia um arquivo pronto. Agora a Ana vai dar um passo maior: ela tem um <strong>aplicativo de verdade</strong> — uma API em Node.js que responde JSON — e quer empacotá-lo numa imagem Docker, do tipo que daria para mandar para um servidor de produção. Para isso ela escreve um <strong>Dockerfile</strong> (a "receita" da imagem), constrói com <code>docker build</code> e sobe o container publicando a porta 3000.</p>
+
+<div class="note">
+<strong>Você vai aprender</strong>
+<ul>
+  <li>O cenário real: por que empacotar a API numa imagem (funciona igual em qualquer máquina).</li>
+  <li>Escrever um Dockerfile do zero: <code>FROM</code>, <code>WORKDIR</code>, <code>COPY</code>, <code>RUN</code>, <code>EXPOSE</code>, <code>CMD</code> — linha por linha.</li>
+  <li>Por que <code>COPY package*.json</code> vem antes do <code>COPY . .</code> (cache de camadas).</li>
+  <li><code>docker build -t api .</code> e como ler a saída do BuildKit (<code>CACHED</code>, <code>DONE</code>).</li>
+  <li>Rodar com <code>-p 3000:3000</code> e <code>-e NODE_ENV=production</code>, testar com <code>curl</code> e ler os logs.</li>
+  <li>O ciclo build → run → test → rebuild, que é o dia a dia de quem trabalha com Docker.</li>
+  <li>Erros reais: porta ocupada, imagem não encontrada e o clássico <code>listen</code> em <code>127.0.0.1</code>.</li>
+</ul>
+</div>
+
+<hr>
+
+<h2>A ideia: a receita vira imagem, a imagem vira container</h2>
+<p>Até agora usamos imagens prontas (<code>nginx:alpine</code>). Desta vez a Ana <strong>cria a própria imagem</strong>. O fluxo tem três degraus, e vale decorar:</p>
+<pre class="file">Dockerfile  --(docker build)-->  imagem  --(docker run)-->  container</pre>
+<ul>
+  <li>O <strong>Dockerfile</strong> é um arquivo de texto com instruções, uma por linha. Cada instrução vira uma <strong>camada</strong> da imagem (a aula <a href="camadas-cache.html">Camadas e cache do build</a> explica).</li>
+  <li>A <strong>imagem</strong> é o resultado pronto, somente leitura, guardada na máquina.</li>
+  <li>O <strong>container</strong> é a imagem posta para rodar, com uma camada de escrita em cima.</li>
+</ul>
+<p>A analogia da cozinha: o Dockerfile é a receita do bolo, a imagem é o bolo pronto na forma, e o container é a fatia servida no prato — com a cereja que cada um coloca na hora.</p>
+
+<hr>
+
+<h2>Passo 1: os arquivos do projeto</h2>
+<p>No notebook da Ana, crie a pasta do projeto e entre nela:</p>
+<pre class="term">$ mkdir -p ~/api
+$ cd ~/api</pre>
+<p>Crie a estrutura abaixo (quatro arquivos — o <code>.dockerignore</code> já já faz sentido):</p>
+<pre class="file">api/
+├── app.js
+├── package.json
+├── .dockerignore
+└── Dockerfile</pre>
+
+<h3>app.js — a API</h3>
+<p>Uma API mínima com duas rotas: <code>/</code> devolve uma mensagem e o ambiente, e <code>/saude</code> devolve um status (útil para healthchecks):</p>
+<pre class="file" data-file="api/app.js">const express = require('express');
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+app.get('/', (req, res) => {
+  res.json({
+    mensagem: 'Olá do container!',
+    ambiente: process.env.NODE_ENV || 'development'
+  });
+});
+
+app.get('/saude', (req, res) => {
+  res.json({ status: 'ok' });
+});
+
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`API rodando na porta ${PORT}`);
+});</pre>
+<p>Repare no <code>app.listen(PORT, '0.0.0.0', …)</code>: dentro de um container, escutar em <code>127.0.0.1</code> (localhost) deixaria a API <strong>invisível para fora do container</strong> — o <code>0.0.0.0</code> diz "aceito conexões em todas as interfaces", e é o <code>-p</code> que controla o que chega de fora. Esse é um dos erros mais comuns de quem começa (veja a seção de erros lá embaixo).</p>
+
+<h3>package.json — o manifesto do projeto</h3>
+<pre class="file" data-file="api/package.json">{
+  "name": "api",
+  "version": "1.0.0",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}</pre>
+<p>Só uma dependência: o <strong>Express</strong>. O <code>package-lock.json</code> será gerado pelo <code>npm install</code> dentro do build.</p>
+
+<h3>.dockerignore — o que NÃO vai para dentro da imagem</h3>
+<pre class="file" data-file="api/.dockerignore">node_modules
+.git
+npm-debug.log
+Dockerfile
+.dockerignore
+*.md
+.env</pre>
+<p>Antes do build, o Docker envia a pasta inteira (o "contexto") para o daemon. Sem o <code>.dockerignore</code>, o seu <code>node_modules</code> local (que pode ter zilhões de arquivos) seria enviado e copiado para dentro da imagem — lentidão e sujeira. A aula <a href="dockerignore.html">.dockerignore</a> detalha a sintaxe.</p>
+
+<h3>Dockerfile — a receita da imagem</h3>
+<pre class="file" data-file="api/Dockerfile">FROM node:22-alpine
+WORKDIR /app
+COPY package*.json ./
+RUN npm install
+COPY . .
+EXPOSE 3000
+CMD ["node", "app.js"]</pre>
+<p>Anatomia, instrução por instrução (a cola completa está em <a href="ref-dockerfile.html">Instruções do Dockerfile</a>):</p>
+<dl class="anatomy">
+  <dt>FROM node:22-alpine</dt><dd>a imagem base: Node 22 sobre Alpine Linux, ~189MB, já com <code>node</code> e <code>npm</code> (a aula <a href="dockerfile-from.html">FROM</a> explica como escolher a base).</dd>
+  <dt>WORKDIR /app</dt><dd>cria a pasta <code>/app</code> dentro do container e define como diretório de trabalho — os próximos comandos rodam a partir dela.</dd>
+  <dt>COPY package*.json ./</dt><dd>copia só os manifestos de dependências (<code>package.json</code> e <code>package-lock.json</code>, se existir) para <code>/app</code>. Fica <strong>antes</strong> do código de propósito: como quase nunca mudam, a camada fica em cache e o <code>npm install</code> não refaz tudo a cada build (veremos isso na saída).</dd>
+  <dt>RUN npm install</dt><dd>roda durante o build e instala as dependências dentro da imagem. Cada <code>RUN</code> vira uma camada.</dd>
+  <dt>COPY . .</dt><dd>copia todo o resto do contexto (respeitando o <code>.dockerignore</code>) para <code>/app</code>.</dd>
+  <dt>EXPOSE 3000</dt><dd><strong>documenta</strong> a porta que a app usa. Não publica nada sozinha — para acessar de fora, ainda precisamos do <code>-p</code> no run (pegadinha clássica).</dd>
+  <dt>CMD ["node", "app.js"]</dt><dd>o comando padrão que o container executa ao iniciar, em formato JSON (obrigatório nesse formato para não ser interpretado pelo shell).</dd>
+</dl>
+
+<hr>
+
+<h2>Passo 2: construa a imagem</h2>
+<p>Na pasta <code>~/api</code>, rode o build. O <code>.</code> no final é o <strong>contexto do build</strong> (a pasta atual — tudo que o Docker pode usar no <code>COPY</code>):</p>
+<dl class="anatomy">
+  <dt>docker build</dt><dd>lê o Dockerfile e monta a imagem camada por camada.</dd>
+  <dt>-t api:latest</dt><dd>dá o nome <code>api</code> e a tag <code>latest</code> à imagem criada (formato <code>repositório:tag</code>).</dd>
+  <dt>.</dt><dd>o contexto: a pasta atual.</dd>
+</dl>
+<pre class="term" data-cwd="~/api">$ docker build -t api:latest .
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 187B done
+#1 DONE 0.0s
+#2 [internal] load metadata for docker.io/library/node:22-alpine
+#2 DONE 0.6s
+#3 [internal] load .dockerignore
+#3 transferring context: 2B done
+#3 DONE 0.0s
+#4 [1/5] FROM docker.io/library/node:22-alpine
+#4 DONE 0.0s
+#5 [2/5] WORKDIR /app
+#5 CACHED
+#6 [3/5] COPY package*.json ./
+#6 DONE 0.1s
+#7 [4/5] RUN npm install
+#7 2.87 added 58 packages, and audited 59 packages in 3s
+#7 DONE 3.1s
+#8 [5/5] COPY . .
+#8 DONE 0.2s
+#9 exporting to image
+#9 exporting layers
+#9 writing image sha256:9f8e7d6c5b4a... done
+#9 naming to docker.io/library/api:latest done
+#9 DONE 0.4s</pre>
+<p>Como ler a saída do BuildKit (o motor de build):</p>
+<ul>
+  <li><code>#N [k/total] INSTRUÇÃO</code> — cada instrução do Dockerfile, numerada.</li>
+  <li><code>CACHED</code> — a entrada dessa instrução não mudou desde o último build, então a camada foi <strong>reaproveitada</strong> (0s).</li>
+  <li><code>DONE x.xs</code> — a instrução rodou de verdade agora e levou esse tempo.</li>
+  <li>No fim, <code>writing image sha256:…</code> é o ID real da imagem criada.</li>
+</ul>
+<p>Agora a imagem está na lista local:</p>
+<pre class="term">$ docker images
+REPOSITORY   TAG         IMAGE ID       CREATED           SIZE
+api          latest      9f8e7d6c5b4a   25 seconds ago    195MB
+node         22-alpine   c3d4e5f6a1b2   1 week ago        189MB
+nginx        alpine      b2c3d4e5f6a1   5 days ago        48.2MB</pre>
+<p>Repare: a imagem <code>api</code> tem 195MB — os 189MB da base Node mais o Express e o <code>node_modules</code> (~6MB).</p>
+
+<div class="try" data-goal="Successfully tagged api" data-solucao="docker build -t api .">
+<p class="try-task"><strong>Missão:</strong> faça o build como no CI: rode <code>docker build -t api .</code> e depois <code>docker images</code> para confirmar que a imagem <code>api</code> foi criada.</p>
+</div>
+
+<hr>
+
+<h2>Passo 3: rode o container</h2>
+<p>Com a imagem pronta, é hora do <code>run</code>:</p>
+<dl class="anatomy">
+  <dt>docker run</dt><dd>cria e inicia o container.</dd>
+  <dt>-d</dt><dd>segundo plano: devolve o ID e libera o terminal.</dd>
+  <dt>-p 3000:3000</dt><dd>publica a porta 3000 do container na 3000 do host (dava para usar outra, tipo <code>-p 8081:3000</code>).</dd>
+  <dt>--name api</dt><dd>nome previsível para os próximos comandos.</dd>
+  <dt>-e NODE_ENV=production</dt><dd>define a variável de ambiente <code>NODE_ENV</code> dentro do container — a app lê ela no <code>process.env</code> (e o Express muda de comportamento: menos logs, sem stack trace de erro, etc.).</dd>
+  <dt>api:latest</dt><dd>a imagem usada.</dd>
+</dl>
+<pre class="term">$ docker run -d -p 3000:3000 --name api -e NODE_ENV=production api:latest
+b1c2d3e4f5a6071829304a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6
+
+$ docker ps
+CONTAINER ID   IMAGE         COMMAND        CREATED          STATUS          PORTS                    NAMES
+b1c2d3e4f5a6   api:latest    "node app.js"  5 seconds ago    Up 5 seconds    0.0.0.0:3000->3000/tcp   api</pre>
+
+<div class="try" data-goal="3000:3000" data-solucao="docker run -d -p 3000:3000 --name api api:latest">
+<p class="try-task"><strong>Missão:</strong> suba a API: rode <code>docker run -d -p 3000:3000 --name api api:latest</code> (a imagem <code>api</code> já existe se você fez o build antes nesta página) e depois <code>docker ps</code> — a coluna PORTS deve mostrar <code>3000:3000</code>.</p>
+</div>
+
+<hr>
+
+<h2>Passo 4: teste a API</h2>
+<pre class="term">$ curl -s http://localhost:3000
+{"mensagem":"Olá do container!","ambiente":"production"}
+
+$ curl -s http://localhost:3000/saude
+{"status":"ok"}
+
+$ curl -sI http://localhost:3000/saude | head -1
+HTTP/1.1 200 OK
+
+$ docker logs api
+API rodando na porta 3000</pre>
+<p>O valor <code>"ambiente":"production"</code> veio da variável <code>-e NODE_ENV=production</code>: dá para mudar o comportamento do container <strong>sem trocar a imagem</strong> — só passando variáveis na hora do run (a aula <a href="variaveis-ambiente.html">Variáveis de ambiente</a> mostra outras formas, como <code>--env-file</code>).</p>
+<p>Também dá para entrar no container e ver o código por dentro:</p>
+<pre class="term">$ docker exec api ls /app
+app.js  node_modules  package.json  package-lock.json
+$ docker exec api node -e "console.log(process.env.NODE_ENV)"
+production</pre>
+
+<hr>
+
+<h2>Passo 5: o ciclo build → run → test (mude e repita)</h2>
+<p>Agora a parte que vira rotina: a Ana quer adicionar uma rota nova, <code>/hora</code>, que devolve a hora do container. Ela edita o <code>app.js</code> no host:</p>
+<pre class="file" data-file="api/app.js (trecho novo)">app.get('/hora', (req, res) => {
+  res.json({ agora: new Date().toISOString() });
+});</pre>
+<p>E repete o ciclo:</p>
+<pre class="term" data-cwd="~/api">$ docker build -t api:latest .
+#6 [3/5] COPY package*.json ./
+#6 CACHED                    « não mudou → cache
+#7 [4/5] RUN npm install
+#7 CACHED                    « idem: 0s em vez de 3s!
+#8 [5/5] COPY . .
+#8 DONE 0.2s                 « só o código foi reempacotado
+...
+
+$ docker stop api && docker rm api
+api
+api
+$ docker run -d -p 3000:3000 --name api -e NODE_ENV=production api:latest
+b1c2d3e4f5a6…
+
+$ curl -s http://localhost:3000/hora
+{"agora":"2025-11-24T12:05:31.442Z"}</pre>
+<p>Esse é o fluxo do dia a dia: <strong>edita o código → build → stop/rm do container antigo → run de novo → testa com curl</strong>. A ordem <code>COPY package*.json</code> antes de <code>COPY . .</code> fez o <code>npm install</code> ficar <code>CACHED</code> — o build inteiro levou menos de 1 segundo em vez de 4. A aula <a href="build-otimizado.html">Builds otimizados</a> aprofunda essa economia.</p>
+
+<hr>
+
+<h2>Erros comuns neste projeto</h2>
+<div class="warn"><strong>Porta ocupada:</strong>
+<pre class="term">$ docker run -d -p 3000:3000 --name api api:latest
+docker: Error response from daemon: driver failed programming external connectivity on endpoint api (b1c2d3e4f5a6...): Bind for 0.0.0.0:3000 failed: port is already allocated</pre>
+Já existe outro processo usando a 3000 do host — quem sabe um container <code>api</code> esquecido? Pare o antigo (<code>docker stop api</code>) ou publique outra porta no host: <code>-p 3001:3000</code> (e acesse <code>localhost:3001</code>).</div>
+
+<div class="warn"><strong>Imagem não encontrada:</strong>
+<pre class="term">$ docker run -d -p 3000:3000 --name api api:latest
+Unable to find image 'api:latest' locally
+docker: pull access denied for api, repository does not exist or may require 'docker login'.</pre>
+A Ana rodou o <code>docker run</code> <strong>antes</strong> do <code>docker build</code>. Build primeiro, run depois. (Se a imagem não existisse nem no Docker Hub, o <code>pull</code> automático falha com essa mensagem — é o mesmo erro quando o nome está errado.)</div>
+
+<div class="warn"><strong>Nome já em uso:</strong>
+<pre class="term">$ docker run -d --name api api:latest
+docker: Error response from daemon: Conflict. The container name "/api" is already in use by container "b1c2d3e4f5a6…". You have to remove (or rename) that container to be able to reuse that name.</pre>
+Nomes são únicos, mesmo para containers parados. Solução: <code>docker rm api</code> antes, ou outro <code>--name</code>.</div>
+
+<div class="warn"><strong>A API responde no navegador mas não dá curl / dá "connection refused" de fora:</strong> a causa clássica é o <code>app.listen(PORT)</code> sem o <code>'0.0.0.0'</code>. Dentro do container, <code>localhost</code> é o próprio container — a app fica presa lá dentro e o <code>-p</code> não consegue alcançá-la. Sempre escute em <code>0.0.0.0</code> em apps containerizadas.</div>
+
+<div class="warn"><strong>O build quebra no <code>RUN npm install</code>:</strong>
+<pre class="term">#7 ERROR: process "/bin/sh -c npm install" did not complete successfully: exit code: 1</pre>
+Geralmente é dependência quebrada no <code>package.json</code> ou arquivo faltando no contexto (você listou demais no <code>.dockerignore</code> e o <code>COPY</code> não achou o arquivo: <code>COPY failed: file not found in build context</code>). Leia as linhas <em>acima</em> do erro no log do build.</div>
+
+<hr>
+
+<h2>Levando a imagem para outro lugar (tag e push)</h2>
+<p>Uma imagem só na máquina da Ana não serve para o trabalho de faculdade entregar no servidor da turma. Para mandar a imagem para o Docker Hub (ou qualquer registry), o nome precisa ter o seu usuário na frente — é assim que o registry sabe de quem é o repositório:</p>
+<pre class="term" data-cwd="~/api">$ docker login -u ana
+Password:
+Login Succeeded
+
+$ docker tag api:latest ana/api-hello:1.0
+$ docker images | grep ana
+REPOSITORY     TAG       IMAGE ID       CREATED          SIZE
+ana/api-hello  1.0       9f8e7d6c5b4a   2 minutes ago    195MB
+
+$ docker push ana/api-hello:1.0
+The push refers to repository [docker.io/ana/api-hello]
+9f8e7d6c5b4a: Layer already exists
+...
+1.0: digest: sha256:9f8e7d6c5b4a3f2e... size: 1786</pre>
+<p>Depois disso, qualquer pessoa (ou servidor) com Docker pode baixar a imagem com <code>docker pull ana/api-hello:1.0</code> e rodar com o mesmo <code>docker run</code> — <strong>é exatamente por isso que "funciona na minha máquina" deixa de ser desculpa</strong>. A aula <a href="docker-tag-push.html">docker tag e push</a> detalha tags, digests e o login.</p>
+<div class="warn"><strong>Nunca suba imagem com senha dentro:</strong> se o projeto usa variáveis sensibles (senhas de banco, chaves de API), elas não devem estar no código nem na imagem. Use variáveis de ambiente no run (<code>-e</code>) ou um arquivo <code>.env</code> (com <code>--env-file</code>), e mantenha o <code>.env</code> fora do git e fora do contexto do build (está no nosso <code>.dockerignore</code>).</div>
+
+<hr>
+
+<h2>Desafio extra</h2>
+<ol class="passo">
+  <li>Adicione a rota <code>/hora</code> mostrada acima no seu <code>app.js</code>.</li>
+  <li>Refaça o build e observe o <code>CACHED</code> no <code>npm install</code>.</li>
+  <li>Pare e remova o container antigo, suba de novo, e teste <code>curl localhost:3000/hora</code>.</li>
+  <li>(Bônus) Adicione um <code>HEALTHCHECK CMD wget -qO- http://localhost:3000/saude || exit 1</code> no Dockerfile e veja o status mudar para <code>(healthy)</code> no <code>docker ps</code> — a aula <a href="healthcheck.html">HEALTHCHECK</a> explica.</li>
+</ol>
+
+<hr>
+
+<h2>Checklist do projeto 2</h2>
+<ul>
+  <li>☐ Criei a pasta <code>~/api</code> com <code>app.js</code>, <code>package.json</code>, <code>.dockerignore</code> e <code>Dockerfile</code>.</li>
+  <li>☐ O <code>app.listen</code> usa <code>'0.0.0.0'</code> (senão a API não responde de fora).</li>
+  <li>☐ Rodei <code>docker build -t api:latest .</code> e a imagem apareceu no <code>docker images</code>.</li>
+  <li>☐ Rodei <code>docker run -d -p 3000:3000 --name api -e NODE_ENV=production api:latest</code> e o <code>docker ps</code> mostrou <code>0.0.0.0:3000->3000/tcp</code>.</li>
+  <li>☐ <code>curl localhost:3000</code> devolveu o JSON com <code>"ambiente":"production"</code>; <code>curl localhost:3000/saude</code> devolveu <code>{"status":"ok"}</code>.</li>
+  <li>☐ <code>docker logs api</code> mostrou "API rodando na porta 3000".</li>
+  <li>☐ Mudei o código, refiz o build (com <code>CACHED</code> no install), troquei o container e a rota nova respondeu.</li>
+  <li>☐ Limpei tudo no final: <code>docker stop api</code> + <code>docker rm api</code>.</li>
+</ul>
+
+<hr>
+
+<h2>Resumo</h2>
+<ul>
+  <li>O fluxo é: <strong>Dockerfile</strong> (receita) → <code>docker build</code> → <strong>imagem</strong> → <code>docker run</code> → <strong>container</strong>.</li>
+  <li>Ordem do Dockerfile importa: <code>COPY package*.json</code> + <code>RUN npm install</code> <em>antes</em> do <code>COPY . .</code>, para o cache não invalidar a cada mudança de código.</li>
+  <li><code>EXPOSE</code> só documenta a porta; quem publica é o <code>-p</code> no run.</li>
+  <li><code>-e CHAVE=valor</code> muda a configuração do container sem rebuild; apps em containers devem escutar em <code>0.0.0.0</code>.</li>
+  <li>O ciclo do dia a dia: edita → <code>build</code> → <code>stop</code>/<code>rm</code> → <code>run</code> → <code>curl</code>.</li>
+  <li>Erros clássico: porta ocupada (<code>port is already allocated</code>), run antes do build (<code>Unable to find image</code>), nome repetido (<code>already in use</code>).</li>
+</ul>
+
+<div class="tip"><strong>Próxima aula:</strong> <a href="projeto-fullstack.html">Fullstack: React + API + Banco (Compose)</a> — em vez de um container só, vamos subir três serviços que conversam entre si com um único comando.</div>
+
+</div>
+</main>
+</div>
+<script src="assets/site.js?v=4"></script>
+</body>
+</html>

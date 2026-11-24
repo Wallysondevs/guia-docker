@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>O que é um Dockerfile — a receita da imagem | Guia Docker</title>
+<meta name="description" content="O que é um Dockerfile: a imagem como receita de bolo, a história da Ana criando seu primeiro projeto ~/ola-docker no notebook, o exemplo mínimo com FROM + CMD comentado linha a linha, onde o arquivo fica (raiz do contexto do build), quem lê o arquivo (o docker build), como rodar a imagem pronta, erros reais de quem esquece o D maiúsculo ou o arquivo na pasta errada, quiz e resumo. Conferido no Docker Engine 27.x.">
+<link rel="stylesheet" href="assets/style.css?v=4">
+<script>try{var t=localStorage.getItem("tema");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<meta http-equiv="Cache-Control" content="no-store, must-revalidate">
+<script>try{history.scrollRestoration="manual"}catch(e){}(function(){var n=0;function t(){window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;if(++n<60)setTimeout(t,50)}t();window.addEventListener("pagehide",function(){window.scrollTo(0,0);document.documentElement.scrollTop=0;});window.addEventListener("pageshow",function(){window.scrollTo(0,0)});window.addEventListener("load",function(){window.scrollTo(0,0)});})();document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(a){var h=a.getAttribute("href")||"";if(/[.]html($|[?#])/.test(h)&&a.host===location.host){window.scrollTo(0,0);document.documentElement.scrollTop=0;}}});</script>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" id="sidebar" aria-label="Tópicos"></nav>
+<main class="main">
+<div class="content">
+
+<div class="pager"></div>
+
+<h1>O que é um <span class="hl">Dockerfile</span></h1>
+
+<p class="intro">Até agora você usou imagens prontas, baixadas do Docker Hub — como comprar pão na padaria. Agora você vai <strong>criar a sua própria imagem</strong>, do zero. Para isso, o Docker usa um arquivo de texto chamado <code>Dockerfile</code>. Pense nele como a <strong>receita de um bolo</strong>: cada linha é um passo escrito em letras garrafais, e o resultado final, depois de "assar", é a imagem. Nesta aula a Ana, no notebook dela (<code>ana@notebook</code>), vai escrever a primeira receita: um "olá" empacotado em container.</p>
+
+<div class="note">
+<strong>Você vai aprender</strong>
+<ul>
+  <li>A analogia da receita: ingrediente base, preparo e modo de servir.</li>
+  <li>O Dockerfile mínimo (<code>FROM</code> + <code>CMD</code>), comentado linha a linha.</li>
+  <li>Onde o arquivo fica: na <strong>raiz do contexto do build</strong>, com o D maiúsculo.</li>
+  <li>Quem lê o arquivo: o comando <code>docker build</code>, e por que o <code>.</code> no fim importa.</li>
+  <li>O caminho completo: Dockerfile → <code>docker build</code> → imagem → <code>docker run</code> → container.</li>
+  <li>A diferença entre Dockerfile, imagem e container (tabela comparativa).</li>
+  <li>Os erros reais de principiante: arquivo na pasta errada, nome com letra minúscula, build sem arquivo.</li>
+</ul>
+</div>
+
+<hr>
+
+<h2>A história: a Ana quer empacotar o "olá" dela</h2>
+<p>A Ana escreveu um programazinho que imprime "Olá!" no terminal do notebook dela. Ela podia mandar o código por e-mail para a amiga, junto com um bilhete dizendo "instala o Node antes de rodar". Só que aí cada amiga teria que instalar a mesma coisa, na mesma versão, e torcer para dar certo. Em vez disso, ela vai <strong>empacotar o programa junto com o ambiente</strong> numa imagem Docker — aí a amiga só precisa rodar <code>docker run</code> e pronto.</p>
+<p>O primeiro passo é criar uma pasta só para o projeto e escrever a receita dentro dela. No terminal do notebook da Ana:</p>
+<pre class="term" data-cwd="~">$ mkdir ~/ola-docker
+$ cd ~/ola-docker
+$ cat > Dockerfile &lt;&lt;'EOF'
+FROM alpine:3.20
+CMD ["echo", "Olá! Eu fui assado por um Dockerfile."]
+EOF
+$ ls
+Dockerfile</pre>
+<p>O comando <code>cat &gt; Dockerfile &lt;&lt;'EOF' … EOF</code> é um <em>heredoc</em> do Bash: tudo que a Ana digita entre as duas linhas <code>EOF</code> vai para dentro do arquivo. Repare que o arquivo se chama exatamente <code>Dockerfile</code> — com <strong>D maiúsculo</strong> e sem extensão. Esse nome é uma convenção forte: é o arquivo que o <code>docker build</code> procura por padrão.</p>
+
+<div class="tip"><strong>Por que o D maiúsculo?</strong>
+<p>Porque é a convenção oficial e porque o Linux liga para maiúsculas: <code>dockerfile</code> (minúsculo) <strong>não</strong> é encontrado pelo build padrão. Muita gente já perdeu dez minutos procurando o arquivo errado por causa disso.</p></div>
+
+<hr>
+
+<h2>A imagem como receita de bolo</h2>
+<p>Uma receita de bolo tem três partes — e o Dockerfile também. Toda instrução do arquivo cai em uma dessas partes:</p>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Parte da receita</th><th>Instrução do Dockerfile</th><th>Exemplo</th><th>Quando acontece</th></tr>
+<tr><td>O ingrediente base</td><td><code>FROM</code></td><td><code>FROM alpine:3.20</code></td><td>Escolhida no build, uma vez</td></tr>
+<tr><td>O preparo (misturar, assar)</td><td><code>RUN</code>, <code>COPY</code>, <code>ENV</code>…</td><td><code>RUN apk add curl</code></td><td>Durante o <code>docker build</code></td></tr>
+<tr><td>O modo de servir</td><td><code>CMD</code></td><td><code>CMD ["echo", "Olá!"]</code></td><td>Toda vez que um container inicia</td></tr>
+</table>
+</div>
+<p>O <strong>bolo pronto</strong> é a <strong>imagem</strong>: um pacote fechado, só de leitura, com tudo dentro. Cada container que você cria a partir dela é uma <strong>fatia servida</strong> desse bolo — com uma camada gravável em cima, para não estragar o bolo original. Se a fatia sujar, o bolo continua limpo.</p>
+
+<dl class="anatomy">
+  <dt>Ingrediente base (FROM)</dt><dd>de onde a imagem começa: outra imagem, como <code>alpine:3.20</code> ou <code>node:22-alpine</code>.</dd>
+  <dt>Preparo (RUN, COPY…)</dt><dd>passos executados <strong>na hora do build</strong> para deixar a imagem pronta (instalar pacotes, copiar o código).</dd>
+  <dt>Modo de servir (CMD)</dt><dd>o comando padrão que roda <strong>quando o container inicia</strong>.</dd>
+</dl>
+
+<hr>
+
+<h2>O Dockerfile mínimo, linha a linha</h2>
+<p>Com apenas duas instruções você já gera uma imagem funcional. Esse é o <code>Dockerfile</code> que a Ana escreveu:</p>
+<pre class="file"># arquivo: Dockerfile
+# Linha 1: de onde a imagem nasce (a base)
+FROM alpine:3.20
+# Linha 2: o que roda quando o container iniciar
+CMD ["echo", "Olá! Eu fui assado por um Dockerfile."]</pre>
+
+<dl class="anatomy">
+  <dt># comentário</dt><dd>Linhas que começam com <code>#</code> são comentários: o Docker as ignora. Use e abuse para explicar cada passo — o seu "eu do futuro" agradece.</dd>
+  <dt>FROM alpine:3.20</dt><dd>"A partir de alpine na versão 3.20". O <code>alpine</code> é uma distribuição Linux minúscula (uns 5MB); a tag <code>:3.20</code> fixa a versão. Escolher a base tem aula própria: <a href="dockerfile-from.html">FROM: a imagem base</a>.</dd>
+  <dt>CMD</dt><dd>"Quando este container iniciar, rode isto". É o comando padrão do container.</dd>
+  <dt>["echo", "Olá! …"]</dt><dd>A sintaxe entre colchetes é a <strong>forma exec</strong> (uma lista em JSON): cada elemento vira um argumento do comando, sem passar por shell. A aula <a href="dockerfile-run-cmd.html">RUN e CMD</a> compara com a forma shell (<code>CMD echo "Olá!"</code>).</dd>
+</dl>
+
+<p>Detalhes que fazem diferença:</p>
+<ul>
+  <li><strong>Uma instrução por linha.</strong> O Dockerfile não usa ponto e vírgula no fim — cada linha já é um comando completo.</li>
+  <li><strong>Ordem importa.</strong> O <code>FROM</code> tem que ser a primeira instrução (depois de comentários). Se você colocar um <code>RUN</code> antes do <code>FROM</code>, o build quebra na hora.</li>
+  <li><strong>O arquivo é lido de cima para baixo</strong>, como uma receita mesmo: cada linha usa o resultado das anteriores.</li>
+</ul>
+
+<div class="warn"><strong>Erro comum: texto grudado na instrução.</strong> Escrever <code>FROMalpine:3.20</code> (sem espaço) dá erro de parse: <code>docker: 'FROMalpine:3.20' is not a valid command</code>-style — na verdade o build acusa <code>unknown instruction: FROMALPINE:3.20</code>. Sempre um espaço entre a instrução e o argumento.</div>
+
+<hr>
+
+<h2>Onde o arquivo fica: a raiz do contexto do build</h2>
+<p>Por padrão, o arquivo se chama <code>Dockerfile</code> e fica na <strong>raiz do projeto</strong> — a pasta que você manda para o Docker. Essa pasta tem nome chique: <strong>contexto do build</strong> (build context). Tudo que está nela pode ser copiado para dentro da imagem com <code>COPY</code> (aula <a href="dockerfile-copy-add.html">COPY, ADD e WORKDIR</a>), e tudo que está fora dela <strong>não pode</strong> entrar na imagem.</p>
+<pre class="term" data-cwd="~">$ ls ~/ola-docker
+Dockerfile
+$ tree ~/ola-docker   « a pasta só tem a receita ainda
+.
+└── Dockerfile</pre>
+<p>O arquivo <code>.dockerignore</code>, quando existe nessa mesma raiz, funciona como uma lista de exclusão: o que está nele <strong>não é enviado</strong> no contexto (aula <a href="dockerignore.html">.dockerignore</a>).</p>
+
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Conceito</th><th>O que é</th><th>Analogia</th></tr>
+<tr><td><strong>Contexto do build</strong></td><td>A pasta que você passa no <code>docker build .</code> (o <code>.</code>)</td><td>A cesta de ingredientes que você leva para a cozinha</td></tr>
+<tr><td><strong>Dockerfile</strong></td><td>O arquivo de receita dentro do contexto</td><td>O papel com o passo a passo</td></tr>
+<tr><td><strong>Imagem</strong></td><td>O resultado do build: camadas só de leitura empilhadas</td><td>O bolo pronto, embalado a vácuo</td></tr>
+<tr><td><strong>Container</strong></td><td>Uma imagem rodando, com uma camada gravável em cima</td><td>A fatia servida no prato</td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>Quem lê o Dockerfile: o docker build</h2>
+<p>Ninguém lê o arquivo sozinho — quem transforma a receita em imagem é o comando <code>docker build</code>. Ele procura o arquivo <code>Dockerfile</code> dentro da pasta que você indicar e executa cada instrução, uma de cada vez:</p>
+<dl class="anatomy">
+  <dt>docker build</dt><dd>o comando que lê o Dockerfile e monta a imagem passo a passo.</dd>
+  <dt>-t ola:1.0</dt><dd>dá um nome e uma tag à imagem resultante (formato <code>nome:tag</code>). Sem <code>-t</code>, a imagem fica sem nome ("&lt;none&gt;").</dd>
+  <dt>.</dt><dd>o contexto do build: "a pasta atual", onde está o Dockerfile. O ponto é um caminho relativo — poderia ser <code>~/ola-docker</code> também.</dd>
+</dl>
+<pre class="term" data-cwd="~/ola-docker">$ docker build -t ola:1.0 .
+Sending build context to Docker daemon  2.048kB
+Step 1/2 : FROM alpine:3.20
+ ---> e5f6a1b2c3d4
+Step 2/2 : CMD ["echo", "Olá! Eu fui assado por um Dockerfile."]
+ ---> Running in a1b2c3d4e5f6
+Removing intermediate container a1b2c3d4e5f6
+ ---> b2c3d4e5f6a1
+Successfully built b2c3d4e5f6a1
+Successfully tagged ola:1.0</pre>
+<p>Vamos ler essa saída, porque ela aparece em todo build:</p>
+<ol class="passo">
+  <li><code>Sending build context to Docker daemon 2.048kB</code> — a pasta do projeto foi compactada e enviada ao daemon (o processo do Docker que faz o trabalho pesado).</li>
+  <li><code>Step 1/2 : FROM alpine:3.20</code> — a instrução 1 de 2 está sendo executada. A base foi baixada (ou reutilizada do cache) e recebeu o ID <code>e5f6a1b2c3d4</code>.</li>
+  <li><code>Step 2/2 : CMD […]</code> — a instrução 2 rodou num container temporário (<code>Running in a1b2c3d4e5f6</code>), que foi descartado (<code>Removing intermediate container</code>) e virou a camada <code>b2c3d4e5f6a1</code>.</li>
+  <li><code>Successfully built</code> + <code>Successfully tagged ola:1.0</code> — a imagem final foi montada e etiquetada. É o "bolo pronto".</li>
+</ol>
+
+<hr>
+
+<h2>Do Dockerfile à imagem rodando: o caminho completo</h2>
+<p>Pronto: a imagem <code>ola:1.0</code> agora existe na máquina da Ana. Ela confirma listando as imagens e depois roda a imagem — que é de onde vem o container:</p>
+<pre class="term" data-cwd="~/ola-docker">$ docker images
+REPOSITORY   TAG          IMAGE ID       CREATED          SIZE
+ola          1.0          b2c3d4e5f6a1   20 seconds ago   7.85MB
+alpine       3.20         e5f6a1b2c3d4   3 weeks ago      7.8MB
+hello-world  latest       a1b2c3d4e5f6   2 weeks ago      18.2kB
+$ docker run --rm ola:1.0
+Olá! Eu fui assado por um Dockerfile.
+$ docker ps -a
+CONTAINER ID   IMAGE   COMMAND   CREATED   STATUS   PORTS   NAMES</pre>
+<p>O <code>--rm</code> faz o container se apagar sozinho quando termina (bom para testes). Como a saída mostra, o <code>docker ps -a</code> veio vazio: o container do "olá" já rodou, imprimiu e foi removido. Sem <code>--rm</code>, ele ficaria parado na lista até você dar <code>docker rm</code>.</p>
+
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Passo</th><th>Comando da Ana</th><th>O que acontece</th></tr>
+<tr><td>1. Escrever a receita</td><td><code>cat &gt; Dockerfile</code></td><td>Cria o arquivo de texto com as instruções</td></tr>
+<tr><td>2. Assar o bolo</td><td><code>docker build -t ola:1.0 .</code></td><td>Lê o Dockerfile e monta a imagem <code>ola:1.0</code></td></tr>
+<tr><td>3. Conferir o bolo</td><td><code>docker images</code></td><td>Lista as imagens que existem na máquina</td></tr>
+<tr><td>4. Servir a fatia</td><td><code>docker run --rm ola:1.0</code></td><td>Cria um container da imagem e roda o CMD</td></tr>
+<tr><td>5. Ver as fatias servidas</td><td><code>docker ps -a</code></td><td>Lista os containers (rodando ou parados)</td></tr>
+</table>
+</div>
+
+<div class="try" data-goal="Successfully built" data-solucao="docker build --help">
+<p class="try-task"><strong>Missão:</strong> explore o comando de build: rode <code>docker build --help</code> no terminal abaixo e veja a saída do comando que lê o Dockerfile.</p>
+</div>
+
+<div class="try" data-goal="Successfully tagged ola:1.0" data-solucao="docker build -t ola:1.0 .">
+<p class="try-task"><strong>Missão extra:</strong> agora simule o build da receita da Ana: rode <code>docker build -t ola:1.0 .</code> no terminal abaixo e acompanhe os passos até o <code>Successfully tagged ola:1.0</code>.</p>
+</div>
+
+<hr>
+
+<h2>Quando dá errado</h2>
+
+<div class="warn"><strong>Erro comum nº 1: rodar o build numa pasta que não tem Dockerfile.</strong> A Ana esqueceu de dar <code>cd</code> e rodou o build na home:<pre class="term" data-cwd="~">$ docker build -t ola .
+ERROR: failed to solve: failed to read dockerfile: open Dockerfile: no such file or directory</pre>
+O daemon não acha o arquivo e responde <code>no such file or directory</code>. <strong>Como consertar:</strong> entre na pasta do projeto (<code>cd ~/ola-docker</code>) ou aponte o contexto: <code>docker build -t ola ~/ola-docker</code>. Se o arquivo tiver outro nome, use <code>-f</code> (aula <a href="docker-build.html">docker build</a>).</div>
+
+<div class="warn"><strong>Erro comum nº 2: arquivo com nome minúsculo.</strong> Se a Ana tivesse salvo como <code>dockerfile</code>, o build padrão não encontraria e daria o mesmo erro acima. No Linux, <code>Dockerfile</code> e <code>dockerfile</code> são arquivos diferentes. <strong>Como consertar:</strong> renomeie com <code>mv dockerfile Dockerfile</code> — ou use <code>docker build -f dockerfile .</code> para indicar o nome na hora.</div>
+
+<div class="warn"><strong>Erro comum nº 3: instrução antes do FROM.</strong> O Dockerfile precisa começar pela base:<pre class="file"># ERRADO: preparo antes do ingrediente base
+RUN echo "ei"
+FROM alpine:3.20</pre>
+O build falha com <code>Error response from daemon: Dockerfile parse error line 2: unknown instruction: RUN</code>-style (a mensagem exata varia, mas o problema é o mesmo: não existe imagem ainda para rodar o RUN). <strong>Como consertar:</strong> <code>FROM</code> sempre primeiro.</div>
+
+<div class="warn"><strong>Erro comum nº 4: esquecer as aspas no CMD em forma exec.</strong> <code>CMD [echo, "Olá"]</code> (sem aspas no primeiro elemento) não é JSON válido e o build acusa erro de parse na linha do CMD. Na forma exec, <strong>todos</strong> os elementos vão entre aspas: <code>CMD ["echo", "Olá"]</code>.</div>
+
+<hr>
+
+<h2>Referência rápida</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Escrita</th><th>O que faz</th></tr>
+<tr><td><code># comentário</code></td><td>Linha ignorada pelo Docker — use para explicar o passo</td></tr>
+<tr><td><code>FROM imagem:tag</code></td><td>Escolhe a imagem base (sempre a primeira instrução)</td></tr>
+<tr><td><code>RUN comando</code></td><td>Executa algo durante o build (instala, compila, configura)</td></tr>
+<tr><td><code>COPY origem destino</code></td><td>Copia arquivos do contexto para dentro da imagem</td></tr>
+<tr><td><code>CMD ["cmd", "arg"]</code></td><td>Comando padrão quando o container inicia (forma exec recomendada)</td></tr>
+<tr><td><code>docker build -t nome:tag .</code></td><td>Lê o <code>Dockerfile</code> da pasta atual e monta a imagem</td></tr>
+<tr><td><code>docker images</code></td><td>Lista as imagens da máquina</td></tr>
+<tr><td><code>docker run --rm nome:tag</code></td><td>Roda um container da imagem (e apaga ele ao terminar)</td></tr>
+</table>
+</div>
+
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Mensagem de erro</th><th>Quer dizer</th></tr>
+<tr><td><code>failed to read dockerfile: open Dockerfile: no such file or directory</code></td><td>Não existe <code>Dockerfile</code> na pasta do contexto — cd errado ou nome minúsculo</td></tr>
+<tr><td><code>unknown instruction: …</code></td><td>A instrução não existe ou está sem espaço depois dela</td></tr>
+<tr><td><code>Successfully built … / Successfully tagged …</code></td><td>Deu certo: imagem montada e etiquetada</td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>Quiz rápido</h2>
+
+<div class="mc" data-answer="2">
+<p class="mc-q">1. No Dockerfile, qual instrução escolhe a imagem base?</p>
+<label><input type="radio" name="q1"> <code>CMD</code></label>
+<label><input type="radio" name="q1"> <code>FROM</code></label>
+<label><input type="radio" name="q1"> <code>RUN</code></label>
+<label><input type="radio" name="q1"> <code>COPY</code></label>
+</div>
+
+<div class="mc" data-answer="3">
+<p class="mc-q">2. O que o <code>.</code> no fim de <code>docker build -t ola:1.0 .</code> significa?</p>
+<label><input type="radio" name="q2"> O ponto final da frase</label>
+<label><input type="radio" name="q2"> A tag padrão da imagem</label>
+<label><input type="radio" name="q2"> O contexto do build: a pasta atual, onde está o Dockerfile</label>
+<label><input type="radio" name="q2"> Um argumento do comando CMD</label>
+</div>
+
+<div class="mc" data-answer="4">
+<p class="mc-q">3. Qual é a diferença entre imagem e container?</p>
+<label><input type="radio" name="q3"> Nenhuma, são sinônimos</label>
+<label><input type="radio" name="q3"> A imagem é o arquivo de receita; o container é o programa rodando</label>
+<label><input type="radio" name="q3"> O container é a receita; a imagem é o bolo pronto</label>
+<label><input type="radio" name="q3"> A imagem é o bolo pronto (só leitura); o container é uma fatia dele rodando, com camada gravável em cima</label>
+</div>
+
+<div class="mc" data-answer="1">
+<p class="mc-q">4. O build acusou <code>failed to read dockerfile: open Dockerfile: no such file or directory</code>. Qual é a causa mais provável?</p>
+<label><input type="radio" name="q4"> O comando rodou numa pasta sem o arquivo <code>Dockerfile</code> (esqueci o cd, ou o nome está minúsculo)</label>
+<label><input type="radio" name="q4"> A imagem base não existe no Docker Hub</label>
+<label><input type="radio" name="q4"> O CMD está sem aspas</label>
+<label><input type="radio" name="q4"> Falta memória no computador</label>
+</div>
+
+<hr>
+
+<h2>Resumo</h2>
+<ul>
+  <li>O <code>Dockerfile</code> é a <strong>receita</strong> da imagem: um arquivo de texto, com D maiúsculo, na raiz do contexto do build, uma instrução por linha, <code>#</code> para comentários.</li>
+  <li>Toda receita começa com <code>FROM</code> (a base), passa pelo preparo (<code>RUN</code>, <code>COPY</code>) e termina no <code>CMD</code> (o que roda quando o container inicia).</li>
+  <li>Quem lê a receita é o <code>docker build -t nome:tag .</code>: o <code>.</code> é o contexto (a pasta atual), enviado inteiro ao daemon.</li>
+  <li>O build imprime <code>Step N/M</code> por instrução e termina com <code>Successfully built</code> / <code>Successfully tagged</code>.</li>
+  <li>Imagem é o bolo pronto (só leitura); container é a fatia rodando, com uma camada gravável em cima — <code>docker run --rm</code> cria, roda e apaga.</li>
+  <li>Erros clássicaços: build na pasta errada, arquivo com nome minúsculo, instrução antes do <code>FROM</code>, aspas faltando no CMD em forma exec.</li>
+</ul>
+
+<div class="tip"><strong>Próxima aula:</strong> <a href="dockerfile-from.html">FROM: a imagem base</a> — como escolher de onde a sua imagem começa.</div>
+
+<div class="pager"></div>
+
+</div>
+</main>
+</div>
+<script src="assets/site.js?v=4"></script>
+</body>
+</html>

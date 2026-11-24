@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Volumes (-v): pastas que persistem além do container | Guia Docker</title>
+<meta name="description" content="Introdução a volumes no Docker: por que os dados de um container somem quando ele é apagado (camada gravável), como montar pastas do host com -v HOST:CONTAINER:ro (bind mount), volumes nomeados com -v NOME:CONTAINER (gerenciados pelo Docker, para banco de dados), a anatomia dos três formatos de -v, a tabela de quando usar cada um, exemplos com Nginx servindo arquivos locais e Postgres guardando dados, e docker volume ls. Missão no simulador.">
+<link rel="stylesheet" href="assets/style.css?v=4">
+<script>try{var t=localStorage.getItem("tema");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<meta http-equiv="Cache-Control" content="no-store, must-revalidate">
+<script>try{history.scrollRestoration="manual"}catch(e){}(function(){var n=0;function t(){window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;if(++n<60)setTimeout(t,50)}t();window.addEventListener("pagehide",function(){window.scrollTo(0,0);document.documentElement.scrollTop=0;});window.addEventListener("pageshow",function(){window.scrollTo(0,0)});window.addEventListener("load",function(){window.scrollTo(0,0)});})();document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(a){var h=a.getAttribute("href")||"";if(/[.]html($|[?#])/.test(h)&&a.host===location.host){window.scrollTo(0,0);document.documentElement.scrollTop=0;}}});</script>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" id="sidebar" aria-label="Tópicos"></nav>
+<main class="main">
+<div class="content">
+
+<div class="pager"></div>
+
+<h1>Volumes <span class="hl">(-v)</span> — dados que persistem</h1>
+
+<p class="intro">Tudo que um container grava na sua camada própria <strong>some quando o container é apagado</strong> (<code>docker rm</code>). Para dados que devem durar — banco de dados, uploads, configurações — você usa um <strong>volume</strong>: uma pasta que fica <em>fora</em> do container e é "encaixada" dentro dele com <code>-v</code>.</p>
+
+<div class="note">
+<strong>Você vai aprender</strong>
+<ul>
+  <li>Por que os dados do container somem com <code>docker rm</code> (a camada gravável).</li>
+  <li>Os dois jeitos de usar <code>-v</code>: <strong>bind mount</strong> (pasta do seu computador) e <strong>volume nomeado</strong> (pasta gerenciada pelo Docker).</li>
+  <li>A anatomia: <code>-v HOST:CONTAINER</code>, <code>-v NOME:CONTAINER</code> e o sufixo <code>:ro</code> (somente leitura).</li>
+  <li>Exemplo clássico: Nginx servindo os arquivos do seu site local.</li>
+  <li>Volume nomeado para banco de dados (Postgres) e <code>docker volume ls</code>.</li>
+</ul>
+</div>
+
+<hr>
+
+<h2>O problema: o container é descartável</h2>
+<p>A Ana gravou um arquivo dentro de um container e apagou o container. O arquivo sumiu:</p>
+<pre class="term">$ docker run --rm alpine sh -c "echo oi > /tmp/arquivo.txt &amp;&amp; cat /tmp/arquivo.txt"
+oi
+$ docker run --rm alpine cat /tmp/arquivo.txt   « container NOVO: camada gravável nova, vazia
+docker: Error response from daemon: …
+cat: can't open '/tmp/arquivo.txt': No such file or directory</pre>
+<p>Cada <code>docker run</code> cria um container novo, com uma camada gravável <strong>nova e vazia</strong> em cima da imagem. O que foi gravado no container anterior ficou para trás — e foi apagado com o <code>--rm</code>/<code>rm</code>. A imagem (receita) não muda; só a "camada de uso" some.</p>
+
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Onde fica o dado</th><th>Sobrevive a <code>docker rm</code>?</th><th>Como coloca lá</th></tr>
+<tr><td>Camada gravável do container</td><td><strong>Não</strong> — some com o rm</td><td>O próprio programa gravando dentro do container</td></tr>
+<tr><td>Pasta do seu computador (bind mount)</td><td><strong>Sim</strong></td><td><code>-v /caminho/do/host:/caminho/do/container</code></td></tr>
+<tr><td>Volume nomeado do Docker</td><td><strong>Sim</strong></td><td><code>-v nome-do-volume:/caminho/do/container</code></td></tr>
+<tr><td>Dentro da imagem (build)</td><td>Sim, mas é fixo</td><td><code>COPY</code> no Dockerfile (nível 2)</td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>Montar uma pasta do host (bind mount)</h2>
+<p>O caso mais comum do dia a dia: o site da Ana está numa pasta do computador dela, e ela quer que o Nginx do container sirva esses arquivos:</p>
+<pre class="term">$ mkdir ~/meusite
+$ echo "&lt;h1&gt;Olá, sou o site da Ana&lt;/h1&gt;" &gt; ~/meusite/index.html
+$ docker run -d -p 8080:80 -v /home/ana/meusite:/usr/share/nginx/html:ro --name meu-site nginx:alpine
+$ curl -s http://localhost:8080
+&lt;h1&gt;Olá, sou o site da Ana&lt;/h1&gt;     « o arquivo da pasta dela, servido pelo container!</pre>
+
+<dl class="anatomy">
+  <dt>-v /home/ana/meusite:/usr/share/nginx/html:ro</dt><dd>A flag <em>volume</em>.</dd>
+  <dt>/home/ana/meusite</dt><dd>O caminho <strong>no host</strong> (sua máquina) — precisa ser <strong>absoluto</strong> (começa com <code>/</code>).</dd>
+  <dt>:</dt><dd>Separa host de container.</dd>
+  <dt>/usr/share/nginx/html</dt><dd>O caminho <strong>dentro do container</strong> onde a pasta vai aparecer (no Nginx oficial, é de onde ele serve os arquivos).</dd>
+  <dt>:ro</dt><dd><em>read-only</em>: o container só lê a pasta, não consegue apagar/alterar seus arquivos — mais seguro. Sem o <code>:ro</code>, o container pode gravar na sua pasta.</dd>
+</dl>
+
+<p>Agora editar o arquivo na sua máquina reflete no container na hora (é a mesma pasta!):</p>
+<pre class="term">$ echo "&lt;h1&gt;Versão 2 do site&lt;/h1&gt;" &gt; ~/meusite/index.html
+$ curl -s http://localhost:8080
+&lt;h1&gt;Versão 2 do site&lt;/h1&gt;</pre>
+<p>Isso é ouro para desenvolvimento: você edita o código no seu editor e o container já vê a mudança (algumas imagens recarregam sozinhas; outras precisam de <code>docker restart</code>).</p>
+
+<div class="try" data-goal="oi" data-solucao="docker run -v $(pwd):/dados --rm alpine cat /dados/arquivo.txt"><p class="try-task"><strong>Missão:</strong> explore como o simulador trata volumes: rode <code>docker run -v $(pwd):/dados --rm alpine cat /dados/arquivo.txt</code> (no simulador a saída é simplificada; no Docker real, mostraria o conteúdo do arquivo da sua pasta atual dentro do container).</p></div>
+
+<hr>
+
+<h2>Volume nomeado (gerenciado pelo Docker)</h2>
+<p>Para dados que o <strong>próprio container</strong> gera e que devem durar — o banco de dados é o exemplo clássico. Você não aponta para uma pasta sua; dá um <strong>nome</strong> e o Docker cria a pasta gerenciada em <code>/var/lib/docker/volumes/</code>:</p>
+<pre class="term">$ docker run -d --name banco \
+    -e POSTGRES_PASSWORD=segredo123 \
+    -v dados-postgres:/var/lib/postgresql/data \
+    postgres:16-alpine
+$ docker volume ls
+DRIVER    VOLUME NAME
+local     dados-postgres</pre>
+
+<dl class="anatomy">
+  <dt>-v dados-postgres:/var/lib/postgresql/data</dt><dd>Como o primeiro nome <strong>não</strong> começa com <code>/</code> (não é um caminho absoluto), o Docker entende que é um <strong>volume nomeado</strong> e cria/usa <code>dados-postgres</code>.</dd>
+  <dt>/var/lib/postgresql/data</dt><dd>Onde o Postgres grava os dados dentro do container — essa pasta passa a viver no volume.</dd>
+</dl>
+
+<p>Agora o banco sobrevive a tudo:</p>
+<pre class="term">$ docker rm -f banco          « apagou o container…
+$ docker run -d --name banco \
+    -e POSTGRES_PASSWORD=segredo123 \
+    -v dados-postgres:/var/lib/postgresql/data \
+    postgres:16-alpine        « …e recriou: os dados continuaram no volume ✅
+$ docker exec banco psql -U postgres -c "SELECT count(*) FROM produtos;"
+ 42</pre>
+
+<div class="table-wrap">
+<table class="ref">
+<tr><th></th><th>Bind mount (pasta do host)</th><th>Volume nomeado</th></tr>
+<tr><td>Sintaxe</td><td><code>-v /abs/host:/container</code></td><td><code>-v nome:/container</code></td></tr>
+<tr><td>Quem gerencia a pasta</td><td>Você (é uma pasta sua)</td><td>O Docker (em <code>/var/lib/docker/volumes</code>)</td></tr>
+<tr><td>Quando usar</td><td>Código em desenvolvimento (editar e ver na hora), configs</td><td>Dados de banco, uploads, qualquer coisa que o app gera</td></tr>
+<tr><td>Portável?</td><td>Depende do caminho existir na máquina</td><td>Sim — o Docker leva o volume onde for</td></tr>
+<tr><td>Backup</td><td>É só copiar a pasta do host</td><td><code>docker run --rm -v nome:/dados -v $(pwd):/backup alpine tar czf /backup/dados.tgz /dados</code></td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>As três formas de escrever o -v</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Forma</th><th>Tipo</th><th>Exemplo</th></tr>
+<tr><td><code>-v /home/ana/site:/usr/share/nginx/html</code></td><td>Bind mount (caminho absoluto = pasta do host)</td><td>servir arquivos locais</td></tr>
+<tr><td><code>-v /home/ana/site:/usr/share/nginx/html:ro</code></td><td>Bind mount somente leitura</td><td>config que o container não pode alterar</td></tr>
+<tr><td><code>-v dados-postgres:/var/lib/postgresql/data</code></td><td>Volume nomeado (nome sem <code>/</code> inicial)</td><td>banco de dados</td></tr>
+</table>
+</div>
+
+<div class="warning">
+<strong>Caminho relativo não funciona no -v</strong>
+<pre class="term">$ docker run -v meusite:/dados nginx:alpine
+docker: Error response from daemon: create meusite: "meusite" includes invalid characters for a local volume name…
+# na real, caminho relativo vira nome de volume sem querer — use SEMPRE caminho absoluto no host:
+$ docker run -v ~/meusite:/dados nginx   « ~ também não expande aqui!
+$ docker run -v "$PWD/meusite":/dados nginx   « certo: $PWD expande para o caminho absoluto</pre>
+</div>
+
+<div class="warning">
+<strong>Permissões: o container roda como root (por padrão)</strong>
+<p>Se o container gravar numa pasta sua (sem <code>:ro</code>), os arquivos vão aparecer como dono <code>root</code> no seu computador — e aí você pode ter dificuldade para editar/apagar. Soluções: use <code>:ro</code> quando o container só precisa ler; ou rode o container com seu usuário (<code>-u $(id -u):$(id -g)</code>); ou ajuste o usuário na imagem (nível 3, aula <a href="usuario-nao-root.html">usuário não-root</a>).</p>
+</div>
+
+<div class="warning">
+<strong>Dados somem sem volume</strong>
+<p>Se você subiu um banco sem <code>-v</code> e deu <code>docker rm</code>, os dados foram junto — e não tem lixeira. Regra de ouro: <strong>todo container que guarda dados recebe um volume no mesmo <code>run</code></strong>.</p>
+</div>
+
+<div class="mc" data-answer="2">
+<p class="mc-q">Em <code>-v /home/ana/site:/usr/share/nginx/html:ro</code>, o que é o <code>:ro</code>?</p>
+<label><input type="radio" name="q1"> Um novo container</label>
+<label><input type="radio" name="q1"> Read-only: o container monta a pasta só para leitura (não pode apagar seus arquivos)</label>
+<label><input type="radio" name="q1"> Uma tag da imagem</label>
+<label><input type="radio" name="q1"> O usuário root</label>
+</div>
+
+<div class="mc" data-answer="3">
+<p class="mc-q">Qual a diferença entre <code>-v /home/ana/dados:/dados</code> e <code>-v meusdados:/dados</code>?</p>
+<label><input type="radio" name="q2"> Nenhuma</label>
+<label><input type="radio" name="q2"> O primeiro é caminho relativo; o segundo, absoluto</label>
+<label><input type="radio" name="q2"> O primeiro monta uma pasta sua (bind mount, caminho absoluto); o segundo usa/cria um volume nomeado gerenciado pelo Docker</label>
+<label><input type="radio" name="q2"> O primeiro apaga a pasta; o segundo não</label>
+</div>
+
+<div class="mc" data-answer="1">
+<p class="mc-q">A Ana apagou o container do Postgres com <code>docker rm</code> e os dados sumiram. O que faltou?</p>
+<label><input type="radio" name="q3"> Um volume (<code>-v dados-postgres:/var/lib/postgresql/data</code>) — dados no container somem com o rm</label>
+<label><input type="radio" name="q3"> Nada, banco de dados não pode ser recuperado de jeito nenhum</label>
+<label><input type="radio" name="q3"> Um <code>-p</code> a mais</label>
+<label><input type="radio" name="q3"> Uma imagem maior</label>
+</div>
+
+<hr>
+
+<h2>Onde o volume mora de verdade?</h2>
+<p>Um volume nomeado é uma pasta no host (no Linux, em <code>/var/lib/docker/volumes/&lt;nome&gt;/_data</code>). Dá para inspecionar:</p>
+<pre class="term">$ docker volume inspect dados-postgres
+[
+  {
+    "Name": "dados-postgres",
+    "Driver": "local",
+    "Mountpoint": "/var/lib/docker/volumes/dados-postgres/_data",
+    "Scope": "local"
+  }
+]
+$ docker volume ls
+DRIVER    VOLUME NAME
+local     dados-postgres
+$ docker volume rm dados-postgres     « apaga o volume (e os dados!) — só com o container parado
+Error response from daemon: remove dados-postgres: volume is in use - container «…...</pre>
+<p>Apagar volume apaga os dados de vez — por isso o Docker só deixa apagar volume <strong>sem container usando</strong>. Para backup, monte o volume num container temporário e copie de lá (veja a linha de backup na tabela acima). A aula <a href="volumes-inspect.html">docker inspect em volumes</a> detalha.</p>
+
+<h3>Exemplo completo: site + banco com persistência</h3>
+<pre class="term">$ docker run -d --name banco \
+    -e POSTGRES_PASSWORD=segredo123 -e POSTGRES_DB=loja \
+    -v dados-postgres:/var/lib/postgresql/data \
+    postgres:16-alpine
+$ docker run -d --name meu-site \
+    -p 8080:80 \
+    -v /home/ana/meusite:/usr/share/nginx/html:ro \
+    nginx:alpine
+$ docker ps
+CONTAINER ID   IMAGE              STATUS         PORTS                   NAMES
+f3a1…          nginx:alpine       Up 5 seconds   0.0.0.0:8080->80/tcp    meu-site
+d4e5…          postgres:16-alpine Up 3 seconds   5432/tcp                banco
+$ docker rm -f meu-site banco && docker system prune -f   « apagou tudo…
+$ docker run -d --name banco -e POSTGRES_PASSWORD=segredo123 -e POSTGRES_DB=loja \
+    -v dados-postgres:/var/lib/postgresql/data postgres:16-alpine   « …e o banco voltou COM os dados ✅</pre>
+
+<hr>
+
+<h2>Volume anônimo e tmpfs (visión rápida)</h2>
+<p>Além de bind mount e volume nomeado, existem dois tipos que aparecem no nível 2 (<a href="volumes-tipos.html">volumes a fundo</a>):</p>
+<ul>
+  <li><strong>Volume anônimo</strong>: <code>-v /dados</code> (só o caminho do container). O Docker cria um volume sem nome na hora. Serve para dados que devem durar mais que o container, mas que você não precisa referenciar depois. Cuidado: volumes anônimos órfãos acumulam disco — limpe com <code>docker volume prune</code>.</li>
+  <li><strong>tmpfs</strong>: <code>--tmpfs /cache</code> monta a pasta na <strong>memória RAM</strong> (rápido, mas some com o container e não ocupa disco). Ideal para cache e dados temporários sensíveis (não ficam gravados no disco).</li>
+</ul>
+
+<h3>Resumo dos três jeitos de persistir</h3>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Precisa de…</th><th>Use</th></tr>
+<tr><td>Editar o código no host e ver no container na hora</td><td>bind mount <code>-v $PWD/site:/usr/share/nginx/html:ro</code></td></tr>
+<tr><td>Dados do banco que sobrevivam a <code>rm</code> e recriações</td><td>volume nomeado <code>-v dados-db:/var/lib/postgresql/data</code></td></tr>
+<tr><td>Cache rápido que pode sumir</td><td>tmpfs <code>--tmpfs /cache</code></td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>Resumo</h2>
+<ul>
+  <li>O container é descartável: o que ele grava na camada própria <strong>some com <code>docker rm</code></strong>. A imagem (receita) continua.</li>
+  <li><code>-v HOST:CONTAINER</code> (caminho absoluto) = <strong>bind mount</strong>: monta uma pasta sua dentro do container (ótimo para código em dev; use <code>:ro</code> para só leitura).</li>
+  <li><code>-v NOME:CONTAINER</code> (sem <code>/</code> inicial) = <strong>volume nomeado</strong>: pasta gerenciada pelo Docker, ideal para dados de banco. Veja com <code>docker volume ls</code>.</li>
+  <li>Regra de ouro: <strong>container que guarda dados recebe volume no próprio <code>run</code></strong>.</li>
+  <li>Cuidados: caminho do host sempre absoluto (<code>$PWD/…</code>, não <code>~/…</code>); sem <code>:ro</code> o container (root) pode gravar na sua pasta e criar arquivos como root.</li>
+  <li>Tipos a fundo (tmpfs, anonymous volumes, <code>docker volume create/rm</code>): aula <a href="volumes-tipos.html">volumes a fundo</a> (nível 2).</li>
+</ul>
+
+<div class="tip"><strong>Próxima aula:</strong> <a href="dockerfile-intro.html">O que é um Dockerfile</a> — fim do Nível 1! 🐳 No Nível 2 você aprende a criar suas <strong>próprias imagens</strong> e sobe o primeiro projeto completo.</div>
+
+</div>
+</main>
+</div>
+<script src="assets/site.js?v=4"></script>
+</body>
+</html>

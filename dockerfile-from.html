@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FROM: a imagem base — escolher alpine, slim ou full | Guia Docker</title>
+<meta name="description" content="A instrução FROM do Dockerfile: a primeira linha obrigatória, como a Ana escolhe a base do projeto dela no notebook (alpine vs slim vs imagem completa, com tabela de tamanhos reais), o que é a tag :latest e por que fixar a versão (pinagem por tag, versão exata e digest sha256), de onde vêm as imagens oficiais (library/ do Docker Hub), a sintaxe FROM … AS nome para multi-stage, FROM scratch, o último FROM vence, erros reais de tag inexistente e quiz. Conferido no Docker Engine 27.x.">
+<link rel="stylesheet" href="assets/style.css?v=4">
+<script>try{var t=localStorage.getItem("tema");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<meta http-equiv="Cache-Control" content="no-store, must-revalidate">
+<script>try{history.scrollRestoration="manual"}catch(e){}(function(){var n=0;function t(){window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;if(++n<60)setTimeout(t,50)}t();window.addEventListener("pagehide",function(){window.scrollTo(0,0);document.documentElement.scrollTop=0;});window.addEventListener("pageshow",function(){window.scrollTo(0,0)});window.addEventListener("load",function(){window.scrollTo(0,0)});})();document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(a){var h=a.getAttribute("href")||"";if(/[.]html($|[?#])/.test(h)&&a.host===location.host){window.scrollTo(0,0);document.documentElement.scrollTop=0;}}});</script>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" id="sidebar" aria-label="Tópicos"></nav>
+<main class="main">
+<div class="content">
+
+<div class="pager"></div>
+
+<h1><span class="hl">FROM</span> — a imagem base</h1>
+
+<p class="intro">Toda imagem nova nasce em cima de uma imagem existente. A instrução <code>FROM</code> é a <strong>primeira linha obrigatória</strong> de todo Dockerfile: ela escolhe o "ingrediente base" da sua receita — o sistema operacional e as ferramentas que já vêm de fábrica. A escolha certa deixa a imagem pequena, segura e rápida de baixar; a escolha errada deixa tudo isso ao contrário.</p>
+
+<div class="note">
+<strong>Você vai aprender</strong>
+<ul>
+  <li>Como funciona o <code>FROM</code>: repositório, tag e o <code>library/</code> do Docker Hub.</li>
+  <li>Como escolher a base: <code>alpine</code>, <code>slim</code> ou imagem completa — com tabela de tamanhos.</li>
+  <li>O que é a tag <code>:latest</code> e por que fixar a versão (pinagem): tag de versão maior, versão exata e digest <code>@sha256:…</code>.</li>
+  <li>Por que o <code>FROM</code> tem que ser a primeira instrução e por que o último <code>FROM</code> vence.</li>
+  <li>A sintaxe <code>FROM … AS nome</code> (base do multi-stage) e o caso especial <code>FROM scratch</code>.</li>
+  <li>O erro real de uma tag que não existe e como descobrir as tags disponíveis.</li>
+</ul>
+</div>
+
+<hr>
+
+<h2>A cena: a Ana escolhe a base do projeto dela</h2>
+<p>A Ana está criando a <code>minha-api</code>, uma API em Node.js. Ela abre o editor no notebook (<code>ana@notebook</code>) e precisa decidir: começa de que imagem? Ela testa as opções puxando cada uma e vendo o tamanho:</p>
+<pre class="term" data-cwd="~">$ docker pull node:22-alpine
+$ docker pull node:22-slim
+$ docker pull node:22
+$ docker images node
+REPOSITORY   TAG       IMAGE ID       CREATED       SIZE
+node         22-alpine c3d4e5f6a1b2   1 week ago    189MB
+node         22-slim   f6a1b2c3d4e5   1 week ago    407MB
+node         22        1a2b3c4d5e6f   1 week ago    1.09GB</pre>
+<p>Mesma versão do Node (22), três pacotes bem diferentes: <strong>189MB, 407MB, 1GB</strong>. A diferença é o sistema operacional embaixo: Alpine (distro mínima, ~5MB) ou Debian completo. Para a API dela, que só precisa do Node para servir requisições, o <code>alpine</code> sobra. Ela escreve no Dockerfile:</p>
+<pre class="file">FROM node:22-alpine</pre>
+
+<hr>
+
+<h2>A anatomia do FROM</h2>
+<dl class="anatomy">
+  <dt>FROM</dt><dd>a instrução que declara a imagem base. Sem ela, o build nem começa — o Docker não sabe em cima do que empilhar as camadas.</dd>
+  <dt>node</dt><dd>o <strong>repositório</strong>: a imagem oficial <code>node</code> da biblioteca do Docker Hub. Quando você não põe usuário, o Docker completa com <code>docker.io/library/node</code>.</dd>
+  <dt>:22-alpine</dt><dd>a <strong>tag</strong>: a "versão" dentro do repositório — aqui, Node 22 na variante Alpine. Se você omitir a tag, o Docker assume <code>:latest</code> (a mais recente).</dd>
+</dl>
+<pre class="file">FROM node:22-alpine</pre>
+<p>Outras formas de escrever a mesma coisa:</p>
+<pre class="file">FROM docker.io/library/node:22-alpine     # nome completo, com registry e library
+FROM node@sha256:9f8e7d6c…                # pelo digest: o conteúdo exato, imutável</pre>
+
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Parte do nome</th><th>Exemplo</th><th>Significado</th></tr>
+<tr><td>Registry</td><td><code>docker.io</code></td><td>O "supermercado" de imagens. Se omitir, o Docker usa o Docker Hub.</td></tr>
+<tr><td>Usuário/organização</td><td><code>library</code> ou <code>ana</code></td><td>Imagens oficiais ficam em <code>library/</code>; as suas ficam em <code>seu-usuario/</code>.</td></tr>
+<tr><td>Repositório</td><td><code>node</code></td><td>O nome da imagem em si.</td></tr>
+<tr><td>Tag</td><td><code>:22-alpine</code></td><td>A versão/variante. Sem tag, vale <code>:latest</code>.</td></tr>
+<tr><td>Digest</td><td><code>@sha256:9f8e…</code></td><td>O hash do conteúdo: aponta sempre para a mesma imagem, não importa a tag.</td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>Escolhendo a base: alpine, slim ou completa</h2>
+<p>A mesma aplicação pode começar de bases bem diferentes. A regra geral: <strong>comece pequeno</strong> e só cresça se precisar — você sempre pode trocar depois.</p>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Variante</th><th>Tamanho típico da base</th><th>Exemplos</th><th>Quando usar</th></tr>
+<tr><td><code>alpine</code></td><td>base ~5–8MB (com app, ~50–200MB)</td><td><code>node:22-alpine</code>, <code>nginx:alpine</code>, <code>python:3.12-alpine</code>, <code>postgres:16-alpine</code></td><td>Quase sempre: imagem enxuta, menos superfície de ataque, download rápido. Usa o gerenciador de pacotes <code>apk</code> e a biblioteca <code>musl</code> em vez da <code>glibc</code>.</td></tr>
+<tr><td><code>slim</code></td><td>base ~45–80MB</td><td><code>python:3.12-slim</code>, <code>node:22-slim</code>, <code>debian:12-slim</code></td><td>Quando você precisa do Debian (glibc) e não do Alpine — alguns binários compilados (ou pacotes como alguns de Python/C++) só funcionam no Debian.</td></tr>
+<tr><td>completa (ex.: <code>node:22</code>)</td><td>base ~350MB–1GB</td><td><code>node:22</code>, <code>ubuntu:24.04</code>, <code>debian:12</code></td><td>Quando precisa de ferramentas de sistema completas (compiladores, git, vim, debug). Em produção, prefira slim/alpine.</td></tr>
+</table>
+</div>
+<p>Na dúvida, teste as duas e compare com <code>docker images</code> — como a Ana fez acima. E lembre: <strong>segurança também é tamanho</strong>: quanto menos coisa instalada na imagem, menos porta aberta para um ataque.</p>
+
+<div class="warn"><strong>Cuidado com o Alpine: nem tudo roda lá.</strong> O Alpine usa a biblioteca <code>musl</code> em vez da <code>glibc</code> do Debian. A maioria das apps em Node/Python/Go funciona de boa, mas pacotes nativos compilados para glibc (certos drivers de banco, bibliotecas de machine learning) podem quebrar. Se algo misterioso acontece no Alpine, tente a variante <code>slim</code> antes de desistir.</div>
+
+<hr>
+
+<h2>Tags e pinagem: fuja do :latest em produção</h2>
+<p>A tag é a "versão" da imagem. Quando você escreve só <code>FROM node</code>, o Docker completa com <code>node:latest</code> — e o <code>latest</code> <strong>anda no tempo</strong>: hoje aponta para o Node 22, amanhã pode apontar para o 23. Dois builds com o mesmo Dockerfile, em meses diferentes, podem gerar imagens diferentes. Em produção e em CI, isso quebra a previsibilidade.</p>
+<p>Para builds reproduzíveis, fixe a versão. Do mais frouxo para o mais travado:</p>
+<dl class="anatomy">
+  <dt>node:22-alpine</dt><dd>fixa a <strong>versão maior</strong> (22) — recebe atualizações de segurança do 22.x automaticamente.</dd>
+  <dt>node:22.9.0-alpine</dt><dd>fixa a <strong>versão exata</strong> (22.9.0) — não muda nem com patch de segurança.</dd>
+  <dt>node@sha256:9f8e…</dt><dd>fixa pelo <strong>digest</strong> (hash do conteúdo) — a imagem <strong>nunca</strong> muda, nem se a tag for republicada. Máxima segurança e rastreabilidade.</dd>
+</dl>
+<p>Veja como o digest aparece no pull:</p>
+<pre class="term" data-cwd="~">$ docker pull node:22-alpine
+22-alpine: Pulling from library/node
+a1b2c3d4e5f6: Pull complete
+b2c3d4e5f6a1: Pull complete
+c3d4e5f6a1b2: Pull complete
+Digest: sha256:9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c3b2a19f8e7d6c5b4a3f2e1d0c9b8a7f6
+Status: Downloaded newer image for node:22-alpine
+docker.io/library/node:22-alpine</pre>
+<p>A linha <code>Digest: sha256:…</code> é o que você pode copiar para o seu Dockerfile se quiser travar tudo: <code>FROM node@sha256:9f8e7d6c…</code>.</p>
+
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Forma de fixar</th><th>Exemplo</th><th>Muda com o tempo?</th><th>Quando usar</th></tr>
+<tr><td><code>:latest</code> (implícito)</td><td><code>FROM node</code></td><td>Sim — a cada nova publicação</td><td>Só em experimentos locais, nunca em produção</td></tr>
+<tr><td>Versão maior</td><td><code>FROM node:22-alpine</code></td><td>Só em patches do 22.x</td><td>O dia a dia: boa previsibilidade + segurança</td></tr>
+<tr><td>Versão exata</td><td><code>FROM node:22.9.0-alpine</code></td><td>Nunca</td><td>Quando até patch de segurança deve ser testado antes</td></tr>
+<tr><td>Digest</td><td><code>FROM node@sha256:9f8e…</code></td><td>Nunca</td><td>Máxima rastreabilidade (regulatório, produção crítica)</td></tr>
+</table>
+</div>
+
+<div class="warn"><strong>Cuidado:</strong> se o Dockerfile usa <code>FROM node:99-naoexiste</code> (tag que não existe), o build quebra na primeira linha:
+<pre class="term" data-cwd="~/minha-api">$ docker build -t app .
+ERROR: failed to solve: node:99-naoexiste: failed to resolve source metadata for docker.io/library/node:99-naoexiste: docker.io/library/node:99-naoexiste: not found</pre>
+Veja as tags disponíveis de uma imagem oficial na página dela no Docker Hub (ex.: <code>hub.docker.com/_/node</code> → aba "Tags"), como a Ana fez antes de escolher.</div>
+
+<hr>
+
+<h2>Imagens oficiais: de onde elas vêm</h2>
+<p><code>docker pull node</code> na verdade baixa <code>docker.io/library/node:latest</code>: o <code>library/</code> é o repositório das <strong>imagens oficiais</strong>, mantidas pela comunidade ou pela empresa junto com a Docker, e auditadas. Imagens de outros usuários ficam em <code>docker.io/usuario/imagem</code> — e aí a confiança muda de figura. A aula <a href="imagens-oficiais.html">Imagens oficiais e verificadas</a> detalha como confiar numa imagem (Docker Official Images, Verified Publisher,assinatura com cosign).</p>
+<p>Estas são as imagens que já estão na máquina da Ana (e no simulador desta página):</p>
+<pre class="term" data-cwd="~">$ docker images
+REPOSITORY   TAG          IMAGE ID       CREATED         SIZE
+hello-world  latest       a1b2c3d4e5f6   2 weeks ago     18.2kB
+nginx        alpine       b2c3d4e5f6a1   5 days ago      48.2MB
+node         22-alpine    c3d4e5f6a1b2   1 week ago      189MB
+postgres     16-alpine    d4e5f6a1b2c3   3 days ago      245MB
+redis        7-alpine     e5f6a1b2c3d4   1 week ago      42.8MB
+python       3.12-slim    f6a1b2c3d4e5   4 days ago      132MB</pre>
+<p>Repare: a máquina dela já veio "recheada" de imagens úteis — é assim que o guia inteiro funciona: você não precisa baixar tudo toda hora, o Docker reutiliza o que já tem (o cache de imagens).</p>
+
+<div class="try" data-goal="REPOSITORY" data-solucao="docker images">
+<p class="try-task"><strong>Missão:</strong> rode <code>docker images</code> no terminal abaixo e veja quais imagens base já estão disponíveis na máquina.</p>
+</div>
+
+<div class="try" data-goal="Downloaded newer image" data-solucao="docker pull alpine:3.20">
+<p class="try-task"><strong>Missão extra:</strong> baixe uma imagem que ainda não está na máquina: rode <code>docker pull alpine:3.20</code> e veja a mensagem <code>Status: Downloaded newer image</code> no fim.</p>
+</div>
+
+<hr>
+
+<h2>Vários FROM no mesmo arquivo: o último vence</h2>
+<p>Um Dockerfile pode ter <strong>mais de um</strong> <code>FROM</code>. Quando isso acontece, cada <code>FROM</code> começa uma <strong>etapa</strong> nova do build, e a imagem final é a da <strong>última</strong> etapa — as anteriores servem só para produire artefatos que você copia para a final (é o multi-stage). Sem <code>AS</code>, a última etapa é anônima:</p>
+<pre class="file">FROM node:22-alpine
+RUN echo "etapa 1: só para testar"
+
+FROM alpine:3.20
+CMD ["echo", "só a etapa final vira imagem"]</pre>
+<p>Nesse exemplo, o <code>RUN echo</code> acontece durante o build, mas o resultado <strong>não entra na imagem final</strong> — só a etapa do <code>alpine:3.20</code> vira imagem.</p>
+
+<hr>
+
+<h2>FROM … AS nome: a porta do multi-stage</h2>
+<p>Você pode dar um <strong>nome para a etapa</strong> do build com <code>AS</code>. Isso permite usar várias etapas no mesmo Dockerfile e copiar o resultado de uma para a outra — a base dos <em>multi-stage builds</em> (nível 3, aula <a href="multi-stage.html">Multi-stage builds</a>):</p>
+<pre class="file"># etapa 1: compila a aplicação (nomeada "build")
+FROM node:22-alpine AS build
+WORKDIR /app
+COPY . .
+RUN npm run build
+
+# etapa 2: imagem final só com o resultado (nomeada "final")
+FROM nginx:alpine AS final
+COPY --from=build /app/dist /usr/share/nginx/html</pre>
+<p>A imagem final carrega só o site compilado — sem Node, sem <code>node_modules</code>, bem menor. O <code>COPY --from=build</code> copia da etapa chamada <code>build</code>; é explicado na aula <a href="dockerfile-copy-add.html">COPY, ADD e WORKDIR</a>. Você também pode referenciar etapas por número: <code>COPY --from=0 …</code>.</p>
+
+<hr>
+
+<h2>O caso especial: FROM scratch</h2>
+<p>Existe uma imagem base vazia, chamada <code>scratch</code>: ela não tem sistema operacional nenhum, só o seu programa. É usada para binários estáticos (programas em Go, C, Rust compilados sem dependências) que não precisam de shell nem de bibliotecas:</p>
+<pre class="file">FROM scratch
+COPY ola-estatico /ola
+CMD ["/ola"]</pre>
+<p>A imagem resultante tem <strong>só o seu binário</strong> — pode ter menos de 10MB. É o extremo oposto do <code>node:22</code> de 1GB. Quando o seu app é um binário estático, <code>scratch</code> é a base perfeita (e a mais segura: não tem nada dentro para atacar).</p>
+
+<hr>
+
+<h2>Quando dá errado</h2>
+
+<div class="warn"><strong>Tag inexistente</strong> (já vimos acima): <code>FROM node:99-naoexiste</code> quebra o build com <code>not found</code>. <strong>Como consertar:</strong> confira as tags na página do Docker Hub e corrija a tag.</div>
+
+<div class="warn"><strong>RUN antes do FROM:</strong> o Dockerfile precisa começar pela base:
+<pre class="file"># ERRADO
+RUN echo "oi"
+FROM alpine:3.20</pre>
+O build falha na hora com erro de parse (<code>unknown instruction</code> na linha 1, porque fora de uma etapa não existe instrução válida antes do FROM). <strong>Como consertar:</strong> <code>FROM</code> sempre primeiro; comentários com <code>#</code> são a única coisa permitida antes dele.</div>
+
+<div class="warn"><strong>Esquecer os dois pontos da tag:</strong> <code>FROM node 22-alpine</code> (espaço no lugar de <code>:</code>) é lido como repositório <code>node</code> + argumento extra, e o build acusa erro de parse. A tag vai <strong>grudada</strong> no nome com <code>:</code>: <code>node:22-alpine</code>.</div>
+
+<div class="warn"><strong>Registry privado sem login:</strong> se o seu <code>FROM</code> aponta para um registry da empresa (<code>registry.empresa.com/minha-base:1.0</code>) e você não fez <code>docker login</code>, o build falha com <code>pull access denied</code>. <strong>Como consertar:</strong> <code>docker login registry.empresa.com</code> antes do build (aula <a href="registry-privado.html">Registry privado e login</a>).</div>
+
+<hr>
+
+<h2>Referência rápida</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Escrita</th><th>O que faz</th></tr>
+<tr><td><code>FROM node:22-alpine</code></td><td>Começa a imagem a partir do repositório <code>node</code>, tag <code>22-alpine</code></td></tr>
+<tr><td><code>FROM node</code></td><td>O mesmo que <code>FROM node:latest</code> (tag implícita)</td></tr>
+<tr><td><code>FROM docker.io/library/node:22-alpine</code></td><td>Nome completo: registry + usuário + repositório + tag</td></tr>
+<tr><td><code>FROM node@sha256:9f8e…</code></td><td>Fixa a imagem pelo hash do conteúdo (imutável)</td></tr>
+<tr><td><code>FROM node:22-alpine AS build</code></td><td>Dá o nome <code>build</code> à etapa (para <code>COPY --from=build</code>)</td></tr>
+<tr><td><code>FROM scratch</code></td><td>Base vazia: só o seu binário entra na imagem</td></tr>
+</table>
+</div>
+
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Situação</th><th>Base recomendada</th></tr>
+<tr><td>App web/API em Node, Python, Go, Java</td><td><code>…-alpine</code> (ou <code>…-slim</code> se precisar de glibc)</td></tr>
+<tr><td>Site estático</td><td><code>nginx:alpine</code></td></tr>
+<tr><td>Banco de dados</td><td><code>postgres:16-alpine</code>, <code>redis:7-alpine</code>, <code>mysql:8</code></td></tr>
+<tr><td>Binário estático (Go/C/Rust)</td><td><code>scratch</code></td></tr>
+<tr><td>Precisa de apt e ferramentas completas</td><td>imagem completa (<code>debian:12</code>, <code>ubuntu:24.04</code>) — só em dev</td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>Quiz rápido</h2>
+
+<div class="mc" data-answer="3">
+<p class="mc-q">1. O que significa escrever <code>FROM node</code>, sem tag?</p>
+<label><input type="radio" name="q1"> Dá erro, tag é obrigatória</label>
+<label><input type="radio" name="q1"> Aponta para a versão 1 do Node</label>
+<label><input type="radio" name="q1"> O Docker completa com <code>node:latest</code></label>
+<label><input type="radio" name="q1"> Aponta para a imagem <code>node</code> no registry local só</label>
+</div>
+
+<div class="mc" data-answer="2">
+<p class="mc-q">2. A Ana quer o build dela reproduzível até o último bit. Qual forma ela usa no FROM?</p>
+<label><input type="radio" name="q2"> <code>FROM node:latest</code></label>
+<label><input type="radio" name="q2"> <code>FROM node@sha256:9f8e…</code> (digest)</label>
+<label><input type="radio" name="q2"> <code>FROM node:22</code></label>
+<label><input type="radio" name="q2"> Qualquer uma dá na mesma</label>
+</div>
+
+<div class="mc" data-answer="4">
+<p class="mc-q">3. Qual é a principal vantagem da variante <code>alpine</code> sobre a imagem completa?</p>
+<label><input type="radio" name="q3"> Ela tem mais ferramentas instaladas</label>
+<label><input type="radio" name="q3"> Usa apt em vez de apk</label>
+<label><input type="radio" name="q3"> Compatibilidade total com glibc</label>
+<label><input type="radio" name="q3"> É bem menor (base de ~5MB) e tem menos superfície de ataque</label>
+</div>
+
+<div class="mc" data-answer="1">
+<p class="mc-q">4. O build quebrou com <code>…: not found</code> logo no primeiro passo. O que aconteceu?</p>
+<label><input type="radio" name="q4"> A tag do FROM não existe no registry (ex.: <code>node:99-naoexiste</code>)</label>
+<label><input type="radio" name="q4"> O CMD está errado</label>
+<label><input type="radio" name="q4"> Acabou o espaço em disco</label>
+<label><input type="radio" name="q4"> O arquivo se chama <code>dockerfile</code> minúsculo</label>
+</div>
+
+<hr>
+
+<h2>Resumo</h2>
+<ul>
+  <li><code>FROM</code> é a primeira instrução obrigatória do Dockerfile e escolhe a <strong>imagem base</strong>: <code>FROM repositorio:tag</code>, com <code>:latest</code> implícito quando a tag falta.</li>
+  <li>O nome completo é <code>registry/usuario/repositorio:tag</code>; imagens oficiais ficam em <code>docker.io/library/…</code>.</li>
+  <li>Escolha a base pelo tamanho e pela necessidade: <code>alpine</code> (~5MB, musl/apk) na maioria dos casos, <code>slim</code> (Debian enxuto, glibc) quando precisar de compatibilidade, completa só em dev, <code>scratch</code> para binários estáticos.</li>
+  <li>Em produção, fixe a versão: <code>:22</code> (versão maior) ou, para travar tudo, o digest <code>@sha256:…</code>. Evite <code>:latest</code>.</li>
+  <li>Vários <code>FROM</code> no mesmo arquivo criam etapas; a imagem final é a da última etapa. <code>FROM … AS nome</code> nomeia a etapa para o <code>COPY --from</code> do multi-stage.</li>
+  <li>Erros reais: tag inexistente (<code>not found</code>), <code>RUN</code> antes do <code>FROM</code>, tag separada por espaço em vez de <code>:</code>, registry privado sem <code>docker login</code>.</li>
+</ul>
+
+<div class="tip"><strong>Próxima aula:</strong> <a href="dockerfile-run-cmd.html">RUN e CMD</a> — preparo na hora do build vs. comando na hora de rodar.</div>
+
+<div class="pager"></div>
+
+</div>
+</main>
+</div>
+<script src="assets/site.js?v=4"></script>
+</body>
+</html>

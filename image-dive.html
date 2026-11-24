@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Analisando camadas (dive, docker history) | Guia Docker</title>
+<meta name="description" content="Como ver o que cada camada de uma imagem carrega e quanto ela pesa: docker history mostra IMAGE, CREATED BY e SIZE por camada (com &lt;missing&gt; nas intermediárias), o desperdício clássico de instalar numa camada e limpar na outra (o rm não tira o peso), dive (ferramenta interativa) revela arquivos apagados em camadas seguintes e calcula a eficiência da imagem, tabela comparativa history vs dive e dicas para emagrecer imagens.">
+<link rel="stylesheet" href="assets/style.css?v=4">
+<script>try{var t=localStorage.getItem("tema");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<meta http-equiv="Cache-Control" content="no-store, must-revalidate">
+<script>try{history.scrollRestoration="manual"}catch(e){}(function(){var n=0;function t(){window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;if(++n<60)setTimeout(t,50)}t();window.addEventListener("pagehide",function(){window.scrollTo(0,0);document.documentElement.scrollTop=0;});window.addEventListener("pageshow",function(){window.scrollTo(0,0)});window.addEventListener("load",function(){window.scrollTo(0,0)});})();document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(a){var h=a.getAttribute("href")||"";if(/[.]html($|[?#])/.test(h)&&a.host===location.host){window.scrollTo(0,0);document.documentElement.scrollTop=0;}}});</script>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" id="sidebar" aria-label="Tópicos"></nav>
+<main class="main">
+<div class="content">
+
+<div class="pager"></div>
+
+<h1><span class="hl">docker history</span> e dive — o que tem dentro da imagem</h1>
+
+<p class="intro">A Ana buildou a <code>minha-api:1.0</code> com multi-stage e achou que estava tudo enxuto. Aí rodou <code>docker images</code> e viu <strong>195MB</strong> — para uma API pequena, parecia muito. Antes de tentar emagrecer uma imagem às cegas, você precisa enxergar o que cada camada carrega e quanto pesa. Toda imagem é um empilhamento de <strong>camadas</strong> (aulas <a href="docker-pull.html">docker pull</a> e <a href="camadas-cache.html">Camadas e cache</a>): o <code>docker history</code> mostra isso no terminal; o <strong>dive</strong> mostra visualmente, arquivo por arquivo.</p>
+
+<div class="note">
+<strong>Você vai aprender</strong>
+<ul>
+  <li>Ler a saída do <code>docker history</code>: IMAGE, CREATED BY, SIZE e <code>&lt;missing&gt;</code>.</li>
+  <li>O desperdício clássico: instalar numa camada e limpar na outra (o <code>rm</code> não tira o peso).</li>
+  <li>Instalar e usar o <strong>dive</strong>, a ferramenta interativa de análise de camadas.</li>
+  <li>Comparar <code>docker history</code> × <code>dive</code> e quando usar cada um.</li>
+  <li>Uma receita de emagrecimento passo a passo.</li>
+</ul>
+</div>
+
+<hr>
+
+<h2>A ideia: a imagem é uma pilha de fôlegos</h2>
+<p>Cada instrução que gera conteúdo no Dockerfile (<code>RUN</code>, <code>COPY</code>, <code>ADD</code>) vira uma <strong>camada</strong> — um fô Lego em cima do outro. O que você vê no sistema de arquivos do container é a soma de todas as camadas. O detalhe importante: <strong>apagar um arquivo numa camada nova não apaga ele da camada velha</strong> — ele só ganha uma "marca de apagado" por cima. É por isso que limpar numa camada separada não emagrece nada (já já você vê).</p>
+
+<hr>
+
+<h2>docker history: o raio-x da imagem</h2>
+<p>O comando lista as camadas da imagem, da mais recente para a mais antiga, com o comando que a criou e o tamanho que ela adicionou:</p>
+<pre class="term">$ docker history nginx:alpine
+IMAGE          CREATED       CREATED BY                                      SIZE      COMMENT
+b2c3d4e5f6a1   5 days ago    CMD ["nginx" "-g" "daemon off;"]                0B
+&lt;missing&gt;      5 days ago    STOPSIGNAL SIGQUIT                              0B
+&lt;missing&gt;      5 days ago    EXPOSE map[80/tcp:{}]                           0B
+&lt;missing&gt;      5 days ago    ENV NGINX_VERSION=1.27.3                        0B
+&lt;missing&gt;      5 days ago    RUN /bin/sh -c set -eux;  apk add --no-cache …   19.2MB    « a camada gorda
+&lt;missing&gt;      5 days ago    COPY file:9f2c… in /etc/nginx/nginx.conf       1.8kB
+&lt;missing&gt;      6 days ago    ADD file:a1b2… in /                              8.5MB     « a base alpine
+&lt;missing&gt;      6 days ago    CMD ["/bin/sh"]                                 0B</pre>
+
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Coluna</th><th>Significado</th></tr>
+<tr><td><code>IMAGE</code></td><td>ID da camada. Camadas intermediárias aparecem como <code>&lt;missing&gt;</code> — elas não viram imagem sozinhas, só existem dentro da pilha.</td></tr>
+<tr><td><code>CREATED BY</code></td><td>A instrução do Dockerfile (RUN, COPY, ADD, ENV…) que gerou a camada.</td></tr>
+<tr><td><code>SIZE</code></td><td>Quanto aquela camada <strong>adicionou</strong> ao tamanho total. Comandos só de configuração (ENV, EXPOSE, CMD, USER) pesam 0B.</td></tr>
+<tr><td><code>COMMENT</code></td><td>Comentário da instrução (quando existe).</td></tr>
+</table>
+</div>
+<p>Somando a coluna SIZE você chega ao tamanho da imagem. No exemplo, a camada de 19.2MB do <code>apk add</code> é a maior — e é exatamente onde se procura瘦za. Útil também: <code>docker history --no-trunc nginx:alpine</code> mostra os comandos completos (sem cortar com "…"), e <code>docker history -q</code> mostra só os IDs.</p>
+
+<hr>
+
+<h2>O desperdício clássico: instalar e limpar em camadas separadas</h2>
+<p>Um erro comum no Dockerfile da Ana, na primeira tentativa:</p>
+<pre class="file" data-file="Dockerfile (errado)">FROM python:3.12-slim
+RUN apt-get update &amp;&amp; apt-get install -y gcc       « camada 1: instala o compilador (+150MB)
+COPY . .
+RUN apt-get remove -y gcc &amp;&amp; rm -rf /var/lib/apt/lists/*   « camada 2: "limpa"</pre>
+<p>O <code>rm</code> apaga os arquivos <strong>na segunda camada</strong>, mas eles continuam existindo na primeira — o tamanho não diminui. O <code>docker history</code> prova isso:</p>
+<pre class="term">$ docker history minha-api:errada
+…
+&lt;missing&gt;   2 min ago   RUN apt-get remove -y gcc &amp;&amp; rm -rf …   0B    « parece que limpou…
+&lt;missing&gt;   2 min ago   RUN apt-get update &amp;&amp; apt-get install …   152MB  « …mas o peso continua aqui</pre>
+<p>A forma certa é fazer tudo no <strong>mesmo RUN</strong>, ligado por <code>&amp;&amp;</code>:</p>
+<pre class="file" data-file="Dockerfile (certo)">FROM python:3.12-slim
+RUN apt-get update &amp;&amp; apt-get install -y gcc \
+ &amp;&amp; pip install -r requirements.txt \
+ &amp;&amp; apt-get remove -y gcc \
+ &amp;&amp; rm -rf /var/lib/apt/lists/*          « tudo numa camada só: o peso some de verdade</pre>
+<p>Regra de ouro: <strong>cada RUN vira uma camada; junte as operações relacionadas num RUN só, com <code>&amp;&amp;</code></strong>. Isso também deixa o cache mais eficiente (aula <a href="camadas-cache.html">Camadas e cache</a>).</p>
+
+<hr>
+
+<h2>dive: a mesma análise, visual e interativa</h2>
+<p>O <a href="https://github.com/wagoodman/dive">dive</a> abre a imagem numa interface de terminal: camadas à esquerda, árvore de arquivos da camada selecionada à direita, e um indicador de <em>wasted space</em> (espaço desperdiçado por arquivos apagados em camadas seguintes) + a <strong>eficiência</strong> da imagem (percentual de bytes realmente usados):</p>
+<pre class="term">$ dive nginx:alpine</pre>
+<p>Instalação no notebook da Ana (Ubuntu):</p>
+<pre class="term">$ curl -OL https://github.com/wagoodman/dive/releases/download/v0.12.0/dive_0.12.0_linux_amd64.tar.gz   « Linux
+$ tar xzf dive_0.12.0_linux_amd64.tar.gz &amp;&amp; sudo mv dive /usr/local/bin/
+$ dive --version
+dive 0.12.0</pre>
+<p>(No macOS é <code>brew install dive</code>.) Navegação: <kbd>↑</kbd>/<kbd>↓</kbd> troca de camada, <kbd>Tab</kbd> alterna entre a árvore de camadas e a árvore de arquivos, <kbd>Ctrl</kbd>+<kbd>C</kbd> sai. O dive também funciona em CI: <code>dive minha-api:1.0 -j saida.json</code> exporta a análise em JSON, e <code>--ci</code> faz o comando falhar (exit 1) se a eficiência estiver abaixo de um limite — dá para colocar isso na pipeline para impedir imagem gorda de entrar.</p>
+
+<hr>
+
+<h2>docker history vs dive</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th></th><th><code>docker history</code></th><th><code>dive</code></th></tr>
+<tr><td>Já vem instalado?</td><td>Sim (vem com o Docker)</td><td>Não — precisa instalar</td></tr>
+<tr><td>Mostra</td><td>Comando e tamanho de cada camada</td><td>Arquivos de cada camada + desperdício (wasted space) + eficiência %</td></tr>
+<tr><td>Bom para</td><td>Ver rápido no terminal, scripts, servidor (sem interface)</td><td>Investigar <em>por que</em> a imagem está grande e o que foi apagado em vão</td></tr>
+<tr><td>CI/CD</td><td>Dá para parsear com <code>-q</code>/<code>--format</code></td><td><code>-j</code> exporta JSON, <code>--ci</code> falha se eficiência baixa</td></tr>
+<tr><td>Exemplo de uso</td><td><code>docker history minha-api:1.0</code></td><td><code>dive minha-api:1.0</code></td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>Receita para emagrecer uma imagem</h2>
+<p>Quando a Ana achou a imagem de 195MB grande demais, seguiu este roteiro:</p>
+<ol class="passo">
+  <li>Rode <code>docker history minha-api:1.0 --no-trunc</code> e ache a camada mais gorda (quase sempre um <code>RUN apt/apk/npm install</code> ou um <code>COPY . .</code> que trouxe <code>node_modules</code>/<code>.git</code>).</li>
+  <li>Se for <code>COPY . .</code>: crie um <a href="dockerignore.html">.dockerignore</a> com <code>node_modules</code>, <code>.git</code>, <code>*.log</code> — o contexto de build fica leve.</li>
+  <li>Se for instalação de pacotes: junte tudo num <code>RUN</code> só com <code>&amp;&amp;</code> e limpe no mesmo comando (<code>rm -rf /var/lib/apt/lists/*</code>, <code>apk del</code>, <code>npm prune</code>).</li>
+  <li>Se forem dependências de build (compilador, headers): mude para <a href="multi-stage.html">multi-stage</a> e copie só o artefato.</li>
+  <li>Se a base for grande: troque para <code>-alpine</code> ou <code>-slim</code>, ou vá de <a href="distroless.html">distroless</a> para binários estáticos.</li>
+  <li>Rebuild e compare: <code>docker images</code> antes e depois, e <code>dive</code> para confirmar a eficiência subiu.</li>
+</ol>
+
+<div class="try" data-goal="REPOSITORY" data-solucao="docker images">
+<p class="try-task"><strong>Missão:</strong> rode <code>docker images</code> e compare a coluna SIZE das imagens que você tem — qual é a mais pesada?</p>
+</div>
+
+<div class="warning"><strong>Imagem grande por causa de dependências de build?</strong> Se o <code>docker history</code> mostrar uma camada gigante de <code>node_modules</code> ou binários compilados, o problema pode ser o <code>COPY . .</code> copiando coisa demais — resolva com <a href="dockerignore.html">.dockerignore</a> e, para binários, com <a href="multi-stage.html">multi-stage builds</a>.</div>
+
+<div class="cenario">
+<strong>Cenário real: o .git que foi parar na imagem</strong>
+<p>A Ana fez <code>COPY . .</code> sem <code>.dockerignore</code> e a imagem ganhou 40MB de histórico do git — além de vazar o código inteiro (com direito a credenciais antigas que já avaient sido cometidas e apagadas depois, que continuam no histórico). O <code>.dockerignore</code> com <code>.git</code> resolve o peso e o vazamento de uma vez. Mesma coisa vale para <code>node_modules</code> local, arquivos <code>.env</code> e logs.</p>
+</div>
+
+<hr>
+
+<h2>Camadas compartilhadas: por que 10 imagens não ocupam 10× o espaço</h2>
+<p>Se cada imagem tem suas camadas, por que o disco não enche? Porque as camadas são <strong>compartilhadas</strong> entre imagens: se <code>nginx:alpine</code> e <code>minha-api:1.0</code> usam a mesma base Alpine, o arquivo da base é guardado <em>uma vez só</em> no disco e as duas imagens apenas apontam para ele. É por isso que no push vimos <code>Mounted from library/nginx</code> — o registry também compartilha camadas entre repositórios.</p>
+<p>Para ver quanto cada imagem ocupa de verdade (e não somando camadas compartilhadas), use <a href="docker-system-df.html">docker system df -v</a>:</p>
+<pre class="term">$ docker system df -v
+Images Space Usage:
+REPOSITORY      TAG       IMAGE ID       CREATED         SIZE      SHARED SIZE   UNIQUE SIZE   CONTAINERS
+nginx           alpine    c3d4e5f6a1b2   5 days ago      48.2MB    8.5MB         39.7MB        1
+minha-api       1.0       f6a1b2c3d4e5   2 hours ago     195MB     8.5MB         186.5MB       1
+…
+Containers Space Usage: …
+Local Volumes Space Usage: …</pre>
+<p>As colunas importantes: <code>SHARED SIZE</code> (quanto é compartilhado com outras imagens) e <code>UNIQUE SIZE</code> (quanto só aquela imagem ocupa). É o <code>UNIQUE</code> que conta para o disco — e é nele que o multi-stage e o .dockerignore fazem diferença.</p>
+
+<hr>
+
+<h2>Quiz rápido</h2>
+<div class="mc" data-answer="2">
+<p class="mc-q">1. No <code>docker history</code>, o que significa <code>&lt;missing&gt;</code> na coluna IMAGE?</p>
+<label><input type="radio" name="q1"> Que a camada foi corrompida</label>
+<label><input type="radio" name="q1"> Que é uma camada intermediária, que não vira imagem sozinha</label>
+<label><input type="radio" name="q1"> Que a camada foi apagada</label>
+<label><input type="radio" name="q1"> Que o comando deu erro</label>
+</div>
+
+<div class="mc" data-answer="3">
+<p class="mc-q">2. Por que <code>RUN apt-get install gcc</code> numa linha e <code>RUN rm -rf …</code> na outra <strong>não</strong> deixa a imagem mais leve?</p>
+<label><input type="radio" name="q2"> Porque o rm não funciona em containers</label>
+<label><input type="radio" name="q2"> Porque o apt-get é rápido demais</label>
+<label><input type="radio" name="q2"> Porque cada RUN vira uma camada: apagar na camada nova só coloca uma "marca de apagado"; o peso continua na camada velha</label>
+<label><input type="radio" name="q2"> Porque o docker history mente</label>
+</div>
+
+<div class="mc" data-answer="4">
+<p class="mc-q">3. O que o dive mostra que o docker history não mostra?</p>
+<label><input type="radio" name="q3"> O preço da imagem</label>
+<label><input type="radio" name="q3"> O nome do usuário</label>
+<label><input type="radio" name="q3"> A porta publicada</label>
+<label><input type="radio" name="q3"> A árvore de arquivos de cada camada, o espaço desperdiçado (wasted space) e a eficiência da imagem</label>
+</div>
+
+<div class="mc" data-answer="1">
+<p class="mc-q">4. Qual destas instruções pesa 0B no docker history?</p>
+<label><input type="radio" name="q4"> <code>ENV</code>, <code>EXPOSE</code>, <code>CMD</code>, <code>USER</code> (só konfiguram metadados)</label>
+<label><input type="radio" name="q4"> <code>COPY</code></label>
+<label><input type="radio" name="q4"> <code>RUN apt-get install</code></label>
+<label><input type="radio" name="q4"> <code>ADD</code></label>
+</div>
+
+<hr>
+
+<h2>Resumo</h2>
+<ul>
+  <li>Toda imagem é uma pilha de camadas; <code>docker history</code> lista cada uma com o comando que a criou (<code>CREATED BY</code>) e o tamanho que adicionou (<code>SIZE</code>).</li>
+  <li><code>&lt;missing&gt;</code> = camada intermediária; instruções de metadado (ENV/CMD/USER/EXPOSE) pesam 0B.</li>
+  <li>Apagar arquivo numa camada nova não tira o peso da camada velha — junte install + limpeza num <code>RUN</code> só com <code>&amp;&amp;</code>.</li>
+  <li><code>dive</code> mostra a árvore de arquivos por camada, o desperdício e a eficiência; no CI dá para exportar JSON (<code>-j</code>) e falhar com <code>--ci</code>.</li>
+  <li>Para emagrecer: <code>.dockerignore</code> (tira <code>.git</code>/<code>node_modules</code> do contexto), base alpine/slim/distroless, multi-stage para dependências de build.</li>
+</ul>
+
+<div class="tip"><strong>Próxima aula:</strong> <a href="distroless.html">Imagens distroless e Alpine</a>.</div>
+
+<div class="pager"></div>
+
+</div>
+</main>
+</div>
+<script src="assets/site.js?v=4"></script>
+</body>
+</html>

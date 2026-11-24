@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HEALTHCHECK e políticas de restart | Guia Docker</title>
+<meta name="description" content="HEALTHCHECK no Dockerfile e no docker run (--health-cmd, --health-interval, --health-timeout, --health-start-period, --health-retries): por que 'Up' no docker ps não significa que a app responde; como ver (healthy)/(unhealthy) no docker ps e o log de testes no docker inspect; as políticas de restart (no, always, on-failure, unless-stopped) com tabela comparativa e exemplo de crash voltando sozinho; HEALTHCHECK + restart juntos num exemplo completo.">
+<link rel="stylesheet" href="assets/style.css?v=4">
+<script>try{var t=localStorage.getItem("tema");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<meta http-equiv="Cache-Control" content="no-store, must-revalidate">
+<script>try{history.scrollRestoration="manual"}catch(e){}(function(){var n=0;function t(){window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;if(++n<60)setTimeout(t,50)}t();window.addEventListener("pagehide",function(){window.scrollTo(0,0);document.documentElement.scrollTop=0;});window.addEventListener("pageshow",function(){window.scrollTo(0,0)});window.addEventListener("load",function(){window.scrollTo(0,0)});})();document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(a){var h=a.getAttribute("href")||"";if(/[.]html($|[?#])/.test(h)&&a.host===location.host){window.scrollTo(0,0);document.documentElement.scrollTop=0;}}});</script>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" id="sidebar" aria-label="Tópicos"></nav>
+<main class="main">
+<div class="content">
+
+<div class="pager"></div>
+
+<h1><span class="hl">HEALTHCHECK</span> e políticas de restart</h1>
+
+<p class="intro">A Ana subiu a API da Loja Aurora com <code>--restart unless-stopped</code> e achou que estava tudo resolvido. Na primeira madrugada, o banco de dados caiu por um instante, a API travou esperando a conexão — e continuou com status <code>Up</code> no <code>docker ps</code>, porque o processo dela não tinha morrido; só estava travado. O site ficou fora do ar até de manhã. Nesta aula você aprende a diferença entre <strong>"o processo está vivo"</strong> e <strong>"a aplicação responde"</strong>: o <code>HEALTHCHECK</code> testa a saúde de dentro do container, e a <strong>política de restart</strong> faz o Docker reagir quando o processo morre. Juntos, são a primeira linha de auto-recuperação.</p>
+
+<div class="note">
+<strong>Você vai aprender</strong>
+<ul>
+  <li>Por que <code>Up</code> no <code>docker ps</code> não basta (processo vivo ≠ app respondendo).</li>
+  <li><code>HEALTHCHECK</code> no Dockerfile: <code>CMD curl -f http://localhost/ || exit 1</code> e as flags de tempo.</li>
+  <li>Healthcheck direto no <code>docker run</code>: <code>--health-cmd</code>, <code>--health-interval</code>, etc.</li>
+  <li>Ver a saúde no <code>docker ps</code> (<code>healthy</code>/<code>unhealthy</code>) e no <code>docker inspect</code>.</li>
+  <li>Políticas de restart: <code>no</code>, <code>always</code>, <code>on-failure</code>, <code>unless-stopped</code> — tabela comparativa.</li>
+  <li>O limite do Docker puro: <code>unhealthy</code> não reinicia sozinho (quem faz isso é o orquestrador).</li>
+</ul>
+</div>
+
+<hr>
+
+<h2>A ideia: termômetro vs. pessoa viva</h2>
+<p>O status <code>Up</code> do container é como dizer "a pessoa está viva": o coração bate, mas ela pode estar desmaiada. O <strong>healthcheck</strong> é o termômetro: de tempos em tempos, o Docker pergunta <em>de dentro do container</em> "você está bem?" e anota a resposta. Se a resposta vier errada várias vezes seguidas, o status muda para <code>unhealthy</code> — e quem olha esse status (um load balancer, um orquestrador, um script seu) pode agir.</p>
+
+<hr>
+
+<h2>HEALTHCHECK no Dockerfile</h2>
+<p>A instrução diz ao Docker <em>como testar</em> o container de tempos em tempos. A regra: o comando deve devolver código de saída <strong>0</strong> (saudável) ou <strong>diferente de 0</strong> (doente):</p>
+<pre class="file" data-file="Dockerfile">FROM nginx:alpine
+COPY site/ /usr/share/nginx/html/
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD curl -f http://localhost/ || exit 1</pre>
+<dl class="anatomy">
+  <dt>HEALTHCHECK</dt><dd>Inicia a definição do teste de saúde da imagem.</dd>
+  <dt>--interval=30s</dt><dd>De quanto em quanto tempo o teste roda (padrão 30s).</dd>
+  <dt>--timeout=5s</dt><dd>Se o teste passar desse tempo, conta como falha (padrão 30s).</dd>
+  <dt>--start-period=10s</dt><dd>Janela inicial em que falhas <strong>não contam</strong> — dá tempo da app subir (padrão 0s). Essencial para apps que demoram para iniciar.</dd>
+  <dt>--retries=3</dt><dd>Quantas falhas seguidas mudam o status para <code>unhealthy</code> (padrão 3).</dd>
+  <dt>CMD curl -f http://localhost/ || exit 1</dt><dd>O comando de teste. <code>curl -f</code> devolve erro se o HTTP não for 2xx/3xx; <code>|| exit 1</code> garante saída 1 nesse caso. Dá para usar <code>HEALTHCHECK NONE</code> para desligar um healthcheck herdado da imagem base.</dd>
+</dl>
+<p>Imagens sem <code>curl</code> (como as <a href="distroless.html">distroless</a>) podem usar <code>wget -q -O /dev/null http://localhost/</code> ou um binário de healthcheck próprio compilado junto com a app (em Go é comum embutir um <code>/healthz</code> no próprio servidor e testar com o binário estático).</p>
+
+<hr>
+
+<h2>Healthcheck direto no docker run</h2>
+<p>Para imagens de terceiros que não têm HEALTHCHECK, dá para definir na hora de subir o container:</p>
+<pre class="term">$ docker run -d --name web -p 8080:80 \
+>     --health-cmd "curl -f http://localhost/ || exit 1" \
+>     --health-interval 30s \
+>     --health-timeout 5s \
+>     --health-start-period 10s \
+>     --health-retries 3 \
+>     nginx:alpine
+f3a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5</pre>
+<p>As flags equivalentes no <code>docker run</code> são <code>--health-*</code>; no Compose, os campos são <code>healthcheck:</code> com <code>test</code>, <code>interval</code>, <code>timeout</code>, <code>retries</code> e <code>start_period</code>.</p>
+
+<hr>
+
+<h2>Vendo a saúde: docker ps e docker inspect</h2>
+<p>Depois de alguns segundos, a coluna STATUS ganha o estado de saúde entre parênteses:</p>
+<pre class="term">$ docker ps
+CONTAINER ID   IMAGE          STATUS                          PORTS                   NAMES
+f3a1b2c3d4e5   nginx:alpine   Up 45 seconds (healthy)         0.0.0.0:8080-&gt;80/tcp    web
+c3d4e5f6a1b2   minha-api:1.0  Up 2 minutes (unhealthy)        3000/tcp                api
+b5e6f7a8b9c0   redis:7-alpine Up 3 minutes (health: starting)                    cache</pre>
+<p>Os três estados: <code>starting</code> (ainda na janela de <code>--start-period</code>), <code>healthy</code> e <code>unhealthy</code>. O detalhe dos últimos testes fica no inspect:</p>
+<pre class="term">$ docker inspect web --format '{{.State.Health.Status}}'
+healthy
+
+$ docker inspect api --format '{{range .State.Health.Log}}{{.Start}} → exit {{.ExitCode}}: {{.Output}}{{"\n"}}{{end}}'
+2025-01-15T10:00:00Z → exit 1: curl: (7) Failed to connect to localhost port 3000</pre>
+<p>Esse log de health é ouro para debugar: diz <em>quando</em> começou a falhar e <em>o que</em> o teste viu (o output do comando).</p>
+
+<div class="warning"><strong>Importante:</strong> no Docker puro, <code>unhealthy</code> <strong>não reinicia o container sozinho</strong> — ele só muda o status (e aparece como erro em load balancers que respeitam health, que param de mandar tráfego para ele). Quem recria o container quando fica unhealthy é o orquestrador (<a href="swarm-intro.html">Swarm</a>/<a href="kubernetes-intro.html">Kubernetes</a>). Numa máquina só, dá para fazer um script simples que lê o status e dá <code>docker restart</code> — ou usar o restart policy abaixo para o caso de o processo morrer.</div>
+
+<hr>
+
+<h2>Políticas de restart: o container volta sozinho</h2>
+<p>O <code>--restart</code> diz o que acontece quando o <strong>processo do container morre</strong> (crash, <code>exit</code>, OOM kill) ou quando o daemon reinicia:</p>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Política</th><th>Comportamento</th><th>Quando usar</th></tr>
+<tr><td><code>no</code></td><td>Padrão. Nunca reinicia sozinho.</td><td>Jobs pontuais, containers de teste (ex.: <code>--rm</code>).</td></tr>
+<tr><td><code>always</code></td><td>Sempre reinicia — <strong>mesmo se você deu <code>docker stop</code> manual</strong>; volta quando o daemon subir.</td><td>Serviços críticos que devem estar sempre no ar, mesmo depois de stop acidental.</td></tr>
+<tr><td><code>on-failure</code></td><td>Reinicia só se o processo sair com código de erro (ex.: <code>Exited (1)</code>). Aceita limite: <code>on-failure:5</code> (tenta 5 vezes, depois desiste).</td><td>Workers/jobs que podem falhar e devem tentar de novo.</td></tr>
+<tr><td><code>unless-stopped</code></td><td>Como o <code>always</code>, mas <strong>respeita o stop manual</strong> — se você parou de propósito, ele não volta.</td><td><strong>Recomendada para produção</strong> na máquina única.</td></tr>
+</table>
+</div>
+<pre class="term">$ docker run -d --name web --restart unless-stopped -p 8080:80 nginx:alpine
+f3a1b2c3d4e5f6…
+
+$ docker ps -a
+CONTAINER ID   IMAGE          STATUS           PORTS                   NAMES
+f3a1b2c3d4e5   nginx:alpine   Up 5 seconds     0.0.0.0:8080-&gt;80/tcp    web
+… depois de um crash …
+CONTAINER ID   IMAGE          STATUS                        PORTS                   NAMES
+f3a1b2c3d4e5   nginx:alpine   Up 2 seconds (health: starting)  0.0.0.0:8080-&gt;80/tcp   web   « voltou sozinho</pre>
+<p>A política atual aparece no inspect: <code>docker inspect web --format '{{.HostConfig.RestartPolicy.Name}}'</code> → <code>unless-stopped</code>. E dá para mudar depois: <code>docker update --restart always web</code>.</p>
+
+<div class="try" data-goal="unless-stopped" data-solucao="docker run -d --name web --restart=unless-stopped nginx:alpine">
+<p class="try-task"><strong>Missão:</strong> suba um container com a política <code>--restart=unless-stopped</code> (no simulador, use <code>=</code> na flag) e depois confira com <code>docker ps</code> e <code>docker inspect web</code>.</p>
+</div>
+
+<hr>
+
+<h2>HEALTHCHECK + restart: exemplo completo</h2>
+<p>A combinação que a Ana usa na API da Loja Aurora em produção (máquina única, sem orquestrador ainda):</p>
+<pre class="term">$ docker run -d --name api \
+>     --restart unless-stopped \
+>     --health-cmd "curl -f http://localhost:3000/health || exit 1" \
+>     --health-interval 20s \
+>     --health-timeout 5s \
+>     --health-start-period 15s \
+>     --health-retries 3 \
+>     -p 3000:3000 \
+>     ana/minha-api:1.0
+f3a1b2c3d4e5f6…</pre>
+<p>Agora o container (1) é testado a cada 20s (e fica <code>unhealthy</code> se o <code>/health</code> falhar 3 vezes) e (2) se o processo morrer, o Docker o reinicia sozinho. Sem esses dois, a pane é descoberta pelo cliente — como aconteceu naquela madrugada.</p>
+
+<div class="cenario">
+<strong>Cenário real: o healthcheck que salvou o Black Friday</strong>
+<p>Numa loja online, a API principal tinha um vazamento de memória: a cada pico de acesso, ela travava (processo vivo, sem responder). O <code>docker ps</code> mostrava <code>Up</code> o dia todo — ninguém percebia. Depois de adicionar <code>HEALTHCHECK CMD curl -f http://localhost/health</code>, o load balancer passou a ver <code>unhealthy</code> nos picos e tirou a réplica do ar; o Swarm recriou a réplica sadia na hora. O cliente nem notou. Sem o healthcheck, o travamento só era descoberto pelos erros 502 no site.</p>
+</div>
+
+<hr>
+
+<h2>Erros comuns</h2>
+<div class="warning"><strong>Healthcheck que usa ferramenta que a imagem não tem:</strong> <code>HEALTHCHECK CMD curl …</code> numa imagem <a href="distroless.html">distroless</a> (sem curl) marca tudo como <code>unhealthy</code> mesmo com a app perfeita. Teste o comando dentro da imagem antes: <code>docker run --rm IMAGEM curl -f http://localhost/</code>. Em distroless, use o binário de health da própria app ou <code>wget</code> (também não tem… o jeito é embutir o check na app, ex.: um endpoint <code>/healthz</code> testado por um binário estático compilado junto).</div>
+<div class="warning"><strong>--start-period esquecido em app lenta:</strong> banco de dados e apps Java demoram 30-60s para subir; sem <code>--start-period</code>, as falhas do início contam para o <code>unhealthy</code> e o container fica marcado como doente forever. Sempre configure <code>--start-period</code> (ou <code>start_period</code> no Compose) maior que o tempo de subida.</div>
+<div class="warning"><strong>Healthcheck que testa a porta errada:</strong> testar <code>http://localhost/</code> quando a app sobe na porta 3000 dá <code>connection refused</code> e status <code>unhealthy</code> — confira a porta real no <code>dockerfile-expose-env.html</code> (EXPOSE/ENV) da imagem.</div>
+
+<hr>
+
+<h2>Quiz rápido</h2>
+<div class="mc" data-answer="2">
+<p class="mc-q">1. O que significa <code>Up 2 minutes</code> no docker ps?</p>
+<label><input type="radio" name="q1"> Que a aplicação está respondendo normalmente</label>
+<label><input type="radio" name="q1"> Que o processo principal do container está rodando — mas a app pode estar travada</label>
+<label><input type="radio" name="q1"> Que o healthcheck passou</label>
+<label><input type="radio" name="q1"> Que o container vai parar em 2 minutos</label>
+</div>
+
+<div class="mc" data-answer="4">
+<p class="mc-q">2. Qual política de restart é a recomendada para produção numa máquina só?</p>
+<label><input type="radio" name="q2"> <code>no</code></label>
+<label><input type="radio" name="q2"> <code>always</code> (reinicia até depois de stop manual)</label>
+<label><input type="radio" name="q2"> <code>on-failure</code></label>
+<label><input type="radio" name="q2"> <code>unless-stopped</code> — reinicia sempre, mas respeita o stop manual</label>
+</div>
+
+<div class="mc" data-answer="3">
+<p class="mc-q">3. O que acontece no Docker puro quando o container fica <code>unhealthy</code>?</p>
+<label><input type="radio" name="q3"> Ele é reiniciado na hora</label>
+<label><input type="radio" name="q3"> Ele é removido</label>
+<label><input type="radio" name="q3"> Só o status muda — quem recria a réplica é o orquestrador (Swarm/K8s) ou um load balancer que respeita health</label>
+<label><input type="radio" name="q3"> O daemon desliga</label>
+</div>
+
+<div class="mc" data-answer="1">
+<p class="mc-q">4. Para que serve o <code>--start-period</code> do healthcheck?</p>
+<label><input type="radio" name="q4"> Para dar tempo da app subir: falhas nessa janela inicial não contam para o unhealthy</label>
+<label><input type="radio" name="q4"> Para definir quanto tempo o container roda no total</label>
+<label><input type="radio" name="q4"> Para reiniciar o daemon</label>
+<label><input type="radio" name="q4"> Para trocar a porta do healthcheck</label>
+</div>
+
+<hr>
+
+<h2>Resumo</h2>
+<ul>
+  <li><code>Up</code> = processo vivo, não = app respondendo. O <code>HEALTHCHECK</code> testa de dentro: exit 0 = saudável, outro código = doente.</li>
+  <li>No Dockerfile: <code>HEALTHCHECK --interval --timeout --start-period --retries CMD …</code>; no run: <code>--health-cmd</code> e amigos.</li>
+  <li>Status no <code>docker ps</code>: <code>(health: starting)</code>, <code>(healthy)</code>, <code>(unhealthy)</code>; log dos testes no <code>docker inspect</code>.</li>
+  <li>Restart policies: <code>no</code> (padrão), <code>always</code>, <code>on-failure[:N]</code>, <code>unless-stopped</code> (recomendada em produção).</li>
+  <li>No Docker puro, <code>unhealthy</code> não reinicia sozinho — é o orquestrador (Swarm/K8s) que recria a réplica.</li>
+  <li>Erros comuns: testar com ferramenta que a imagem não tem (curl em distroless), esquecer <code>--start-period</code> em app lenta, porta errada no teste.</li>
+</ul>
+
+<div class="tip"><strong>Próxima aula:</strong> <a href="limites-recursos.html">Limites de CPU e memória (--memory, --cpus)</a>.</div>
+
+<div class="pager"></div>
+
+</div>
+</main>
+</div>
+<script src="assets/site.js?v=4"></script>
+</body>
+</html>

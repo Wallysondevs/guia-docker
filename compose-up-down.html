@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>docker compose up e down — subir e derrubar a aplicação inteira | Guia Docker</title>
+<meta name="description" content="Os comandos essenciais do Compose: docker compose up, up -d (segundo plano), up --build (rebuild), up --scale (réplicas), down e down -v (cuidado: apaga volumes), compose ps, compose logs (-f, --tail, por serviço), stop, start e restart. Com o arquivo docker-compose.yml de exemplo e saídas reais do Compose v2.29.">
+<link rel="stylesheet" href="assets/style.css?v=4">
+<script>try{var t=localStorage.getItem("tema");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<meta http-equiv="Cache-Control" content="no-store, must-revalidate">
+<script>try{history.scrollRestoration="manual"}catch(e){}(function(){var n=0;function t(){window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;if(++n<60)setTimeout(t,50)}t();window.addEventListener("pagehide",function(){window.scrollTo(0,0);document.documentElement.scrollTop=0;});window.addEventListener("pageshow",function(){window.scrollTo(0,0)});window.addEventListener("load",function(){window.scrollTo(0,0)});})();document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(a){var h=a.getAttribute("href")||"";if(/[.]html($|[?#])/.test(h)&&a.host===location.host){window.scrollTo(0,0);document.documentElement.scrollTop=0;}}});</script>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" id="sidebar" aria-label="Tópicos"></nav>
+<main class="main">
+<div class="content">
+
+<div class="pager"></div>
+
+<h1><span class="hl">docker compose up</span> e down — subir e parar tudo</h1>
+
+<p class="intro">Com o <code>docker-compose.yml</code> pronto (aula <a href="compose-yaml.html">O arquivo docker-compose.yml</a>), o <code>up</code> <strong>cria e inicia</strong> rede, volumes e containers do projeto de uma vez. O <code>down</code> faz o caminho inverso: para e remove tudo. Estes são os dois comandos que você mais vai usar no dia a dia — e nesta aula vamos além deles: <code>ps</code>, <code>logs</code>, <code>stop</code>, <code>start</code>, <code>restart</code> e <code>--scale</code>.</p>
+
+<div class="note">
+<strong>Você vai aprender</strong>
+<ul>
+  <li><code>docker compose up</code> e <code>up -d</code> (segundo plano) — e o que cada linha da saída significa.</li>
+  <li><code>up --build</code> para reconstruir imagens e <code>up --scale web=3</code> para réplicas.</li>
+  <li><code>down</code> e <code>down -v</code> (cuidado: apaga os dados dos volumes!).</li>
+  <li><code>compose ps</code>, <code>compose logs [-f] [--tail N] [serviço]</code>, <code>stop</code>, <code>start</code> e <code>restart</code>.</li>
+  <li>Por que o <code>up</code> é idempotente: rodar de novo não quebra nada.</li>
+</ul>
+</div>
+
+<hr>
+
+<h2>O projeto de exemplo</h2>
+<p>Vamos usar este arquivo durante toda a aula — a Ana salvou como <code>docker-compose.yml</code> numa pasta <code>~/meuapp</code> no <code>ana@notebook</code>:</p>
+<pre class="file" data-file="~/meuapp/docker-compose.yml"># meuapp/docker-compose.yml
+services:
+  web:
+    image: nginx:alpine
+    ports:
+      - "8080:80"
+    depends_on:
+      - banco
+  banco:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_PASSWORD: segredo
+    volumes:
+      - dados-db:/var/lib/postgresql/data
+volumes:
+  dados-db:</pre>
+<p>Dois serviços: um <code>web</code> (Nginx na porta 8080) e um <code>banco</code> (PostgreSQL com os dados num volume nomeado). É pouco, mas já mostra tudo: rede, volume, containers e ordem de subida.</p>
+
+<hr>
+
+<h2>up: criar e iniciar tudo</h2>
+<dl class="anatomy">
+  <dt>docker</dt><dd>o CLI.</dd>
+  <dt>compose</dt><dd>o plugin v2 (com espaço).</dd>
+  <dt>up</dt><dd>cria e inicia tudo que está no YAML: rede, volumes e containers — e reconecta o que já existe.</dd>
+  <dt>-d</dt><dd><em>detach</em>: roda em segundo plano e devolve o terminal na hora.</dd>
+</dl>
+<pre class="term" data-cwd="~/meuapp">$ docker compose up -d
+[+] Running 4/4
+ ✔ Network meuapp_default  Created                                    0.0s
+ ✔ Volume meuapp_dados-db  Created                                    0.0s
+ ✔ Container meuapp-banco-1  Started                                   0.5s
+ ✔ Container meuapp-web-1    Started                                   0.5s</pre>
+<p>Lendo a saída, linha por linha:</p>
+<ol class="passo">
+  <li><code>[+] Running 4/4</code> — o Compose enumerou 4 recursos para criar (1 rede + 1 volume + 2 containers).</li>
+  <li><code>Network meuapp_default Created</code> — a rede interna do projeto (todos os serviços se enxergam por ela).</li>
+  <li><code>Volume meuapp_dados-db Created</code> — o volume nomeado declarado no fim do YAML.</li>
+  <li><code>Container meuapp-banco-1 Started</code> — o banco subiu <strong>antes</strong> do web, por causa do <code>depends_on</code>.</li>
+  <li><code>Container meuapp-web-1 Started</code> — o site, já com a porta 8080 publicada.</li>
+</ol>
+<p>O <code>-1</code> no fim do nome é o <strong>número da réplica</strong> (cada serviço pode ter várias cópias — já já vemos como).</p>
+
+<h3>Sem o -d: o terminal vira os logs</h3>
+<p>Sem o <code>-d</code>, o <code>up</code> prende o terminal mostrando os logs de <strong>todos</strong> os serviços misturados, com o nome na frente — ótimo para debugar, péssimo para o dia a dia:</p>
+<pre class="term" data-cwd="~/meuapp">$ docker compose up
+meuapp-banco-1  | database system is ready to accept connections
+meuapp-web-1    | /docker-entrypoint.sh: Configuration complete; ready for start up
+meuapp-web-1    | 172.17.0.1 - - [24/Nov/2025:12:00:01] "GET / HTTP/1.1" 200 612
+^C                                                        « Ctrl+C para no logs; os containers continuam rodando</pre>
+
+<h3>O up é idempotente</h3>
+<p>Rodar <code>up -d</code> de novo, sem mudar nada, <strong>não quebra nem duplica nada</strong> — o Compose vê que tudo já existe e só garante que está rodando:</p>
+<pre class="term" data-cwd="~/meuapp">$ docker compose up -d
+[+] Running 2/2
+ ✔ Container meuapp-banco-1  Started                                   0.2s
+ ✔ Container meuapp-web-1    Started                                   0.2s</pre>
+<p>Mas se você <strong>editar o YAML</strong> (mudar a porta, a senha, a imagem), o <code>up</code> recria o serviço alterado:</p>
+<pre class="term" data-cwd="~/meuapp">$ docker compose up -d        « depois de trocar "8080:80" por "8081:80" no YAML
+[+] Running 3/3
+ ✔ Container meuapp-banco-1  Started
+ ✔ Container meuapp-web-1    Recreated                                 0.3s
+ ✔ Network meuapp_default   Created</pre>
+
+<div class="try" data-goal="projeto iniciado" data-solucao="docker compose up -d">
+<p class="try-task"><strong>Missão:</strong> suba o projeto inteiro com <code>docker compose up -d</code>.</p>
+</div>
+
+<hr>
+
+<h2>up --build e up --scale</h2>
+<p>Duas variações muito usadas. O <code>--build</code> força a reconstrução das imagens que têm <code>build:</code> (detalhes na aula <a href="compose-build.html">Build no Compose</a>):</p>
+<pre class="term" data-cwd="~/meuapp">$ docker compose up -d --build
+[+] Building 14.2s (9/9) FINISHED
+ ✔ Container meuapp-api-1  Recreated                                  0.4s</pre>
+<p>E o <code>--scale</code> cria <strong>várias réplicas</strong> de um serviço — útil para testar balanceamento de carga:</p>
+<pre class="term" data-cwd="~/meuapp">$ docker compose up -d --scale web=3
+[+] Running 4/4
+ ✔ Container meuapp-web-1  Started
+ ✔ Container meuapp-web-2  Started
+ ✔ Container meuapp-web-3  Started
+ ✔ Container meuapp-banco-1  Running</pre>
+
+<hr>
+
+<h2>ps e logs: vendo o que subiu</h2>
+<p>Depois do <code>up</code>, o <code>docker compose ps</code> lista <strong>só os containers deste projeto</strong> (diferente do <code>docker ps</code>, que lista todos os containers da máquina):</p>
+<pre class="term" data-cwd="~/meuapp">$ docker compose ps
+NAME            IMAGE              COMMAND                   SERVICE   CREATED          STATUS          PORTS
+meuapp-web-1    nginx:alpine       "/docker-entrypoint.…"    web       30 seconds ago   Up 30 seconds   0.0.0.0:8080->80/tcp
+meuapp-banco-1  postgres:16-alpine "docker-entrypoint.s…"   banco     30 seconds ago   Up 30 seconds   5432/tcp
+$ docker compose ps -a        « inclui os containers parados do projeto também</pre>
+<p>E para ver a saída (logs) dos serviços — todos juntos, só um, só os últimos, ou em tempo real:</p>
+<pre class="term" data-cwd="~/meuapp">$ docker compose logs
+meuapp-banco-1  | database system is ready to accept connections
+meuapp-web-1    | /docker-entrypoint.sh: Configuration complete; ready for start up
+$ docker compose logs web          « só do serviço "web"
+$ docker compose logs --tail 20    « só as últimas 20 linhas
+$ docker compose logs -f           « segue os logs em tempo real (Ctrl+C sai)</pre>
+
+<div class="try" data-goal="CONTAINER ID" data-solucao="docker compose ps">
+<p class="try-task"><strong>Missão:</strong> depois do <code>up</code>, liste os containers do projeto com <code>docker compose ps</code>.</p>
+</div>
+
+<div class="try" data-goal="logs do compose" data-solucao="docker compose logs">
+<p class="try-task"><strong>Missão:</strong> veja os logs dos serviços com <code>docker compose logs</code>.</p>
+</div>
+
+<hr>
+
+<h2>stop e start: pausa sem apagar</h2>
+<p>Para parar os containers do projeto <strong>sem removê-los</strong> (eles continuam existindo, parados — dá para ver com <code>compose ps -a</code> e voltar com <code>start</code>):</p>
+<pre class="term" data-cwd="~/meuapp">$ docker compose stop
+[+] Running 2/2
+ ✔ Container meuapp-web-1    Stopped                                    0.3s
+ ✔ Container meuapp-banco-1  Stopped                                    0.4s
+$ docker compose start
+[+] Running 2/2
+ ✔ Container meuapp-banco-1  Started                                    0.4s
+ ✔ Container meuapp-web-1    Started                                    0.3s
+$ docker compose restart web   « reinicia só o serviço web (útil depois de mudar configuração)</pre>
+<p>Na dúvida entre <code>stop</code> e <code>down</code>: <code>stop</code> pausa (os containers continuam na máquina, ocupando memória de disco); <code>down</code> remove. Para desenvolvimento, o <code>down</code> é o mais comum no fim do dia.</p>
+
+<hr>
+
+<h2>down: derrubar tudo</h2>
+<p>O <code>down</code> <strong>para e remove</strong> os containers e a rede criada para o projeto. Os volumes nomeados <strong>não</strong> são apagados por padrão — os dados do banco ficam guardados para o próximo <code>up</code>:</p>
+<pre class="term" data-cwd="~/meuapp">$ docker compose down
+[+] Running 3/3
+ ✔ Container meuapp-web-1    Removed                                    0.2s
+ ✔ Container meuapp-banco-1  Removed                                    0.1s
+ ✔ Network meuapp_default   Removed                                    0.1s</pre>
+<div class="warn"><strong>Cuidado com o <code>-v</code>:</strong> <code>docker compose down -v</code> apaga também os <strong>volumes nomeados</strong> do projeto — no nosso exemplo, todos os dados do PostgreSQL vão embora, sem lixeira. Use só quando quiser começar do zero de verdade (banco de desenvolvimento descartável, por exemplo).
+<pre class="term" data-cwd="~/meuapp">$ docker compose down -v
+[+] Running 4/4
+ ✔ Container meuapp-web-1    Removed                                    0.2s
+ ✔ Container meuapp-banco-1  Removed                                    0.1s
+ ✔ Network meuapp_default   Removed                                    0.1s
+ ✔ Volume meuapp_dados-db   Removed                                    0.0s</pre>
+Também existe o <code>--rmi all</code> (apaga junto as imagens usadas pelo projeto) — raramente precisa.</div>
+
+<div class="try" data-goal="projeto parado" data-solucao="docker compose down">
+<p class="try-task"><strong>Missão:</strong> quando terminar, derrube o projeto com <code>docker compose down</code>.</p>
+</div>
+
+<hr>
+
+<h2>Rodou o up numa pasta sem o arquivo?</h2>
+<div class="warn"><strong>Erro real</strong> quando não existe <code>docker-compose.yml</code> na pasta atual:
+<pre class="term" data-cwd="~">$ cd ~
+$ docker compose up
+no configuration file provided: not found</pre>
+Solução: entre na pasta do projeto (<code>cd ~/meuapp</code>) ou aponte o arquivo com <code>-f</code>: <code>docker compose -f ~/meuapp/docker-compose.yml up -d</code>.</div>
+<div class="warn"><strong>Erro real de porta ocupada:</strong> se outra coisa na máquina (ou outro projeto seu) já estiver usando a 8080:
+<pre class="term" data-cwd="~/meuapp">$ docker compose up -d
+Error response from daemon: driver failed programming external connectivity on endpoint meuapp-web-1 (a1b2c3d4e5f6…): Bind for 0.0.0.0:8080 failed: port is already allocated</pre>
+Solução: troque a porta do host no YAML (<code>"8081:80"</code>) ou derrube o que estiver usando a 8080. Veja também <a href="problemas.html">Erros Comuns e Soluções</a>.</div>
+
+<hr>
+
+<h2>Resumo dos comandos</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Comando</th><th>O que faz</th></tr>
+<tr><td><code>docker compose up</code></td><td>Cria e inicia tudo, grudado nos logs.</td></tr>
+<tr><td><code>docker compose up -d</code></td><td>Cria e inicia tudo em segundo plano. Idempotente: rodar de novo não quebra.</td></tr>
+<tr><td><code>docker compose up -d --build</code></td><td>Rebuild das imagens com <code>build:</code> antes de subir.</td></tr>
+<tr><td><code>docker compose up -d --scale web=3</code></td><td>Sobe 3 réplicas do serviço <code>web</code>.</td></tr>
+<tr><td><code>docker compose ps [-a]</code></td><td>Lista os containers do projeto (todos, se <code>-a</code>).</td></tr>
+<tr><td><code>docker compose logs [-f] [--tail N] [serviço]</code></td><td>Mostra os logs: de todos, só um serviço, últimas N linhas ou em tempo real.</td></tr>
+<tr><td><code>docker compose stop</code> / <code>start</code> / <code>restart [serviço]</code></td><td>Para / inicia / reinicia os containers sem apagá-los.</td></tr>
+<tr><td><code>docker compose down</code></td><td>Para e remove containers e a rede do projeto. Volumes ficam.</td></tr>
+<tr><td><code>docker compose down -v</code></td><td>Como o <code>down</code>, mas apaga também os volumes nomeados. <strong>Cuidado!</strong></td></tr>
+</table>
+</div>
+
+<h2>Quiz rápido</h2>
+<div class="mc" data-answer="2">
+<p class="mc-q">1. O que o <code>docker compose down</code> faz por padrão?</p>
+<label><input type="radio" name="q1"> Apaga containers, rede <strong>e</strong> volumes do projeto</label>
+<label><input type="radio" name="q1"> Para e remove containers e a rede; os volumes nomeados continuam existindo</label>
+<label><input type="radio" name="q1"> Só para os containers, sem remover nada</label>
+<label><input type="radio" name="q1"> Apaga as imagens usadas pelo projeto</label>
+</div>
+
+<div class="mc" data-answer="3">
+<p class="mc-q">2. Qual flag sobe várias cópias de um serviço?</p>
+<label><input type="radio" name="q2"> <code>docker compose up -d --replicas web=3</code></label>
+<label><input type="radio" name="q2"> <code>docker compose scale web=3</code></label>
+<label><input type="radio" name="q2"> <code>docker compose up -d --scale web=3</code></label>
+<label><input type="radio" name="q2"> <code>docker compose up web web web</code></label>
+</div>
+
+<hr>
+
+<h2>Resumo</h2>
+<ul>
+  <li><code>docker compose up -d</code> cria e inicia rede + volumes + containers do projeto em segundo plano; sem <code>-d</code>, o terminal vira os logs de todos os serviços.</li>
+  <li>O <code>up</code> é <strong>idempotente</strong>: reexecutar não duplica nada; se o YAML mudou, o serviço alterado é recriado (<code>Recreated</code>).</li>
+  <li><code>up -d --build</code> reconstrói imagens com <code>build:</code>; <code>up -d --scale web=3</code> sobe réplicas (<code>meuapp-web-1</code>, <code>-2</code>, <code>-3</code>).</li>
+  <li><code>compose ps</code> lista só o projeto; <code>compose logs [-f] [--tail N] [serviço]</code> mostra as saídas.</li>
+  <li><code>stop</code>/<code>start</code> pausa e retoma sem apagar; <code>down</code> remove containers e rede — e <code>down -v</code> apaga os volumes também (perigo com dados!).</li>
+  <li>Erros comuns: pasta sem YAML (<code>no configuration file provided: not found</code>) e porta do host já ocupada (<code>port is already allocated</code>).</li>
+</ul>
+
+<div class="tip"><strong>Próxima aula:</strong> <a href="compose-servicos.html">Serviços, portas, variáveis e volumes no Compose</a> — o que dá para configurar dentro de cada serviço.</div>
+
+</div>
+</main>
+</div>
+<script src="assets/site.js?v=4"></script>
+</body>
+</html>

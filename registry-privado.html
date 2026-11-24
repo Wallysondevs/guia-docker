@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Registry privado e docker login | Guia Docker</title>
+<meta name="description" content="Registries privados para imagens internas da empresa: por que o Docker Hub público não serve para código proprietário, docker login em qualquer host (registry.empresa.com) com credenciais salvas por host no ~/.docker/config.json, o nome completo da imagem com o host do registry na frente, pull e push de imagens privadas com o erro real de 'pull access denied' sem login, subir seu próprio registry com a imagem registry:2 (Harbor para produção) e os registries do mercado (Harbor, Nexus, AWS ECR, Artifact Registry, Azure ACR, GitLab).">
+<link rel="stylesheet" href="assets/style.css?v=4">
+<script>try{var t=localStorage.getItem("tema");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<meta http-equiv="Cache-Control" content="no-store, must-revalidate">
+<script>try{history.scrollRestoration="manual"}catch(e){}(function(){var n=0;function t(){window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;if(++n<60)setTimeout(t,50)}t();window.addEventListener("pagehide",function(){window.scrollTo(0,0);document.documentElement.scrollTop=0;});window.addEventListener("pageshow",function(){window.scrollTo(0,0)});window.addEventListener("load",function(){window.scrollTo(0,0)});})();document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(a){var h=a.getAttribute("href")||"";if(/[.]html($|[?#])/.test(h)&&a.host===location.host){window.scrollTo(0,0);document.documentElement.scrollTop=0;}}});</script>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" id="sidebar" aria-label="Tópicos"></nav>
+<main class="main">
+<div class="content">
+
+<div class="pager"></div>
+
+<h1><span class="hl">Registry privado</span> e docker login</h1>
+
+<p class="intro">A Ana publicó <code>ana/minha-api:1.0</code> no Docker Hub público na aula passada — ótimo para código aberto. Mas a API nova da Loja Aurora tem <strong>regras de negócio internas</strong>, e a imagem dela carrega o código-fonte: não pode ir para um lugar onde qualquer pessoa pode baixar. A solução é um <strong>registry privado</strong> — a mesma ideia do Hub, rodando dentro da sua infraestrutura (ou alugado na nuvem) — e o <code>docker login</code> funciona do mesmo jeito, só que apontando para outro endereço.</p>
+
+<div class="note">
+<strong>Você vai aprender</strong>
+<ul>
+  <li>Por que empresas usam registry privado (segurança, compliance, velocidade de pull).</li>
+  <li><code>docker login registry.empresa.com</code> — login é por host, não só para o Hub.</li>
+  <li>O nome completo da imagem muda: <code>registry.empresa.com/projeto/api:2.0</code>.</li>
+  <li>Pull e push de imagens privadas — e o erro real quando o servidor não está logado.</li>
+  <li>Subir um registry simples com a imagem oficial <code>registry:2</code> e quando usar Harbor.</li>
+  <li>Os registries do mercado: Harbor, Nexus, ECR, Artifact Registry, ACR, GitLab.</li>
+</ul>
+</div>
+
+<hr>
+
+<h2>Por que um registry privado?</h2>
+<p>O Docker Hub tem repositórios privados nos planos pagos, mas muitas empresas não quieren (ou não podem, por compliance) mandar o próprio código para um serviço de terceiro. Além de não vazar código proprietário, o registry privado costuma oferecer:</p>
+<ul>
+  <li><strong>Controle de acesso</strong>: quem pode dar pull/push em cada projeto (times, papéis, service accounts).</li>
+  <li><strong>Scan de vulnerabilidades</strong> na hora do push (o registry escaneia as camadas atrás de CVEs).</li>
+  <li><strong>Proximidade</strong>: na mesma rede ou nuvem dos servidores, o pull é quase instantâneo (segundos em vez de minutos).</li>
+  <li><strong>Replicação</strong> entre datacenters e quarentena de imagens não aprovadas.</li>
+  <li><strong>Cache de camadas</strong>: como as bases (nginx:alpine etc.) já estão lá, só as camadas novas são enviadas.</li>
+</ul>
+
+<hr>
+
+<h2>docker login em outro registry</h2>
+<p>O <code>docker login</code> aceita o endereço do registry como argumento. A credencial fica salva <strong>por host</strong> no <code>~/.docker/config.json</code> — dá para estar logado no Hub e no registry da empresa ao mesmo tempo:</p>
+<pre class="term">$ docker login registry.empresa.com
+Username: ana
+Password:
+WARNING! Your password will be stored unencrypted in /home/ana/.docker/config.json.
+Configure a credential helper to remove this warning.
+
+Login Succeeded</pre>
+<p>Para sair desse registry específico: <code>docker logout registry.empresa.com</code>. Para ver em quais registries você está logado: <code>cat ~/.docker/config.json</code> (as credenciais ficam em base64 — não é criptografia, é só ofuscação; por isso o aviso do login e a dica de usar credential helper ou token).</p>
+
+<hr>
+
+<h2>O nome completo da imagem muda</h2>
+<p>Quando o primeiro elemento do nome <strong>tem ponto ou dois-pontos</strong> (ex.: <code>registry.empresa.com</code>), o Docker entende que é um host de registry — e não um usuário do Hub. Sem o host na frente, o push vai para o lugar errado (o Hub):</p>
+<pre class="term" data-cwd="~/minha-api">$ docker build -t minha-api:2.0 .
+$ docker tag minha-api:2.0 registry.empresa.com/projeto/minha-api:2.0
+
+$ docker push registry.empresa.com/projeto/minha-api:2.0
+The push refers to repository [registry.empresa.com/projeto/minha-api]
+a1b2c3d4e5f6: Pushed
+b2c3d4e5f6a1: Pushed
+2.0: digest: sha256:1c8e4f2a9b3d… size: 3412</pre>
+<div class="warning"><strong>Erro clássico: esquecer o host no nome.</strong> <code>docker push projeto/minha-api:2.0</code> manda a imagem para <code>docker.io/projeto/minha-api</code> (o Docker Hub público), não para o registry privado — e se o repositório lá for público, o código da empresa vaza. Sempre use o nome completo com o host na frente, e confira com <code>docker images</code> antes de dar push.</div>
+
+<hr>
+
+<h2>Baixando (pull) uma imagem privada</h2>
+<p>Em outra máquina (um servidor de produção, o notebook de um colega), basta estar logado nesse registry para baixar:</p>
+<pre class="term">$ docker login registry.empresa.com
+Login Succeeded
+
+$ docker pull registry.empresa.com/projeto/minha-api:2.0
+2.0: Pulling from projeto/minha-api
+a1b2c3d4e5f6: Pull complete
+e5f6a1b2c3d4: Pull complete
+Status: Downloaded newer image for registry.empresa.com/projeto/minha-api:2.0
+
+$ docker run -d -p 8080:8080 registry.empresa.com/projeto/minha-api:2.0
+f3a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5</pre>
+<p>Se o servidor <strong>não estiver logado</strong>, o pull/run falha na hora — essa é a mensagem real:</p>
+<pre class="term">$ docker pull registry.empresa.com/projeto/minha-api:2.0
+Error response from daemon: pull access denied for registry.empresa.com/projeto/minha-api,
+repository does not exist or may require 'docker login': denied: requested access to the resource is denied</pre>
+<p>Em servidores de produção, o login não fica interactive: usa-se um <strong>service account</strong> (usuário de máquina) com token, injetado por gerenciador de segredos (Vault, AWS Secrets Manager, Kubernetes Secrets) na hora do deploy.</p>
+
+<div class="try" data-goal="Login Succeeded" data-solucao="docker login registry.empresa.com">
+<p class="try-task"><strong>Missão:</strong> rode <code>docker login registry.empresa.com</code> e depois <code>docker pull registry.empresa.com/projeto/minha-api:2.0</code> para baixar a "imagem privada" no simulador.</p>
+</div>
+
+<hr>
+
+<h2>Subindo seu próprio registry (o jeito rápido)</h2>
+<p>Para testes ou uma equipe pequena, dá para subir um registry privado em um container — a própria projeto Docker mantém a imagem oficial <code>registry:2</code>:</p>
+<pre class="term">$ docker run -d -p 5000:5000 --name registry registry:2
+
+$ docker tag minha-api:2.0 localhost:5000/minha-api:2.0
+$ docker push localhost:5000/minha-api:2.0
+The push refers to repository [localhost:5000/minha-api]
+…: Pushed</pre>
+<p>Esse registry de teste guarda as imagens numa pasta do host (monte um volume: <code>-v registry-dados:/var/lib/registry</code>) e <strong>não tem autenticação nem HTTPS</strong> — serve para a rede local, não para a internet. Para produção, use Harbor (abaixo) ou um serviço gerenciado.</p>
+
+<hr>
+
+<h2>Registries comuns no mercado</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Registry</th><th>Onde roda</th><th>Destaque</th></tr>
+<tr><td><strong>Harbor</strong> (projeto CNCF, open source)</td><td>Na sua infraestrutura (on-premises ou nuvem)</td><td>Interface web, scan de CVE no push, replicação entre instâncias, controle de acesso por projeto, cache de proxies para o Hub/ECR/GCR.</td></tr>
+<tr><td><strong>Registry oficial</strong> (<code>registry:2</code>)</td><td>Onde você quiser (container)</td><td>Mínimo, sem UI nem auth — bom para teste e rede local.</td></tr>
+<tr><td><strong>Nexus</strong> (Sonatype)</td><td>On-premises</td><td>Além de imagens Docker, guarda artefatos Maven/npm — um "armazém geral".</td></tr>
+<tr><td><strong>AWS ECR</strong></td><td>Nuvem AWS</td><td>Integrado ao IAM: as permissões da AWS valem para pull/push; cobra por GB armazenado.</td></tr>
+<tr><td><strong>Google Artifact Registry</strong> (antigo GCR)</td><td>Nuvem Google</td><td>Scan de vulnerabilidades nativo e integração com GKE.</td></tr>
+<tr><td><strong>Azure ACR</strong></td><td>Nuvem Azure</td><td>Integração com Entra ID (Azure AD) e AKS.</td></tr>
+<tr><td><strong>GitLab Container Registry</strong></td><td>GitLab (SaaS ou self-hosted)</td><td>Registry embutido em cada repositório do GitLab — combina com a pipeline de CI do próprio GitLab.</td></tr>
+<tr><td><strong>Docker Hub</strong> (plano pago)</td><td>SaaS</td><td>Repositórios privados ilimitados por conta/organização.</td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>Erros comuns</h2>
+<div class="warning"><strong>Token expirado:</strong> <code>unauthorized: authentication required</code> mesmo estando "logado". Tokens de CI expiram (ou são revogados) — refaça o <code>docker login</code> com um token novo. Em Kubernetes, o erro clássico é o <code>ImagePullBackOff</code> por credencial vencida no Secret.</div>
+<div class="warning"><strong>Certificado autoassinado:</strong> <code>x509: certificate signed by unknown authority</code> ao dar pull de um registry interno com certificado próprio. Em produção, instale a CA da empresa nos hosts (ou no Docker: <code>/etc/docker/certs.d/registry.empresa.com/ca.crt</code>). Só em <em>ambiente de teste</em>, dá para marcar o registry como inseguro no <code>/etc/docker/daemon.json</code> (<code>"insecure-registries": ["registry.empresa.com:5000"]</code>) — nunca em produção, porque sem TLS o login e as imagens trafegam em texto claro.</div>
+<div class="warning"><strong>Nome sem o host:</strong> dar <code>docker push projeto/api:2.0</code> manda para o <em>Docker Hub</em>, não para o registry privado. Sempre use o nome completo com o host na frente.</div>
+
+<hr>
+
+<h2>Quem pode dar push? Papéis e projetos</h2>
+<p>Num registry de empresa (Harbor, ECR, GitLab…), o acesso é organizado em <strong>projetos</strong> e <strong>papéis</strong>. Na Loja Aurora, o projeto <code>loja</code> no registry tem essa cara:</p>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Papel</th><th>Pode fazer</th><th>Quem tem na Loja Aurora</th></tr>
+<tr><td><strong>Guest</strong></td><td>Só pull (baixar imagens)</td><td>Estagiários, contas de leitura</td></tr>
+<tr><td><strong>Developer</strong></td><td>Pull + push</td><td>Desenvolvedores (a Ana)</td></tr>
+<tr><td><strong>Maintainer</strong></td><td>Push + apagar tags + configurar o projeto</td><td>Tech lead</td></tr>
+<tr><td><strong>Project admin</strong></td><td>Tudo no projeto, inclusive criar usuários e quotas</td><td>Equipe de plataforma/DevOps</td></tr>
+</table>
+</div>
+<p>Boas práticas que a equipe adotou depois de um susto (alguém deu push numa tag <code>:1.0</code> antiga por engano e sobrescreveu a versão boa):</p>
+<ul>
+  <li><strong>Tags imutáveis</strong>: no Harbor dá para ligar "immutability" no projeto — depois do push, ninguém altera ou apaga aquela tag. O deploy passa a usar só digest.</li>
+  <li><strong>Service accounts separadas para CI</strong>: a pipeline não usa o login pessoal da Ana; usa uma conta de robô com token próprio, que dá para revogar sem trocar a senha dela.</li>
+  <li><strong>Quota de espaço</strong>: cada projeto tem um limite de GB — sem isso, um build descontrolado enche o registry e derruba os pulls de produção.</li>
+  <li><strong>Scan no push</strong>: o registry escaneia as camadas e bloqueia (ou marca) imagens com CVE crítica — a Ana vê o resultado na interface web antes de liberar o deploy.</li>
+</ul>
+
+<hr>
+
+<h2>Quiz rápido</h2>
+<div class="mc" data-answer="3">
+<p class="mc-q">1. Por que a imagem da API interna da Loja Aurora não pode ir para o Docker Hub público?</p>
+<label><input type="radio" name="q1"> Porque o Hub é pago</label>
+<label><input type="radio" name="q1"> Porque o Hub não aceita imagens grandes</label>
+<label><input type="radio" name="q1"> Porque a imagem carrega o código-fonte proprietário — qualquer pessoa poderia baixar</label>
+<label><input type="radio" name="q1"> Porque o Hub só funciona no Windows</label>
+</div>
+
+<div class="mc" data-answer="2">
+<p class="mc-q">2. Como o Docker sabe que <code>registry.empresa.com/api:2.0</code> é um registry privado e não um usuário do Hub?</p>
+<label><input type="radio" name="q2"> Porque o primeiro elemento tem ponto/dois-pontos — aí é host de registry; sem ponto, seria usuário do Hub</label>
+<label><input type="radio" name="q2"> Porque a tag é 2.0</label>
+<label><input type="radio" name="q2"> Porque o nome tem "empresa"</label>
+<label><input type="radio" name="q2"> Não sabe; manda tudo para o Hub</label>
+</div>
+
+<div class="mc" data-answer="4">
+<p class="mc-q">3. Um servidor de produção tentou <code>docker pull registry.empresa.com/projeto/minha-api:2.0</code> sem login e recebeu…?</p>
+<label><input type="radio" name="q3"> <code>image not found</code></label>
+<label><input type="radio" name="q3"> Nada — baixa mesmo assim</label>
+<label><input type="radio" name="q3"> <code>connection refused</code></label>
+<label><input type="radio" name="q3"> <code>pull access denied … may require 'docker login': denied: requested access to the resource is denied</code></label>
+</div>
+
+<div class="mc" data-answer="1">
+<p class="mc-q">4. Onde ficam salvas as credenciais do <code>docker login</code>?</p>
+<label><input type="radio" name="q4"> Em <code>~/.docker/config.json</code>, uma entrada por host de registry</label>
+<label><input type="radio" name="q4"> No kernel do Linux</label>
+<label><input type="radio" name="q4"> Dentro da imagem</label>
+<label><input type="radio" name="q4"> No arquivo <code>/etc/hosts</code></label>
+</div>
+
+<hr>
+
+<h2>Resumo</h2>
+<ul>
+  <li>Registry privado = mesma ideia do Docker Hub, na sua infraestrutura: código interno não vaza, pull é rápido na rede local e dá para ter controle de acesso e scan de CVE.</li>
+  <li><code>docker login HOST</code> autentica por host; as credenciais ficam em <code>~/.docker/config.json</code> (uma entrada por registry).</li>
+  <li>Nome completo com host: <code>registry.empresa.com/projeto/api:2.0</code> — sem o host, o push vai para o Hub por engano.</li>
+  <li>Pull sem login em imagem privada falha com <code>pull access denied … may require 'docker login'</code>.</li>
+  <li>Para teste local: <code>docker run -d -p 5000:5000 registry:2</code> (sem auth/HTTPS). Para produção: Harbor, ECR, Artifact Registry, ACR ou GitLab Registry.</li>
+  <li>Certificado autoassinado dá <code>x509: certificate signed by unknown authority</code> — instale a CA nos hosts; <code>insecure-registries</code> só em teste.</li>
+</ul>
+
+<div class="tip"><strong>Próxima aula:</strong> <a href="image-dive.html">Analisando camadas (dive, docker history)</a>.</div>
+
+<div class="pager"></div>
+
+</div>
+</main>
+</div>
+<script src="assets/site.js?v=4"></script>
+</body>
+</html>

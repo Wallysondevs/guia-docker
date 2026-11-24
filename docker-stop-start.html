@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>docker stop, start e restart — controlando containers | Guia Docker</title>
+<meta name="description" content="Como parar, iniciar e reiniciar containers com docker stop, docker start, docker restart e docker kill. A diferença entre stop (graceful, SIGTERM, espera 10s) e kill (SIGKILL imediato), a opção -t para mudar o tempo de espera, o ciclo de vida do container (rodando → parado → apagado), o erro 'No such container', e que os arquivos gravados continuam lá quando o container para. Missões no simulador.">
+<link rel="stylesheet" href="assets/style.css?v=4">
+<script>try{var t=localStorage.getItem("tema");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<meta http-equiv="Cache-Control" content="no-store, must-revalidate">
+<script>try{history.scrollRestoration="manual"}catch(e){}(function(){var n=0;function t(){window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;if(++n<60)setTimeout(t,50)}t();window.addEventListener("pagehide",function(){window.scrollTo(0,0);document.documentElement.scrollTop=0;});window.addEventListener("pageshow",function(){window.scrollTo(0,0)});window.addEventListener("load",function(){window.scrollTo(0,0)});})();document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(a){var h=a.getAttribute("href")||"";if(/[.]html($|[?#])/.test(h)&&a.host===location.host){window.scrollTo(0,0);document.documentElement.scrollTop=0;}}});</script>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" id="sidebar" aria-label="Tópicos"></nav>
+<main class="main">
+<div class="content">
+
+<div class="pager"></div>
+
+<h1>docker <span class="hl">stop, start, restart</span></h1>
+
+<p class="intro">Um container rodando pode ser <strong>parado, religado e reiniciado sem ser recriado</strong>. O estado interno (arquivos gravados na camada do container) continua lá — parar não é apagar. Nesta aula a Ana controla the ciclo de vida do site dela no <code>notebook</code>.</p>
+
+<div class="note">
+<strong>Você vai aprender</strong>
+<ul>
+  <li><code>docker stop</code>: parar com educação (SIGTERM, espera, depois SIGKILL).</li>
+  <li><code>docker start</code>: religar o <strong>mesmo</strong> container (nada se perde).</li>
+  <li><code>docker restart</code>: stop + start num comando só.</li>
+  <li><code>docker kill</code>: parar na marra (SIGKILL imediato) — quando usar.</li>
+  <li>A opção <code>-t</code> (tempo de espera) e o erro <code>No such container</code>.</li>
+</ul>
+</div>
+
+<hr>
+
+<h2>A cena: o site da Ana no ar</h2>
+<p>Ela subiu o Nginx dela na aula de <a href="docker-run.html">docker run</a>:</p>
+<pre class="term">$ docker run -d --name meu-site nginx:alpine
+$ docker ps
+CONTAINER ID   IMAGE          STATUS         PORTS     NAMES
+f3a1b2c3d4e5   nginx:alpine   Up 5 seconds   80/tcp    meu-site</pre>
+
+<hr>
+
+<h2>stop: parar com educação</h2>
+<div class="try" data-goal="meu-site" data-solucao="docker stop meu-site"><p class="try-task"><strong>Missão:</strong> suba um container com <code>docker run -d --name meu-site nginx:alpine</code> e depois pare com <code>docker stop meu-site</code>.</p></div>
+<pre class="term">$ docker stop meu-site
+meu-site
+$ docker ps
+CONTAINER ID   IMAGE   COMMAND   CREATED   STATUS   PORTS   NAMES   « sumiu dos rodando
+$ docker ps -a
+… STATUS                       NAMES
+… Exited (0) 2 seconds ago     meu-site   « está parado, NÃO apagado</pre>
+
+<p>O comando imprime o <strong>nome do container parado</strong> (é a confirmação). Repare na diferença crucial: <code>docker ps</code> (só rodando) ficou vazio, mas <code>docker ps -a</code> mostra o container como <code>Exited (0)</code> — parado, guardado, pronto para religar.</p>
+
+<dl class="anatomy">
+  <dt>docker stop meu-site</dt><dd>"Pare o container chamado meu-site" (dá para passar vários: <code>docker stop a b c</code>, ou IDs).</dd>
+  <dt>SIGTERM</dt><dd>O stop manda o sinal de término "gentil" para o processo principal: o Nginx fecha as conexões abiertas e sai limpando a casa.</dd>
+  <dt>espera 10 segundos</dt><dd>Se o processo não terminar nesse tempo, o Docker manda SIGKILL e mata na marra. Dá para mudar: <code>docker stop -t 30 meu-site</code> (30s) ou <code>-t 0</code> (mata na hora).</dd>
+</dl>
+
+<hr>
+
+<h2>start: religar o mesmo container</h2>
+<p>Religar usa o <strong>mesmo container</strong> — com os mesmos arquivos, mesma configuração, mesmo ID:</p>
+<pre class="term">$ docker start meu-site
+meu-site
+$ docker ps
+… STATUS          NAMES
+… Up 2 seconds    meu-site   « voltou a rodar</pre>
+<p>É diferente de dar <code>docker run</code> de novo (que criaria um container <strong>novo</strong>). O <code>start</code> ressuscita o antigo — por isso o <code>CREATED</code> continua antigo no <code>ps</code>.</p>
+
+<div class="try" data-goal="Up 2 minutes" data-solucao="docker start meu-site">
+<p class="try-task"><strong>Missão:</strong> com o container parado, rode <code>docker start meu-site</code> e depois <code>docker ps</code> para vê-lo <code>Up</code> de novo.</p>
+</div>
+
+<hr>
+
+<h2>restart: parar e ligar de novo</h2>
+<pre class="term">$ docker restart meu-site
+meu-site</pre>
+<p>Equivalente a <code>stop</code> + <code>start</code>. Muito usado depois de trocar uma configuração montada por volume (ex.: editar o <code>nginx.conf</code> na sua pasta e mandar <code>docker restart meu-site</code> para o Nginx recarregar).</p>
+
+<hr>
+
+<h2>kill: parar na marra</h2>
+<pre class="term">$ docker kill meu-site    « SIGKILL imediato, sem esperar os 10s</pre>
+<p>O processo morre na hora, sem chance de limpar nada (arquivos abertos podem corromper). Use <code>kill</code> só quando o <code>stop</code> travar — container que não responde ao SIGTERM. No <code>ps -a</code>, um container morto por kill aparece como <code>Exited (137)</code> (128 + 9 = sinal 9, SIGKILL).</p>
+
+<div class="table-wrap">
+<table class="ref">
+<tr><th></th><th>docker stop</th><th>docker kill</th></tr>
+<tr><td>Sinal enviado</td><td>SIGTERM (gentil) e, se demorar, SIGKILL</td><td>SIGKILL direto</td></tr>
+<tr><td>Espera o processo terminar?</td><td>Sim, até 10s (configurável com <code>-t</code>)</td><td>Não</td></tr>
+<tr><td>Status depois</td><td><code>Exited (0)</code> (limpo)</td><td><code>Exited (137)</code></td></tr>
+<tr><td>Quando usar</td><td>Sempre que der (é o padrão)</td><td>Só se o stop travar</td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>O ciclo de vida completo</h2>
+<pre class="term">$ docker run -d --name ciclo nginx:alpine    « nasce rodando
+$ docker ps                → Up …            ciclo
+$ docker stop ciclo        → Exited (0)       ciclo  (parado, existe)
+$ docker start ciclo       → Up …            ciclo  (religou o MESMO)
+$ docker stop ciclo
+$ docker rm ciclo          → some da lista    (apagado de vez)</pre>
+
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Você quer…</th><th>Comando</th><th>Estado depois</th></tr>
+<tr><td>Criar e rodar</td><td><code>docker run -d …</code></td><td>rodando (Up)</td></tr>
+<tr><td>Parar (guardando)</td><td><code>docker stop X</code></td><td>parado (Exited)</td></tr>
+<tr><td>Religar o mesmo</td><td><code>docker start X</code></td><td>rodando de novo</td></tr>
+<tr><td>Reiniciar</td><td><code>docker restart X</code></td><td>rodando (novo start)</td></tr>
+<tr><td>Parar na marra</td><td><code>docker kill X</code></td><td>parado (Exited 137)</td></tr>
+<tr><td>Apagar de vez</td><td><code>docker rm X</code></td><td>não existe mais</td></tr>
+</table>
+</div>
+
+<div class="warning">
+<strong>Parar não apaga dados</strong>
+<p>Os arquivos que o programa gravou dentro do container continuam na camada gravável enquanto o container existir (mesmo parado). Eles só somem com <code>docker rm</code>. Para dados que devem durar de qualquer jeito, use <a href="volumes-intro.html">volumes</a>.</p>
+</div>
+
+<div class="warning">
+<strong>Erro real: container que não existe</strong>
+<div class="try" data-goal="No such container" data-solucao="docker stop nao-existe">
+<p class="try-task"><strong>Missão:</strong> tente parar um container que não existe: <code>docker stop nao-existe</code>. Veja a mensagem de erro real.</p>
+</div>
+<pre class="term">$ docker stop nao-existe
+Error response from daemon: No such container: nao-existe</pre>
+<p>Nome errado ou container já apagado. Confira os nomes certos com <code>docker ps -a</code>.</p>
+</div>
+
+<div class="warning">
+<strong>Erro real: start em container que já está rodando</strong>
+<pre class="term">$ docker start meu-site     « já está Up
+docker: Error response from daemon: container meu-site is already running</pre>
+</div>
+
+<div class="mc" data-answer="2">
+<p class="mc-q">Qual a diferença entre <code>docker stop meu-site</code> e <code>docker rm meu-site</code>?</p>
+<label><input type="radio" name="q1"> Nenhuma, são apelidos</label>
+<label><input type="radio" name="q1"> stop para o container (ele continua existindo, parado); rm apaga o container de vez</label>
+<label><input type="radio" name="q1"> stop apaga; rm para</label>
+<label><input type="radio" name="q1"> stop cria um novo; rm lista</label>
+</div>
+
+<div class="mc" data-answer="1">
+<p class="mc-q">O que o <code>docker stop</code> manda para o processo antes de matar?</p>
+<label><input type="radio" name="q2"> SIGTERM (término gentil) e, se não responder em 10s, SIGKILL</label>
+<label><input type="radio" name="q2"> SIGKILL direto, sempre</label>
+<label><input type="radio" name="q2"> Nada, só desliga a tomada</label>
+<label><input type="radio" name="q2"> SIGHUP</label>
+</div>
+
+<div class="mc" data-answer="3">
+<p class="mc-q">Depois de <code>docker stop</code>, onde o container aparece?</p>
+<label><input type="radio" name="q3"> Em lugar nenhum — foi apagado</label>
+<label><input type="radio" name="q3"> No <code>docker images</code></label>
+<label><input type="radio" name="q3"> Só no <code>docker ps -a</code>, como <code>Exited (0)</code></label>
+<label><input type="radio" name="q3"> Continua aparecendo no <code>docker ps</code> normal</label>
+</div>
+
+<hr>
+
+<h2>Vários containers de uma vez</h2>
+<p>Todos esses comandos aceitam <strong>vários nomes/IDs</strong> de uma vez, e dá para combinar com <code>$(...)</code>:</p>
+<pre class="term">$ docker run -d --name web nginx:alpine
+$ docker run -d --name cache redis:7-alpine
+$ docker stop web cache        « dois de uma vez
+web
+cache
+$ docker start web cache
+web
+cache
+$ docker restart $(docker ps -q)   « reinicia TODOS os que estão rodando</pre>
+
+<div class="warning">
+<strong>Cuidado com <code>docker stop $(docker ps -q)</code></strong>
+<p>Isso para <strong>todos</strong> os containers rodando da máquina — inclusive de outros projetos. Sempre confira antes com <code>docker ps</code>.</p>
+</div>
+
+<h3>Parar tudo de uma vez: a ordem certa</h3>
+<ol class="passo">
+  <li><code>docker ps</code> — veja o que está rodando.</li>
+  <li><code>docker stop $(docker ps -q)</code> — para todos os rodando.</li>
+  <li><code>docker ps -a</code> — agora todos estão <code>Exited</code>.</li>
+  <li>Quando quiser apagar: <code>docker rm $(docker ps -aq)</code> (próxima aula).</li>
+</ol>
+
+<hr>
+
+<h2>Relacionados: pause e restart policy</h2>
+<p>Dois parentes próximos que vale conhecer:</p>
+<ul>
+  <li><code>docker pause X</code> / <code>docker unpause X</code>: congela o processo (ele continua existindo, mas não usa CPU) e descongela depois. Diferente do <code>stop</code>, que mata o processo. Útil para "dar um tempo" num container pesado sem perdê-lo.</li>
+  <li><code>--restart unless-stopped</code> no <code>docker run</code>: se o container cair (ou a máquina reiniciar), o Docker religa sozinho — não precisa de <code>start</code> manual. É o que se usa em produção (aula <a href="healthcheck.html">HEALTHCHECK e restart policies</a> aprofunda).</li>
+</ul>
+
+<pre class="term">$ docker run -d --restart unless-stopped --name api node:22-alpine node server.js
+$ docker ps
+… STATUS                          NAMES
+… Up 5 seconds (healthy)  ou simply Up 5 seconds   api</pre>
+
+<hr>
+
+<h2>Parar na prática: o fluxo de debug da Ana</h2>
+<p>Quando um serviço cai sozinho, a sequência que a Ana usa:</p>
+<ol class="passo">
+  <li><code>docker ps -a</code> — o container está <code>Exited (1)</code>? (morreu com erro)</li>
+  <li><code>docker logs NOME</code> — qual foi a última linha antes de morrer? (aula <a href="docker-logs.html">logs</a>)</li>
+  <li>Corrige a causa (variável faltando, porta ocupada, arquivo errado…).</li>
+  <li><code>docker start NOME</code> — tenta religar o mesmo (se o comando padrão ainda vale).</li>
+  <li>Se a imagem/config mudou: <code>docker rm NOME</code> + <code>docker run …</code> de novo (container novo).</li>
+</ol>
+
+<h3>Reinício automático: --restart</h3>
+<p>Em vez de religar na mão, dá para dizer pro Docker cuidar: a flag <code>--restart</code> no <code>run</code> define o que acontece quando o container cai ou a máquina reinicia:</p>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Valor</th><th>Quando religa</th></tr>
+<tr><td><code>no</code> (padrão)</td><td>Nunca — se cair, fica parado até você dar <code>start</code></td></tr>
+<tr><td><code>always</code></td><td>Sempre, mesmo se você deu <code>stop</code> na mão (só para de vez com <code>docker rm</code>)</td></tr>
+<tr><td><code>on-failure</code></td><td>Se saiu com código ≠ 0 (erro)</td></tr>
+<tr><td><code>unless-stopped</code></td><td>Sempre, <strong>exceto</strong> se você deu <code>stop</code> manualmente — o mais usado em produção</td></tr>
+</table>
+</div>
+<pre class="term">$ docker run -d --restart unless-stopped --name api node:22-alpine node server.js
+$ docker ps
+… STATUS                NAMES
+… Up 5 seconds (healthy) ou Up 5 seconds   api</pre>
+<p>O status entre parênteses (ex.: <code>(health)</code>) aparece quando a imagem tem <strong>HEALTHCHECK</strong> definido — aula <a href="healthcheck.html">HEALTHCHECK e restart policies</a>.</p>
+
+<hr>
+
+<h2>Erros de stop/start na prática</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Mensagem</th><th>Causa</th><th>Solução</th></tr>
+<tr><td><code>No such container: X</code></td><td>Nome/ID errado ou container já apagado</td><td>Veja os nomes certos: <code>docker ps -a</code></td></tr>
+<tr><td><code>container X is already running</code></td><td>Deu <code>start</code> num que já está Up</td><td>Nada a fazer — ou dê <code>restart</code> se era isso que queria</td></tr>
+<tr><td><code>You cannot start a container that was never started…</code></td><td><code>start</code> em container criado com <code>create</code> e com comando inválido</td><td>Recria com <code>run</code></td></tr>
+</table>
+</div>
+
+<h3>Quanto tempo o stop esperou?</h3>
+<p>Dá para ver no log do próprio container ou com <code>docker inspect</code> (campo <code>State.FinishedAt</code> menos <code>StartedAt</code>). E dá para mudar a espera: <code>docker stop -t 30 meu-site</code> (30 segundos) ou <code>-t 0</code> (mata na hora, como kill).</p>
+
+<hr>
+
+<h2>Resumo</h2>
+<ul>
+  <li><code>docker stop X</code> para com educação (SIGTERM, espera até 10s com <code>-t</code>, depois SIGKILL) e imprime o nome.</li>
+  <li><code>docker start X</code> religa o <strong>mesmo</strong> container — arquivos e config continuam lá; <code>docker restart X</code> = stop + start.</li>
+  <li><code>docker kill X</code> mata na hora (SIGKILL, vira <code>Exited (137)</code>) — só quando o stop travar.</li>
+  <li>Parado ≠ apagado: o container parado só aparece no <code>ps -a</code> e só sai de vez com <code>docker rm</code>.</li>
+  <li>Erros reais: <code>No such container: X</code> (nome errado/apagado) e <code>container X is already running</code> (start em quem já está Up).</li>
+</ul>
+
+<div class="tip"><strong>Próxima aula:</strong> <a href="docker-rm.html">docker rm: removendo containers</a> — agora que o container está parado, como apagar de vez (por nome, por ID, vários, com <code>-f</code>) e o erro de tentar apagar container rodando.</div>
+
+</div>
+</main>
+</div>
+<script src="assets/site.js?v=4"></script>
+</body>
+</html>

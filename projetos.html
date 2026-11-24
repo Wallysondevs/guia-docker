@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Como usar os Projetos práticos | Guia Docker</title>
+<meta name="description" content="Página índice da seção de projetos do Guia Docker: pré-requisitos (Docker instalado e testado na máquina da Ana), como acompanhar cada projeto passo a passo (arquivos, comandos, verificação, limpeza), a lista dos 5 projetos completos com o que cada um ensina, a ordem sugerida de estudo e um checklist geral.">
+<link rel="stylesheet" href="assets/style.css?v=4">
+<script>try{var t=localStorage.getItem("tema");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<meta http-equiv="Cache-Control" content="no-store, must-revalidate">
+<script>try{history.scrollRestoration="manual"}catch(e){}(function(){var n=0;function t(){window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;if(++n<60)setTimeout(t,50)}t();window.addEventListener("pagehide",function(){window.scrollTo(0,0);document.documentElement.scrollTop=0;});window.addEventListener("pageshow",function(){window.scrollTo(0,0)});window.addEventListener("load",function(){window.scrollTo(0,0)});})();document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(a){var h=a.getAttribute("href")||"";if(/[.]html($|[?#])/.test(h)&&a.host===location.host){window.scrollTo(0,0);document.documentElement.scrollTop=0;}}});</script>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" id="sidebar" aria-label="Tópicos"></nav>
+<main class="main">
+<div class="content">
+
+<div class="pager"></div>
+
+<h1>Como usar os <span class="hl">Projetos</span></h1>
+
+<p class="intro">Chegou a hora de sair do <code>hello-world</code> e montar aplicações de verdade. A Ana chegou até aqui no notebook dela depois de passar pelos três níveis do guia — e agora ela mesma vai montar um site, uma API, um blog e uma aplicação fullstack, tudo rodando em containers. Cada projeto desta seção é um <strong>passo a passo completo</strong>: os arquivos para criar, os comandos para rodar na ordem certa, a saída esperada no terminal e uma missão no simulador para praticar sem medo de quebrar nada.</p>
+
+<div class="note">
+<strong>Você vai aprender</strong>
+<ul>
+  <li>O que você precisa ter instalado e testado antes de começar (leva 2 minutos).</li>
+  <li>O ritual de cada projeto: criar arquivos → rodar comandos → conferir a saída → fazer a missão → limpar tudo.</li>
+  <li>Quais são os 5 projetos, o que cada um monta e o que ele ensina de novo.</li>
+  <li>Em que ordem fazer os projetos para o aprendizado encaixar um no outro.</li>
+  <li>O checklist geral que vale para qualquer projeto Docker.</li>
+</ul>
+</div>
+
+<hr>
+
+<h2>O cenário: a Ana e o notebook dela</h2>
+<p>Toda esta seção acontece na máquina fictícia <code>ana@notebook</code> — um notebook comum, com Ubuntu 24.04 e o Docker Engine 27 instalado (a aula <a href="instalar.html">Instalar o Docker</a> mostra como ela fez). A Ana não é especialista em Linux: ela usa o terminal para o básico e o navegador para ver os sites. Se você está acompanhando no seu próprio computador, rode os mesmos comandos aí — o resultado é o mesmo.</p>
+<p>Uma regra de ouro antes de começar: <strong>nesta seção, tudo termina do jeito que começou</strong>. Cada projeto ensina a desmontar o que montou (<code>docker compose down</code>, <code>docker stop</code> + <code>docker rm</code>), porque container esquecido é porta ocupada e disco cheio — e a página <a href="problemas.html">Erros comuns</a> vive disso.</p>
+
+<hr>
+
+<h2>Como ler os blocos de cada página de projeto</h2>
+<p>Antes de entrar no projeto 1, vale entender os quatro tipos de bloco que vão aparecer em todas as páginas desta seção — eles são sempre os mesmos:</p>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Bloco</th><th>Aspecto</th><th>O que significa</th></tr>
+<tr><td><code>pre.file</code> (caixa clara, botão "copiar")</td><td>arquivo de texto</td><td>Um arquivo para você <strong>criar</strong> no seu computador, exatamente como está escrito. O nome do arquivo aparece no título da caixa.</td></tr>
+<tr><td><code>pre.term</code> (caixa escura, tipo terminal)</td><td>terminal da <code>ana@notebook</code></td><td>Comandos e saídas <strong>de verdade</strong>: as linhas que começam com <code>$</code> são comandos para digitar; as outras são a resposta da máquina. O texto depois de <code>«</code> é uma anotação nossa.</td></tr>
+<tr><td><code>dl.anatomy</code></td><td>anatomia</td><td>O comando "desmontado" peça por peça, com uma explicação de cada parte embaixo — para você entender antes de decorar.</td></tr>
+<tr><td><code>div.try</code> (caixa com terminal embutido)</td><td>simulador</td><td>Um terminal fictício que roda no navegador e entende os comandos Docker principais. Tem botão <strong>Reiniciar</strong> e, nas missões, botão <strong>Ver comando</strong>. A faixa <strong>✔ Missão cumprida!</strong> aparece quando a saída bate com o objetivo.</td></tr>
+</table>
+</div>
+<p>Os blocos <code>warn</code> (borda vermelha) são os <strong>erros reais</strong> que a Ana já cometeu — com a mensagem exata que apareceu no terminal dela e a solução. Não pule: é neles que mora metade do aprendizado prático.</p>
+
+<hr>
+
+<h2>Pré-requisitos (2 minutos)</h2>
+<p>Antes do primeiro projeto, confirme que o Docker está instalado e répondendo na sua máquina:</p>
+<pre class="term">$ docker version
+Client:
+  Version:   27.3.1
+  OS/Arch:   linux/amd64
+
+Server: Docker Engine 27.3.1
+  Storage Driver: overlay2
+  Operating System: Ubuntu 24.04 LTS</pre>
+<p>Se aparecer <code>Cannot connect to the Docker daemon</code>, volte na aula <a href="instalar.html">Instalar o Docker</a> — provavelmente o serviço não está no ar ou seu usuário ainda não está no grupo <code>docker</code>.</p>
+<p>Você também vai precisar de:</p>
+<ul>
+  <li>Um <strong>terminal</strong> (no Windows, use o WSL2; no Mac, o Terminal mesmo).</li>
+  <li>Um <strong>navegador</strong>, para abrir as páginas que os projetos publicam (<code>localhost:8080</code>, <code>localhost:3000</code>…).</li>
+  <li>Um <strong>editor de texto</strong> qualquer (VS Code, gedit, nano) para criar os arquivos dos projetos.</li>
+  <li><code>curl</code> instalado, para testar as APIs pelo terminal (no Ubuntu: <code>sudo apt install curl</code>).</li>
+</ul>
+
+<div class="try" data-goal="Docker version" data-solucao="docker --version">
+<p class="try-task"><strong>Missão:</strong> antes de qualquer projeto, confirme que o Docker responde na sua máquina (neste simulador, na máquina fictícia <code>ana@notebook</code>): rode <code>docker --version</code> e veja a linha <code>Docker version 27.3.1</code>.</p>
+</div>
+
+<hr>
+
+<h2>O ritual de cada projeto</h2>
+<p>Todos os projetos seguem a mesma ordem, como uma receita de bolo. Memorize esse fluxo — ele vale para qualquer aplicação Docker que você for montar no futuro:</p>
+<ol class="passo">
+  <li><strong>Crie a pasta do projeto e os arquivos</strong> mostrados nos blocos <code>pre.file</code> (cada bloco tem botão de "copiar"). São arquivos pequenos — dá para digitar na mão.</li>
+  <li><strong>Entre na pasta certa</strong> com <code>cd</code> e confira com <code>ls</code> que os arquivos estão lá. atenção para a pasta: rodar o comando na pasta errada é um dos erros mais comuns.</li>
+  <li><strong>Rode os comandos na ordem</strong> em que aparecem, no terminal real da sua máquina, e compare com a saída esperada mostrada no bloco <code>pre.term</code>.</li>
+  <li><strong>Abra o navegador</strong> na porta publicada (<code>localhost:8080</code> etc.) ou teste com <code>curl</code> — ver funcionando é metade do aprendizado.</li>
+  <li><strong>Faça as missões</strong> nos terminais simulados da própria página (eles imitam os comandos Docker e muestran ✔ quando você acerta). Errar no simulador não quebra nada.</li>
+  <li><strong>Desmonte tudo no final</strong>: <code>docker compose down</code> nos projetos com Compose, ou <code>docker stop</code> + <code>docker rm</code> nos projetos de container único — para não deixar portas ocupadas nem disco sujo.</li>
+</ol>
+
+<div class="warn"><strong>Se algo der errado no meio:</strong> não entre em pânico e não saia apagando tudo. O ritual de diagnóstico é sempre o mesmo: <code>docker ps -a</code> (quem está parado?), <code>docker logs NOME</code> (o que o app disse por último?), <code>docker images</code> (a imagem existe?). A página <a href="problemas.html">Erros comuns e soluções</a> tem a lista completa dos sustos mais frequentes.</div>
+
+<hr>
+
+<h2>Onde cada comando foi ensinado</h2>
+<p>Esta seção não ensina comandos novos do zero — ela <strong>usa</strong> os comandos dos níveis anteriores, agora combinados. Se um comando parecer magia, o link leva para a aula que explica ele:</p>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Comando que aparece nos projetos</th><th>Aula que explica</th></tr>
+<tr><td><code>docker run -d -p … -v … --name …</code></td><td><a href="docker-run.html">docker run: anatomia do comando</a> e <a href="portas.html">Publicando portas</a></td></tr>
+<tr><td><code>docker ps / stop / rm / logs</code></td><td><a href="docker-ps.html">docker ps</a>, <a href="docker-stop-start.html">stop/start/restart</a>, <a href="docker-rm.html">docker rm</a>, <a href="docker-logs.html">docker logs</a></td></tr>
+<tr><td><code>docker build -t … .</code> e Dockerfile</td><td><a href="docker-build.html">docker build</a> e a seção <a href="dockerfile-intro.html">Dockerfile</a></td></tr>
+<tr><td><code>-v pasta:/caminho:ro</code> (bind mount)</td><td><a href="volumes-tipos.html">Volumes nomeados, bind mounts e tmpfs</a></td></tr>
+<tr><td><code>docker compose up/down/ps/logs</code></td><td><a href="compose-up-down.html">docker compose up e down</a> e <a href="compose-servicos.html">Serviços no Compose</a></td></tr>
+<tr><td><code>docker exec -it … sh / psql</code></td><td><a href="docker-exec.html">docker exec</a> e <a href="containers-conversando.html">Containers se comunicando por nome</a></td></tr>
+<tr><td><code>docker volume create/ls</code></td><td><a href="docker-volume.html">docker volume</a></td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>Os cinco projetos</h2>
+<p>Cada projeto abaixo é uma página própria, com passo a passo completo. A tabela resume o que você monta e o que aprende de novo em cada um:</p>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Projeto</th><th>O que você monta</th><th>O que pratica</th><th>Tempo</th></tr>
+<tr><td><a href="projeto-web-nginx.html">1 · Site estático com Nginx</a></td><td>Uma pasta com <code>index.html</code> servida por um Nginx dentro de um container, editável ao vivo.</td><td><code>docker run -d -p</code>, bind mount <code>-v …:ro</code>, <code>docker logs</code>, <code>stop</code>/<code>rm</code></td><td>~10 min</td></tr>
+<tr><td><a href="projeto-api-node.html">2 · API Node.js com Dockerfile</a></td><td>Uma API Express (rotas <code>/</code> e <code>/saude</code>) empacotada numa imagem sua.</td><td>Escrever Dockerfile do zero, <code>docker build</code>, <code>EXPOSE</code>, <code>-e</code>, ciclo build→run→test</td><td>~20 min</td></tr>
+<tr><td><a href="projeto-fullstack.html">3 · Fullstack: React + API + Banco</a></td><td>Três serviços (frontend, API e PostgreSQL) subindo juntos numa rede interna.</td><td><code>docker-compose.yml</code> com vários serviços, <code>depends_on</code>, <code>.env</code>, volumes nomeados, DNS entre containers</td><td>~30 min</td></tr>
+<tr><td><a href="projeto-wordpress.html">4 · WordPress + MySQL com Compose</a></td><td>Um WordPress completo rodando local, com banco MySQL e dados persistentes.</td><td>Imagens oficiais grandes, variáveis de ambiente <code>WORDPRESS_DB_*</code>/<code>MYSQL_*</code>, persistência com volumes, backup</td><td>~20 min</td></tr>
+<tr><td><a href="projeto-python-flask.html">5 · API Python Flask + PostgreSQL</a></td><td>Uma API em Python que consulta um PostgreSQL de verdade dentro do Compose.</td><td><code>requirements.txt</code> + <code>pip</code>, <code>DATABASE_URL</code>, conexão app↔banco, <code>psql</code> via <code>docker exec</code></td><td>~25 min</td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>Ordem sugerida</h2>
+<p>Faça do 1 ao 5. Cada projeto usa o que o anterior ensinou:</p>
+<ol class="passo">
+  <li>O <strong>projeto 1</strong> é o "hello-world com serventia": você aprende que um container pode servir uma pasta da sua máquina e que tudo começa com um <code>docker run</code> bem montado.</li>
+  <li>O <strong>projeto 2</strong> troca a imagem pronta por uma imagem <em sua</em>: entra o Dockerfile e o <code>docker build</code>.</li>
+  <li>O <strong>projeto 3</strong> mostra por que um container sozinho não basta: vários serviços precisam conversar — entra o Compose.</li>
+  <li>O <strong>projeto 4</strong> prova que dá para rodar software complexo (WordPress + MySQL) sem instalar nada além do Docker — só declarando um YAML.</li>
+  <li>O <strong>projeto 5</strong> troca a linguagem (Python em vez de Node) para mostrar que a receita é a mesma: código + Dockerfile + Compose + banco.</li>
+</ol>
+<p>Se travar em algum passo, volte na aula correspondente do <a href="docker-run.html">Nível 1</a> ou do <a href="compose-intro.html">Nível 2</a> linkada na página — e use o simulador da página para testar o comando antes de rodar na máquina real.</p>
+
+<hr>
+
+<h2>Checklist geral de qualquer projeto Docker</h2>
+<p>Antes de começar e antes de terminar, passe por esta lista — ela resume a seção inteira:</p>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Quando</th><th>Verifique</th></tr>
+<tr><td>Antes de começar</td><td><code>docker version</code> responde; você está na pasta certa do projeto (<code>ls</code> confirma os arquivos).</td></tr>
+<tr><td>Durante</td><td>Cada comando rodou na ordem; a saída bateu com a esperada; <code>docker ps</code> mostra o que deveria mostrar.</td></tr>
+<tr><td>Depois (navegador/curl)</td><td>A página abre em <code>localhost:PORTA</code>; a API responde <code>curl</code>; os logs fazem sentido (<code>docker logs</code>).</td></tr>
+<tr><td>Antes de fechar</td><td>Tudo desmontado (<code>compose down</code> ou <code>stop</code>+<code>rm</code>); <code>docker ps -a</code> não mostra containers parados esquecidos; os dados que precisavam persistir estão em volume.</td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>Perguntas rápidas</h2>
+<div class="warn"><strong>“Posso pular o projeto 1 e ir direto para o Compose?”</strong> Pode, mas não é recomendado: o projeto 1 ensina bind mount e portas, que o Compose só esconde — e na hora do erro você vai precisar saber o que está por trás.</div>
+<div class="warn"><strong>“E se eu não tiver Node/Python instalados na máquina?”</strong> Não precisa: é exatamente por isso que usamos containers. O projeto 2 precisa de Node só <em>dentro</em> do build (a imagem <code>node:22-alpine</code> traz o Node); a sua máquina só precisa do Docker.</div>
+<div class="warn"><strong>“O simulador da página é igual ao Docker de verdade?”</strong> Ele imita os comandos principais e as saídas (versão 27.3.1), mas é um modelo: na máquina real, os IDs, tempos e mensagens são diferentes — a estrutura, não.</div>
+
+<hr>
+
+<h2>Resumo desta página</h2>
+<ul>
+  <li>Os projetos são passo a passo completos: arquivos em blocos copiáveis, comandos em ordem, saída esperada e missões no simulador.</li>
+  <li>O ritual é sempre: criar arquivos → <code>cd</code> na pasta certa → rodar → conferir no navegador/curl → fazer a missão → <strong>limpar tudo no final</strong>.</li>
+  <li>Ordem sugerida: Nginx (1) → API Node (2) → Fullstack (3) → WordPress (4) → Flask (5).</li>
+  <li>Se travar, o diagnóstico começa em <code>docker ps -a</code> + <code>docker logs</code> — e a página <a href="problemas.html">Erros comuns</a> lista os sustos mais frequentes.</li>
+</ul>
+
+<div class="tip"><strong>Próxima aula:</strong> <a href="projeto-web-nginx.html">Site estático com Nginx</a> — o projeto mais rápido: um HTML seu servido por um container em menos de um minuto.</div>
+
+</div>
+</main>
+</div>
+<script src="assets/site.js?v=4"></script>
+</body>
+</html>

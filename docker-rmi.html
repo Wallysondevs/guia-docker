@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>docker rmi — removendo imagens | Guia Docker</title>
+<meta name="description" content="Como remover imagens com docker rmi: por nome:tag, por ID, várias de uma vez, -f para forçar, o erro real de imagem em uso por container (must force), imagens dangling (&lt;none&gt;) e docker image prune, o que acontece com containers que já saíram, e que rmi não apaga nada do Docker Hub. Missões no simulador.">
+<link rel="stylesheet" href="assets/style.css?v=4">
+<script>try{var t=localStorage.getItem("tema");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<meta http-equiv="Cache-Control" content="no-store, must-revalidate">
+<script>try{history.scrollRestoration="manual"}catch(e){}(function(){var n=0;function t(){window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;if(++n<60)setTimeout(t,50)}t();window.addEventListener("pagehide",function(){window.scrollTo(0,0);document.documentElement.scrollTop=0;});window.addEventListener("pageshow",function(){window.scrollTo(0,0)});window.addEventListener("load",function(){window.scrollTo(0,0)});})();document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(a){var h=a.getAttribute("href")||"";if(/[.]html($|[?#])/.test(h)&&a.host===location.host){window.scrollTo(0,0);document.documentElement.scrollTop=0;}}});</script>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" id="sidebar" aria-label="Tópicos"></nav>
+<main class="main">
+<div class="content">
+
+<div class="pager"></div>
+
+<h1>docker <span class="hl">rmi</span> — removendo imagens</h1>
+
+<p class="intro">Imagens ocupam espaço em disco (a máquina da Ana já tem ~860MB só nas 6 imagens iniciais). O <code>docker rmi</code> apaga uma imagem da máquina <strong>local</strong> —注意: <strong>não apaga nada do Docker Hub</strong>; o que está publicado lá continua lá para todo mundo baixar.</p>
+
+<div class="note">
+<strong>Você vai aprender</strong>
+<ul>
+  <li>Remover por <code>nome:tag</code> e por <code>ID</code>.</li>
+  <li>Remover várias de uma vez e o <code>-f</code> (forçar).</li>
+  <li>O erro real quando a imagem está em uso por um container.</li>
+  <li>O que acontece com a tag quando a imagem ainda tem outro apelido.</li>
+  <li>Limpar imagens dangling (<code>&lt;none&gt;</code>) com prune.</li>
+</ul>
+</div>
+
+<hr>
+
+<h2>A cena: a Ana quer liberar espaço</h2>
+<p>Depois de testar o <code>hello-world</code> várias vezes, a Ana decide apagar a imagem dele do notebook (ela pode baixar de novo quando quiser — está no Hub):</p>
+
+<h2>Por nome ou ID</h2>
+<div class="try" data-goal="Untagged" data-solucao="docker rmi hello-world"><p class="try-task"><strong>Missão:</strong> remova a imagem <code>hello-world</code> com <code>docker rmi hello-world</code> (se um container dela existir, pare e remova antes).</p></div>
+<pre class="term">$ docker rmi hello-world
+Untagged: hello-world:latest
+Deleted: sha256:a1b2c3d4e5f6…
+$ docker images
+REPOSITORY   TAG          IMAGE ID       CREATED         SIZE
+nginx        alpine       b2c3d4e5f6a1   5 days ago      48.2MB
+…                              « hello-world sumiu</pre>
+
+<dl class="anatomy">
+  <dt>Untagged: hello-world:latest</dt><dd>O "apelido" (tag) foi removido — a linha <code>hello-world:latest</code> some da lista.</dd>
+  <dt>Deleted: sha256:a1b2…</dt><dd>As camadas da imagem foram apagadas do disco (só as que <strong>não</strong> são compartilhadas com outra imagem — se outra imagem usa a mesma camada base, ela continua).</dd>
+</dl>
+
+<p>Também dá para usar o ID no lugar do nome: <code>docker rmi a1b2c3d4e5f6</code> (os primeiros caracteres bastam).</p>
+
+<div class="try" data-goal="No such image" data-solucao="docker rmi imagem-que-nao-existe">
+<p class="try-task"><strong>Missão:</strong> tente apagar uma imagem que não existe: <code>docker rmi imagem-que-nao-existe</code>. Veja o erro real.</p>
+</div>
+
+<pre class="term">$ docker rmi imagem-que-nao-existe
+Error: No such image: imagem-que-nao-existe</pre>
+
+<hr>
+
+<h2>Várias de uma vez</h2>
+<pre class="term">$ docker rmi imagem1 imagem2 imagem3     « vários argumentos
+$ docker rmi $(docker images -q)          « apaga TODAS as imagens locais (cuidado!)
+$ docker rmi nginx:alpine redis:7-alpine   « só essas duas tags</pre>
+
+<div class="warning">
+<strong>Cuidado com <code>docker rmi $(docker images -q)</code></strong>
+<p>Isso apaga <strong>todas</strong> as imagens da máquina de uma vez (menos as que estão em uso por algum container, que dão erro). Em máquina de desenvolvimento.testes, tudo bem; em máquina de produção, cheque duas vezes antes.</p>
+</div>
+
+<hr>
+
+<h2>Erro real: imagem em uso por container</h2>
+<p>Se existir <strong>qualquer container</strong> (rodando <em>ou parado</em>) criado dessa imagem, o Docker recusa:</p>
+<pre class="term">$ docker run --name teste hello-world    « criou um container (parado, Exited)
+$ docker rmi hello-world
+Error response from daemon: conflict: unable to remove repository reference "hello-world:latest" (must force) - container teste is using its referenced image</pre>
+<p>Como consertar, em ordem de preferência:</p>
+<ol class="passo">
+  <li>Remova o container primeiro: <code>docker rm teste</code> e depois <code>docker rmi hello-world</code> — é o caminho limpo.</li>
+  <li>Ou force: <code>docker rmi -f hello-world</code> — apaga a imagem <strong>e</strong> os containers parados que a usavam continuam com uma cópia da camada gravável, mas não dá para recriar novos dessa imagem.</li>
+</ol>
+
+<hr>
+
+<h2>Quando a imagem tem duas tags (apelidos)</h2>
+<p>Se a mesma imagem tem dois nomes (ex.: <code>nginx:alpine</code> e <code>meu-nginx:dev</code>, mesmo ID), o <code>rmi</code> só tira <strong>uma</strong> tag por vez — a imagem só sai do disco quando a última tag dela for removida:</p>
+<pre class="term">$ docker tag nginx:alpine meu-nginx:dev
+$ docker rmi nginx:alpine
+Untagged: nginx:alpine
+$ docker images
+REPOSITORY   TAG       IMAGE ID       SIZE
+meu-nginx    dev       b2c3d4e5f6a1   48.2MB    « a imagem continua, com o outro nome
+$ docker rmi meu-nginx:dev
+Untagged: meu-nginx:dev
+Deleted: sha256:b2c3…                       « agora sim apagou as camadas</pre>
+
+<hr>
+
+<h2>Imagens dangling (&lt;none&gt;) e prune</h2>
+<p>Builds antigos sem tag viram <code>&lt;none&gt;:&lt;none&gt;</code> (aula <a href="docker-images.html">docker images</a>). Para limpar só elas:</p>
+<pre class="term">$ docker image prune
+WARNING! This will remove all dangling images.
+Are you sure you want to continue? [y/N] y
+Deleted Images:
+deleted: sha256:a1b2…
+Total reclaimed space: 148MB</pre>
+<p>E para limpar <strong>tudo</strong> que não está em uso (containers parados + imagens dangling + redes + cache de build): <code>docker system prune</code> — aula <a href="docker-system-prune.html">docker system prune</a>.</p>
+
+<div class="mc" data-answer="2">
+<p class="mc-q">O que o <code>docker rmi hello-world</code> faz?</p>
+<label><input type="radio" name="q1"> Apaga o container hello-world</label>
+<label><input type="radio" name="q1"> Apaga a imagem hello-world da máquina local (o que está no Hub continua lá)</label>
+<label><input type="radio" name="q1"> Apaga a imagem do Docker Hub</label>
+<label><input type="radio" name="q1"> Para todos os containers</label>
+</div>
+
+<div class="mc" data-answer="3">
+<p class="mc-q"><code>docker rmi nginx</code> respondeu "conflict … container meu-site is using its referenced image". O que fazer?</p>
+<label><input type="radio" name="q2"> Rodar <code>docker rmi -f nginx</code> às cegas, sempre</label>
+<label><input type="radio" name="q2"> Reinstalar o Docker</label>
+<label><input type="radio" name="q2"> Remover o container primeiro (<code>docker rm meu-site</code>) e depois o rmi — ou usar <code>-f</code> se tiver certeza</label>
+<label><input type="radio" name="q3"> Apagar o arquivo da imagem manualmente</label>
+</div>
+
+<div class="mc" data-answer="1">
+<p class="mc-q">Na saída do rmi, o que significam as linhas <code>Untagged:</code> e <code>Deleted:</code>?</p>
+<label><input type="radio" name="q4"> Untagged = o nome/tag saiu da lista; Deleted = as camadas foram apagadas do disco</label>
+<label><input type="radio" name="q4"> Untagged = a imagem foi enviada ao Hub; Deleted = foi baixada</label>
+<label><input type="radio" name="q4"> São a mesma coisa, repetidas</label>
+<label><input type="radio" name="q4"> Untagged apaga o container; Deleted apaga a máquina</label>
+</div>
+
+<hr>
+
+<h2>Quanto espaço o rmi devolve?</h2>
+<p>Antes e depois dá para conferir com <code>docker system df</code> (aula <a href="docker-system-df.html">docker system df</a>):</p>
+<pre class="term">$ docker system df
+TYPE            TOTAL     ACTIVE    SIZE      RECLAIMABLE
+Images          6         3         861MB     400MB (46%)
+$ docker rmi hello-world postgres:16-alpine
+Untagged: hello-world:latest
+Deleted: sha256:a1b2c3d4e5f6…
+Untagged: postgres:16-alpine
+Deleted: sha256:d4e5f6a1b2c3…
+$ docker system df
+TYPE            TOTAL     ACTIVE    SIZE      RECLAIMABLE
+Images          4         2         616MB     155MB (25%)</pre>
+<p>O <code>SIZE</code> de cada imagem é a soma das camadas <strong>próprias</strong> dela. Quando você apaga uma imagem, só somem as camadas que nenhuma outra imagem usa — as camadas base compartilhadas (tipo o Alpine) continuam no disco porque outras imagens ainda precisam delas. É por isso que apagar uma imagem às vezes devolve menos espaço do que o <code>SIZE</code> dela.</p>
+
+<h3>Ordem certa de limpeza</h3>
+<ol class="passo">
+  <li>Veja o que tem: <code>docker ps -a</code> (containers) e <code>docker images</code> (imagens).</li>
+  <li>Apague os containers que não precisa mais: <code>docker rm nome</code> (ou <code>docker rm -f</code> se estiver rodando).</li>
+  <li>Depois apague as imagens que não usa: <code>docker rmi nome:tag</code>.</li>
+  <li>Para uma limpeza geral: <code>docker system prune</code> (remove containers parados, imagens dangling, redes e cache não usados).</li>
+  <li>Conferiu o espaço de volta: <code>docker system df</code>.</li>
+</ol>
+
+<div class="warning">
+<strong>Não apague a imagem achando que "o container vai continuar"</strong>
+<p>Um container <strong>rodando</strong> impede o <code>rmi</code> justamente para te proteger. Mas um container <strong>parado</strong> também impede — e se você usar <code>-f</code>, a imagem sai e aquele container parado vira inútil (não dá para dar <code>start</code> de novo sem a imagem). Se o container parado tem dados na camada gravável, eles somem com <code>docker rm</code> — então só apague quando tiver certeza (dados importantes devem estar em <a href="volumes-intro.html">volumes</a>).</p>
+</div>
+
+<hr>
+
+<h2>Antes de apagar: salve a imagem (docker save/load)</h2>
+<p>Se a imagem foi criada por você (build local) e ainda não está no Hub, apagar é perder o trabalho. Dá para exportar para um arquivo <code>.tar</code> e importar depois (ou levar para outra máquina):</p>
+<pre class="term">$ docker save -o meuapp-1.0.tar ana/meuapp:1.0     « exporta a imagem (todas as camadas) para um .tar
+$ ls -lh meuapp-1.0.tar
+-rw-r--r-- 1 ana ana 152M … meuapp-1.0.tar
+$ docker rmi ana/meuapp:1.0                          « pode apagar da máquina local
+$ docker load -i meuapp-1.0.tar                     « importa de volta quando precisar
+Loaded image: ana/meuapp:1.0</pre>
+<p>Útil para: backup antes de limpar, levar imagem para um servidor sem internet (air-gapped), ou passar para um colega sem publicar no Hub.</p>
+
+<h3>Checklist antes de dar rmi</h3>
+<ol class="passo">
+  <li><code>docker ps -a</code> — tem container dessa imagem? (rodando ou parado) → se sim, <code>docker rm</code> primeiro ou <code>-f</code>.</li>
+  <li>É uma imagem que você criou e não está no Hub? → faça <code>docker save</code> antes.</li>
+  <li>Quer apagar mesmo ou só liberar espaço? → <code>docker system prune</code> limpa o que não está em uso sem apagar imagens em uso.</li>
+  <li>Depois, confira: <code>docker images</code> e <code>docker system df</code>.</li>
+</ol>
+
+<div class="warning">
+<strong>O que o rmi NÃO faz</strong>
+<ul>
+  <li>Não apaga nada do Docker Hub (o que está publicado lá continua público para todo mundo).</li>
+  <li>Não apaga camadas compartilhadas com outras imagens (elas continuam porque outras usam).</li>
+  <li>Não apaga volumes (dados de banco em volume continuam — <code>docker volume rm</code> apaga).</li>
+</ul>
+</div>
+
+<hr>
+
+<h2>Removendo pelo filtro (com cuidado)</h2>
+<p>Além de nome e ID, dá para apagar por filtro — útil para limpar imagens velhas de um repositório:</p>
+<pre class="term">$ docker rmi $(docker images --filter "dangling=true" -q)   « só as &lt;none&gt;
+$ docker rmi $(docker images "meuapp" -q)                   « todas as tags do meuapp
+$ docker rmi $(docker images --filter "before=meuapp:1.0" -q)  « imagens mais velhas que essa</pre>
+
+<div class="warning">
+<strong>Não use <code>docker rmi $(docker images -q)</code> "para testar"</strong>
+<p>Esse comando apaga <strong>todas</strong> as imagens locais. Se algum container parado usar uma delas, dá erro; se não, a imagem some e você vai precisar dar <code>pull</code> de novo (de novo = download de novo, se não tiver cache). Em máquina de estudo, tudo bem; em máquina de trabalho, cheque duas vezes com <code>docker images</code> antes.</p>
+</div>
+
+<h3>Depois do rmi: confira</h3>
+<pre class="term">$ docker images
+…                              « a linha sumiu
+$ docker system df
+TYPE      TOTAL  ACTIVE  SIZE     RECLAIMABLE
+Images    5      2       813MB    352MB (43%)   « o SIZE diminuiu</pre>
+
+<hr>
+
+<h2>Rmi de imagem usada por container parado</h2>
+<p>Lembrete importante: o Docker considera "em uso" qualquer container — <strong>rodando ou parado</strong> — criado dessa imagem. Então a ordem certa para apagar tudo de um projeto é sempre: primeiro os containers, depois a imagem:</p>
+<pre class="term">$ docker ps -a
+… meu-site  nginx:alpine   Exited (0) …
+$ docker rmi nginx:alpine
+Error response from daemon: conflict: … container meu-site is using its referenced image
+$ docker rm meu-site
+meu-site
+$ docker rmi nginx:alpine
+Untagged: nginx:alpine
+Deleted: sha256:b2c3…</pre>
+
+<hr>
+
+<h2>Fluxo completo de limpeza da máquina (resumo prático)</h2>
+<pre class="term">$ docker ps -a                    « 1. veja os containers
+$ docker stop $(docker ps -q)     « 2. pare os rodando (se quiser manter algum, pare só ele)
+$ docker rm $(docker ps -aq)      « 3. apague os containers
+$ docker images                   « 4. veja as imagens
+$ docker rmi imagem-que-nao-uso  « 5. apague imagem por imagem (ou system prune)
+$ docker system df                « 6. confira o espaço recuperado</pre>
+
+<hr>
+
+<h2>Resumo</h2>
+<ul>
+  <li><code>docker rmi NOME:TAG</code> (ou ID) apaga a imagem da <strong>máquina local</strong> — nada muda no Docker Hub.</li>
+  <li>Saída: <code>Untagged: …</code> (saiu da lista) + <code>Deleted: sha256:…</code> (camadas apagadas, se não forem compartilhadas).</li>
+  <li>Erro real: <code>conflict … container X is using its referenced image (must force)</code> → remova o container antes ou use <code>-f</code>.</li>
+  <li>Vários de uma vez: <code>docker rmi img1 img2</code>; cuidado com <code>docker rmi $(docker images -q)</code>.</li>
+  <li>Se a imagem tiver duas tags, cada <code>rmi</code> tira uma; as camadas só somem quando sai a última.</li>
+  <li>Dangling <code>&lt;none&gt;</code>: limpe com <code>docker image prune</code> ou <code>docker system prune</code>.</li>
+</ul>
+
+<div class="tip"><strong>Próxima aula:</strong> <a href="tags.html">Tags e versões (:latest, :3.9, :alpine…)</a> — como escolher a versão certa de cada imagem e por que evitar <code>:latest</code> em produção.</div>
+
+</div>
+</main>
+</div>
+<script src="assets/site.js?v=4"></script>
+</body>
+</html>

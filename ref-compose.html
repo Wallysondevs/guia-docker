@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Campos do docker-compose.yml (cola) — services, ports, environment, volumes e todos os outros | Guia Docker</title>
+<meta name="description" content="Cola completa dos campos do docker-compose.yml (Compose v2): services, image, build, ports, environment, env_file, volumes, depends_on (com condition), networks, restart, command, entrypoint, healthcheck, deploy (limites), secrets, configs, plus extends e profiles — sintaxe YAML curta e exemplo de cada. Inclui um docker-compose.yml completo comentado, como subir/derrubar (up, down, ps, logs, exec, -f múltiplos arquivos, override automático), erros comuns e tabela resumo.">
+<link rel="stylesheet" href="assets/style.css?v=4">
+<script>try{var t=localStorage.getItem("tema");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<meta http-equiv="Cache-Control" content="no-store, must-revalidate">
+<script>try{history.scrollRestoration="manual"}catch(e){}(function(){var n=0;function t(){window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;if(++n<60)setTimeout(t,50)}t();window.addEventListener("pagehide",function(){window.scrollTo(0,0);document.documentElement.scrollTop=0;});window.addEventListener("pageshow",function(){window.scrollTo(0,0)});window.addEventListener("load",function(){window.scrollTo(0,0)});})();document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(a){var h=a.getAttribute("href")||"";if(/[.]html($|[?#])/.test(h)&&a.host===location.host){window.scrollTo(0,0);document.documentElement.scrollTop=0;}}});</script>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" id="sidebar" aria-label="Tópicos"></nav>
+<main class="main">
+<div class="content">
+
+<div class="pager"></div>
+
+<h1>Todos os campos do <span class="hl">docker-compose.yml</span> (cola)</h1>
+
+<p class="intro">O <code>docker-compose.yml</code> descreve um <strong>projeto inteiro com vários containers</strong> (web + banco + cache…) em um único arquivo YAML. O <code>docker compose</code> (v2, plugin que já vem com o Docker 27) lê esse arquivo e cria tudo sozinho: containers, rede interna e volumes. Esta cola lista todos os campos mais usados, com a sintaxe curta em YAML e um exemplo — guarde nos favoritos.</p>
+
+<div class="note">
+<strong>Você vai aprender</strong>
+<ul>
+  <li>Os campos de serviço: <code>image</code>, <code>build</code>, <code>ports</code>, <code>environment</code>, <code>env_file</code>, <code>volumes</code>, <code>depends_on</code>, <code>networks</code>, <code>restart</code>, <code>command</code>, <code>entrypoint</code>, <code>healthcheck</code>.</li>
+  <li>Os campos de infraestrutura: <code>services</code> (raiz), <code>volumes</code>, <code>networks</code>, <code>deploy</code>, <code>secrets</code>, <code>configs</code>, <code>profiles</code>, <code>extends</code>.</li>
+  <li>Um <code>docker-compose.yml</code> completo e comentado, pronto para copiar.</li>
+  <li>Como subir e derrubar o projeto: <code>up</code>, <code>down</code>, <code>ps</code>, <code>logs</code>, <code>exec</code>, vários arquivos com <code>-f</code> e o <code>override</code> automático.</li>
+  <li>Os avisos/erros comuns (variável não set, arquivo com nome errado).</li>
+</ul>
+</div>
+
+<hr>
+
+<h2>Regras de sintaxe do YAML que quebram iniciantes</h2>
+<ul>
+  <li><strong>Indentação de 2 espaços</strong> — nunca tab. Um espaço a mais muda o dono da chave.</li>
+  <li><strong>Chaves</strong> terminam com <code>:</code> (<code>services:</code>, <code>web:</code>); valores simples não precisam de aspas, mas portas em formato <code>"8080:80"</code> <strong>precisam</strong> (senão o YAML interpreta como número/sexagesimal e dá erro).</li>
+  <li>Listas começam com <code>- </code> na linha de baixo, no mesmo nível de indentação do campo acima:</li>
+</ul>
+<pre class="file"># certo:
+ports:
+  - "8080:80"
+  - "8443:443"
+
+# ERRADO (tab ou indentação errada quebra o parse):
+ports:
+     - "8080:80"</pre>
+<p>Valide o arquivo antes de subir com <code>docker compose config</code> — ele mostra o YAML resolvido (com variáveis expandidas) e avisa de erro de sintaxe na hora.</p>
+
+<hr>
+
+<h2>A tabela completa dos campos</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Campo</th><th>Sintaxe (YAML)</th><th>O que faz</th></tr>
+<tr><td><code>services</code></td><td><pre>services:
+  nome-do-servico:
+    …</pre></td><td>Raiz do arquivo: declara cada serviço. Cada serviço vira um container chamado <code>projeto-servico-1</code>.</td></tr>
+<tr><td><code>image</code></td><td><code>image: nginx:alpine</code></td><td>Usa uma imagem pronta do registry (não precisa de build).</td></tr>
+<tr><td><code>build</code></td><td><code>build: .</code> ou <code>build: { context: ./api, dockerfile: Dockerfile.dev }</code></td><td>Constrói a imagem a partir de um Dockerfile antes de subir o serviço. Pode ter <code>image:</code> junto para dar nome à imagem construída.</td></tr>
+<tr><td><code>ports</code></td><td><pre>ports:
+  - "8080:80"
+  - "127.0.0.1:9000:9000"</pre></td><td>Publica portas no formato <code>"HOST:CONTAINER"</code> — igual ao <code>-p</code> do run. Com IP, restringe a interface (só localhost). Long syntax também existe (<code>target/published/protocol</code>).</td></tr>
+<tr><td><code>environment</code></td><td><pre>environment:
+  - POSTGRES_PASSWORD=segredo
+  # ou em mapa:
+  # POSTGRES_PASSWORD: segredo</pre></td><td>Variáveis de ambiente dentro do container — igual ao <code>-e</code> do run. Aceita <code>${VAR}</code> do arquivo <code>.env</code> ou do ambiente.</td></tr>
+<tr><td><code>env_file</code></td><td><pre>env_file:
+  - .env</pre></td><td>Lê variáveis de um arquivo (um por linha, <code>CHAVE=valor</code>) — alternativa ao <code>environment</code> para muitos valores.</td></tr>
+<tr><td><code>volumes</code></td><td><pre>volumes:
+  - ./site:/usr/share/nginx/html:ro   # bind mount
+  - dados:/var/lib/postgresql/data     # volume nomeado</pre></td><td>Monta pastas do host (bind mount, com <code>:ro</code> opcional) ou volumes nomeados — igual ao <code>-v</code> do run.</td></tr>
+<tr><td><code>depends_on</code></td><td><pre>depends_on:
+  - db
+# forma longa (espera ficar saudável):
+depends_on:
+  db:
+    condition: service_healthy</pre></td><td>Ordem de subida: o serviço sobe <strong>depois</strong> dos listados. Na forma curta só ordena; na longa pode esperar <code>service_started</code>, <code>service_healthy</code> (precisa de <code>healthcheck</code> no outro serviço) ou <code>service_completed_successfully</code>.</td></tr>
+<tr><td><code>networks</code></td><td><pre>networks:
+  - minha-rede</pre></td><td>Conecta o serviço a redes (declaradas na raiz <code>networks:</code> ou já existentes). Se omitir, o serviço entra na rede padrão do projeto. Dentro da rede, os serviços se acham pelo nome.</td></tr>
+<tr><td><code>restart</code></td><td><code>restart: unless-stopped</code></td><td>Política de reinício automático do container: <code>no</code> (padrão), <code>always</code>, <code>on-failure</code>, <code>unless-stopped</code>.</td></tr>
+<tr><td><code>command</code></td><td><code>command: node server.js</code> ou lista <code>["node", "server.js"]</code></td><td>Sobrescreve o <code>CMD</code> da imagem.</td></tr>
+<tr><td><code>entrypoint</code></td><td><code>entrypoint: /docker-entrypoint.sh</code></td><td>Sobrescreve o <code>ENTRYPOINT</code> da imagem.</td></tr>
+<tr><td><code>healthcheck</code></td><td><pre>healthcheck:
+  test: ["CMD", "curl", "-f", "http://localhost"]
+  interval: 30s
+  timeout: 5s
+  retries: 3
+  start_period: 10s</pre></td><td>Teste de saúde do serviço. O <code>docker compose ps</code> passa a mostrar <code>(healthy)</code>, e o <code>depends_on: condition: service_healthy</code> de outro serviço passa a esperar por ele.</td></tr>
+<tr><td><code>deploy.resources.limits</code></td><td><pre>deploy:
+  resources:
+    limits:
+      cpus: "0.50"
+      memory: 512M
+    reservations:
+      memory: 128M</pre></td><td>Limites e reservas de CPU/memória do serviço (aplicado pelo Compose v2; no Swarm vira <code>docker service</code>).</td></tr>
+<tr><td><code>secrets</code></td><td><pre>secrets:
+  - minha_senha
+# e na raiz:
+secrets:
+  minha_senha:
+    file: ./senha.txt</pre></td><td>Injeta segredos como arquivos dentro do container (geralmente montados em <code>/run/secrets/</code>) — melhor que variável de ambiente para senhas, porque não aparece no <code>inspect</code>.</td></tr>
+<tr><td><code>configs</code></td><td><pre>configs:
+  - minha_config
+# raiz:
+configs:
+  minha_config:
+    file: ./nginx.conf</pre></td><td>Injeta arquivos de configuração no container (ex.: um <code>nginx.conf</code> personalizado), também como arquivo em <code>/run/secrets</code>-style.</td></tr>
+<tr><td><code>profiles</code></td><td><pre>profiles: ["debug"]
+# sobe só com:
+# docker compose --profile debug up</pre></td><td>Marca o serviço como opcional: só sobe se o profile for ativado (<code>--profile</code> ou <code>COMPOSE_PROFILES</code>). Ótimo para ferramentas de debug (phpMyAdmin, mailhog) que não devem subir sempre.</td></tr>
+<tr><td><code>extends</code></td><td><pre>extends:
+  file: comum.yml
+  service: base</pre></td><td>Herda a configuração de outro serviço (de outro arquivo ou do mesmo) — evita repetir YAML.</td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>Um docker-compose.yml completo, comentado</h2>
+<pre class="file" data-file="docker-compose.yml"># version é opcional no Compose v2 (o formato novo não precisa mais)
+services:
+  web:                      # serviço "web" (vira o container meuapp-web-1)
+    build: .                # constrói a imagem a partir do Dockerfile da pasta
+    image: ana/meuapp:1.0   # …e dá esse nome à imagem construída
+    ports:
+      - "8080:80"           # host 8080 -> container 80
+    environment:
+      - NODE_ENV=production
+      - DB_HOST=db          # fala com o serviço "db" pelo nome (DNS interno)
+      - DB_PASSWORD=${DB_PASSWORD}   # vem do .env
+    env_file:
+      - .env                # também carrega tudo que estiver no .env
+    volumes:
+      - ./site:/usr/share/nginx/html:ro   # bind mount (pasta do host), somente leitura
+    depends_on:
+      db:
+        condition: service_healthy      # espera o banco ficar saudável, não só subir
+    networks:
+      - minha-rede
+    restart: unless-stopped             # reinicia sozinho se cair (a menos que pare na mão)
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost"]
+      interval: 30s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 512M
+
+  db:                       # serviço "db"
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+    volumes:
+      - dados:/var/lib/postgresql/data    # volume nomeado (persiste os dados)
+    networks:
+      - minha-rede
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      retries: 10
+
+volumes:
+  dados:                    # declara o volume nomeado usado acima
+
+networks:
+  minha-rede:               # declara a rede usada pelos serviços</pre>
+
+<hr>
+
+<h2>Subindo, vendo e derrubando o projeto</h2>
+<pre class="term">$ docker compose config          « valida e mostra o YAML resolvido (variáveis expandidas)
+$ docker compose up -d           « sobe tudo em segundo plano
+[+] Running 3/3
+ ✔ Network meuapp_minha-rede  Created
+ ✔ Container meuapp-db-1      Started
+ ✔ Container meuapp-web-1     Started
+$ docker compose ps
+CONTAINER ID   IMAGE              STATUS          PORTS                  NAMES
+c3d4e5f6a1b2   postgres:16-alpine Up 30 seconds (healthy)   5432/tcp   meuapp-db-1
+d4e5f6a1b2c3   ana/meuapp:1.0     Up 30 seconds (healthy)   0.0.0.0:8080->80/tcp   meuapp-web-1
+$ docker compose logs -f web    « logs do serviço web, ao vivo
+$ docker compose exec db psql -U postgres   « entra no banco pelo serviço
+$ docker compose down
+[+] Running 3/3
+ ✔ Container meuapp-web-1  Removed
+ ✔ Container meuapp-db-1   Removed
+ ✔ Network meuapp_minha-rede  Removed</pre>
+
+<h3>Vários arquivos: -f e o override automático</h3>
+<p>Além do <code>docker-compose.yml</code> padrão, o Compose lê <strong>automaticamente</strong> o <code>docker-compose.override.yml</code> (se existir) e mescla os dois — é o padrão para separar dev de prod. Dá para passar vários arquivos na mão:</p>
+<pre class="term">$ docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+$ docker compose -f docker-compose.yml -f docker-compose.override.yml config   « vê o merge</pre>
+<p>Ordem de prioridade: os arquivos passados depois sobrescrevem os anteriores (listas como <code>ports</code> são somadas; mapas como <code>environment</code> são mesclados por chave).</p>
+
+<div class="warn"><strong>Atenção:</strong> o arquivo precisa se chamar exatamente <code>docker-compose.yml</code> (ou <code>compose.yaml</code> / <code>compose.yml</code>) e ficar na pasta de onde você roda o comando — ou use <code>docker compose -f caminho/arquivo.yml up</code>. Se o comando diz <code>no configuration file provided: not found</code>, o nome ou a pasta está errada.</div>
+
+<div class="warn"><strong>Variável faltando:</strong> se o YAML usa <code>${DB_PASSWORD}</code> e ela não existe no <code>.env</code> nem no ambiente, o Compose avisa na subida — <code>WARN: The "DB_PASSWORD" variable is not set. Defaulting to a blank string.</code> — e o serviço sobe com a variável vazia (o banco recusa, a app quebra). Sempre confira o <code>.env</code> (e ponha <code>.env</code> no <code>.gitignore</code>).</div>
+
+<div class="try" data-goal="Started" data-solucao="docker compose up">
+<p class="try-task"><strong>Missão:</strong> rode <code>docker compose up</code> no terminal simulado e veja os containers do projeto serem criados e iniciados.</p>
+</div>
+
+<hr>
+
+<h2>Mapa rápido: quero… → campo</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Quero…</th><th>Campo</th></tr>
+<tr><td>…imagem pronta do Hub</td><td><code>image: postgres:16-alpine</code></td></tr>
+<tr><td>…construir do meu Dockerfile</td><td><code>build: .</code> (ou <code>build: ./api</code>)</td></tr>
+<tr><td>…publicar porta</td><td><code>ports: ["8080:80"]</code></td></tr>
+<tr><td>…variáveis de ambiente</td><td><code>environment:</code> ou <code>env_file: .env</code></td></tr>
+<tr><td>…pasta do host dentro do container</td><td><code>volumes: ["./site:/usr/share/nginx/html:ro"]</code></td></tr>
+<tr><td>…dados que persistem</td><td><code>volumes: ["dados:/var/lib/postgresql/data"]</code> + <code>volumes: { dados: }</code> na raiz</td></tr>
+<tr><td>…subir depois de outro serviço</td><td><code>depends_on: [db]</code> (ou com <code>condition: service_healthy</code>)</td></tr>
+<tr><td>…rede própria</td><td><code>networks: [minha-rede]</code> + raiz <code>networks: { minha-rede: }</code></td></tr>
+<tr><td>…reiniciar sozinho se cair</td><td><code>restart: unless-stopped</code></td></tr>
+<tr><td>…limitar CPU/memória</td><td><code>deploy.resources.limits</code></td></tr>
+<tr><td>…senha como arquivo (não como variável)</td><td><code>secrets:</code></td></tr>
+<tr><td>…serviço só em debug</td><td><code>profiles: ["debug"]</code> + <code>--profile debug</code></td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>Resumo</h2>
+<ul>
+  <li>O Compose v2 lê <code>docker-compose.yml</code> (ou <code>compose.yaml</code>) da pasta atual e cria containers + rede + volumes de uma vez; <code>docker-compose.override.yml</code> é mesclado automaticamente.</li>
+  <li>Cada serviço declara <code>image</code> (pronta) ou <code>build</code> (Dockerfile), mais <code>ports</code>, <code>environment</code>/<code>env_file</code>, <code>volumes</code>, <code>depends_on</code>, <code>networks</code>, <code>restart</code>, <code>healthcheck</code>…</li>
+  <li>Dentro da rede do projeto, os serviços se alcançam <strong>pelo nome</strong> (<code>db:5432</code>, <code>api:3000</code>) — é o DNS interno do Docker.</li>
+  <li>Volumes nomeados persistem dados entre <code>down</code> e <code>up</code>; <code>down -v</code> apaga volumes também.</li>
+  <li>Valide com <code>docker compose config</code>; cuidado com <code>WARN: variable is not set</code> (variável vazia quebra banco/app).</li>
+  <li>Comandos do dia a dia: <code>up -d</code>, <code>ps</code>, <code>logs -f</code>, <code>exec</code>, <code>down</code>, <code>-f</code> para vários arquivos.</li>
+</ul>
+
+<div class="tip"><strong>Próxima aula:</strong> <a href="ref-flags.html">Flags comuns do docker run</a></div>
+
+</div>
+</main>
+</div>
+<script src="assets/site.js?v=4"></script>
+</body>
+</html>

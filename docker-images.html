@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>docker images — listando imagens locais | Guia Docker</title>
+<meta name="description" content="O comando docker images: listar as imagens guardadas localmente, entender as colunas REPOSITORY, TAG, IMAGE ID, CREATED e SIZE, o que é uma imagem dangling (&lt;none&gt;), variações (-a, -q, filtro por nome, --format), a relação entre imagem e container (por que rmi pode recusar), quanto espaço as imagens ocupam (docker system df) e missões no simulador.">
+<link rel="stylesheet" href="assets/style.css?v=4">
+<script>try{var t=localStorage.getItem("tema");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<meta http-equiv="Cache-Control" content="no-store, must-revalidate">
+<script>try{history.scrollRestoration="manual"}catch(e){}(function(){var n=0;function t(){window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;if(++n<60)setTimeout(t,50)}t();window.addEventListener("pagehide",function(){window.scrollTo(0,0);document.documentElement.scrollTop=0;});window.addEventListener("pageshow",function(){window.scrollTo(0,0)});window.addEventListener("load",function(){window.scrollTo(0,0)});})();document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(a){var h=a.getAttribute("href")||"";if(/[.]html($|[?#])/.test(h)&&a.host===location.host){window.scrollTo(0,0);document.documentElement.scrollTop=0;}}});</script>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" id="sidebar" aria-label="Tópicos"></nav>
+<main class="main">
+<div class="content">
+
+<div class="pager"></div>
+
+<h1><span class="hl">docker images</span> — as imagens locais</h1>
+
+<p class="intro">Enquanto <code>docker ps</code> lista containers (os "bolos prontos"), o <code>docker images</code> lista as <strong>imagens</strong> (as "receitas") guardadas na sua máquina. É o seu estoque de programas prontos para rodar.</p>
+
+<div class="note">
+<strong>Você vai aprender</strong>
+<ul>
+  <li>A rodar <code>docker images</code> e ler a tabela inteira.</li>
+  <li>Cada coluna: <code>REPOSITORY</code>, <code>TAG</code>, <code>IMAGE ID</code>, <code>CREATED</code>, <code>SIZE</code>.</li>
+  <li>O que é <code>REPOSITORY:TAG</code> e por que o ID pode se repetir.</li>
+  <li>Imagens "penduradas" (dangling, <code>&lt;none&gt;</code>) e por que elas aparecem.</li>
+  <li>Variações: <code>-a</code>, <code>-q</code>, filtro por nome, <code>--format</code>.</li>
+  <li>Quanto espaço as imagens ocupam (<code>docker system df</code>).</li>
+</ul>
+</div>
+
+<hr>
+
+<h2>A cena: o estoque do notebook da Ana</h2>
+<p>A máquina fictícia <code>ana@notebook</code> veio com seis imagens pré-carregadas. Rode aí na caixa e compare com a saída real abaixo:</p>
+
+<div class="try" data-goal="REPOSITORY" data-solucao="docker images">
+<p class="try-task"><strong>Missão:</strong> rode <code>docker images</code> e veja as imagens da máquina da Ana.</p>
+</div>
+
+<pre class="term">$ docker images
+REPOSITORY   TAG          IMAGE ID       CREATED         SIZE
+nginx        alpine       b2c3d4e5f6a1   5 days ago      48.2MB
+node         22-alpine    c3d4e5f6a1b2   1 week ago      189MB
+postgres     16-alpine    d4e5f6a1b2c3   3 days ago      245MB
+redis        7-alpine     e5f6a1b2c3d4   1 week ago      42.8MB
+python       3.12-slim    f6a1b2c3d4e5   4 days ago      132MB
+hello-world  latest       a1b2c3d4e5f6   2 weeks ago     18.2kB</pre>
+
+<hr>
+
+<h2>As colunas, uma a uma</h2>
+<dl class="anatomy">
+  <dt>REPOSITORY</dt><dd>O nome da imagem (ex.: <code>nginx</code> = a oficial da biblioteca; <code>ana/meuapp</code> = publicada pela usuária ana). Sem barra, o Docker completa com <code>library/</code> e <code>docker.io</code>.</dd>
+  <dt>TAG</dt><dd>A versão/variante (ex.: <code>alpine</code>, <code>latest</code>, <code>3.12-slim</code>). Se você omite a tag no <code>pull</code>/<code>run</code>, o Docker usa <code>:latest</code> (aula <a href="tags.html">Tags</a>).</dd>
+  <dt>IMAGE ID</dt><dd>Os primeiros 12 caracteres do hash único da imagem. <strong>Duas tags podem apontar para o mesmo ID</strong> — acontece quando você dá <code>docker tag</code> (apelido novo para a mesma imagem) ou baixa a mesma versão com nomes diferentes.</dd>
+  <dt>CREATED</dt><dd>Quando a imagem foi <strong>criada</strong> (no registro, por quem a publicó) — não é quando você baixou. Repare: o <code>hello-world</code> diz "2 weeks ago" porque a imagem oficial foi publicada há 2 semanas, não porque a Ana baixou agora.</dd>
+  <dt>SIZE</dt><dd>O tamanho em disco: a soma das camadas <strong>que não são compartilhadas</strong> com outras imagens suas. Por isso duas imagens parecidas nem sempre somam o dobro.</dd>
+</dl>
+
+<div class="try" data-goal="a1b2c3d4e5f6" data-solucao="docker images">
+<p class="try-task"><strong>Missão:</strong> rode <code>docker images</code> de novo e ache o IMAGE ID da <code>hello-world</code> (dica: começa com <code>a1b2</code>…).</p>
+</div>
+
+<hr>
+
+<h2>REPOSITORY:TAG na prática</h2>
+<p>Cada linha é um "endereço + versão". Exemplos que a Ana vai encontrar:</p>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Você vê</th><th>Significado</th></tr>
+<tr><td><code>nginx:alpine</code></td><td>Nginx oficial, variante Alpine (leve, ~48MB)</td></tr>
+<tr><td><code>postgres:16-alpine</code></td><td>PostgreSQL versão 16, variante Alpine</td></tr>
+<tr><td><code>python:3.12-slim</code></td><td>Python 3.12, variante slim (Debian enxuto, sem compilador)</td></tr>
+<tr><td><code>node:22-alpine</code></td><td>Node.js 22, variante Alpine</td></tr>
+<tr><td><code>hello-world:latest</code></td><td>O teste de fumaça; <code>latest</code> = a tag padrão quando nenhuma é escrita</td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>Imagens "penduradas" (dangling, &lt;none&gt;)</h2>
+<p>Quando você faz <code>docker build</code> de uma imagem com o mesmo nome/tag várias vezes, as versões velhas perdem a tag e aparecem como <code>&lt;none&gt;:&lt;none&gt;</code> — são as "imagens penduradas" (dangling):</p>
+<pre class="term">$ docker images
+REPOSITORY   TAG       IMAGE ID       CREATED          SIZE
+meuapp       latest    f6a1b2c3d4e5   10 seconds ago   152MB
+&lt;none&gt;     &lt;none&gt;    a1b2c3d4e5f6   5 minutes ago    148MB   « build antigo, sem tag
+&lt;none&gt;     &lt;none&gt;    c3d4e5f6a1b2   1 hour ago       147MB   « outro build antigo</pre>
+<p>Elas ocupam espaço e não sirven para rodar por nome (só por ID). Para limpar: <code>docker image prune</code> (apaga só as dangling) ou <code>docker system prune</code> (apaga tudo que não está em uso) — aula <a href="docker-system-prune.html">docker system prune</a>.</p>
+
+<div class="warning">
+<strong>Por que <code>docker rmi</code> às vezes recusa?</strong>
+<p>Se um container (mesmo parado) estiver usando a imagem, o <code>docker rmi</code> responde <code>conflict: unable to remove repository reference … container X is using its referenced image</code>. Primeiro remova o container (<code>docker rm</code>) ou force com <code>docker rmi -f</code>. Detalhes na aula <a href="docker-rmi.html">docker rmi</a>.</p>
+</div>
+
+<hr>
+
+<h2>Variações do comando</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Comando</th><th>O que faz</th></tr>
+<tr><td><code>docker images</code></td><td>Imagens com tag (omite as <code>&lt;none&gt;</code>).</td></tr>
+<tr><td><code>docker images -a</code></td><td>Todas, inclusive as dangling.</td></tr>
+<tr><td><code>docker images -q</code></td><td>Só os IMAGE ID, um por linha (bom para scripts: <code>docker rmi $(docker images -q)</code>).</td></tr>
+<tr><td><code>docker images nginx</code></td><td>Filtra pelo repositório <code>nginx</code> (mostra todas as tags dele).</td></tr>
+<tr><td><code>docker images --filter "dangling=true"</code></td><td>Só as imagens penduradas <code>&lt;none&gt;</code>.</td></tr>
+<tr><td><code>docker images --format "{{.Repository}}:{{.Tag}} → {{.Size}}"</code></td><td>Saída personalizada (template Go).</td></tr>
+</table>
+</div>
+
+<pre class="term">$ docker images nginx
+REPOSITORY   TAG       IMAGE ID       CREATED        SIZE
+nginx        alpine    b2c3d4e5f6a1   5 days ago     48.2MB
+nginx        latest    9a8b7c6d5e4f   3 weeks ago    192MB
+$ docker images --format "{{.Repository}}:{{.Tag}}"
+nginx:alpine
+node:22-alpine
+postgres:16-alpine
+…</pre>
+
+<hr>
+
+<h2>Quanto espaço as imagens ocupam?</h2>
+<p>Imagens são a parte que mais enche o disco. Para ver o resumo:</p>
+<pre class="term">$ docker system df
+TYPE            TOTAL     ACTIVE    SIZE      RECLAIMABLE
+Images          6         3         861MB     400MB (46%)
+Containers      3         2         15MB      5MB (33%)
+Local Volumes   2         1         120MB     120MB (100%)
+Build Cache     12        0         340MB     340MB</pre>
+<p><code>ACTIVE</code> = quantas estão em uso por algum container agora. <code>RECLAIMABLE</code> = o que dá para recuperar apagando o que não está em uso. A aula <a href="docker-system-df.html">docker system df</a> detalha; para limpar, <a href="docker-system-prune.html">docker system prune</a>.</p>
+
+<div class="mc" data-answer="2">
+<p class="mc-q">Na tabela do <code>docker images</code>, o que é a coluna <code>TAG</code>?</p>
+<label><input type="radio" name="q1"> O ID único da imagem</label>
+<label><input type="radio" name="q1"> A versão/variante da imagem (ex.: <code>alpine</code>, <code>latest</code>)</label>
+<label><input type="radio" name="q1"> O tamanho em disco</label>
+<label><input type="radio" name="q1"> A data em que você baixou a imagem</label>
+</div>
+
+<div class="mc" data-answer="2">
+<p class="mc-q">Duas linhas do <code>docker images</code> mostram o mesmo IMAGE ID. O que isso significa?</p>
+<label><input type="radio" name="q2"> É um bug do Docker</label>
+<label><input type="radio" name="q2"> As duas linhas são a mesma imagem com tags diferentes (apelidos)</label>
+<label><input type="radio" name="q3"> Uma das linhas está corrompida</label>
+<label><input type="radio" name="q2"> O disco está cheio</label>
+</div>
+
+<div class="mc" data-answer="1">
+<p class="mc-q">O que é uma imagem <code>&lt;none&gt;:&lt;none&gt;</code> (dangling)?</p>
+<label><input type="radio" name="q4"> Um build antigo que perdeu a tag e sobrou só o ID — candidata a ser apagada com prune</label>
+<label><input type="radio" name="q4"> Uma imagem oficial ainda não baixada</label>
+<label><input type="radio" name="q4"> Um container parado</label>
+<label><input type="radio" name="q4"> Uma imagem que está corrompida</label>
+</div>
+
+<hr>
+
+<h2>De onde vêm as imagens da sua máquina?</h2>
+<p>Uma imagem entra no seu disco de quatro jeitos:</p>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Origem</th><th>Comando</th><th>Exemplo</th></tr>
+<tr><td>Baixada do registry (Hub)</td><td><code>docker pull nome</code></td><td><code>docker pull redis:7-alpine</code></td></tr>
+<tr><td>Baixada automaticamente no primeiro run</td><td><code>docker run nome</code> (se não tiver local)</td><td><code>docker run nginx:alpine</code></td></tr>
+<tr><td>Criada por você (build)</td><td><code>docker build -t meuapp .</code></td><td>aula <a href="docker-build.html">docker build</a></td></tr>
+<tr><td>Importada de um arquivo .tar</td><td><code>docker load -i imagem.tar</code></td><td>quando alguém manda uma imagem por <code>docker save</code></td></tr>
+</table>
+</div>
+
+<pre class="term">$ docker run hello-world     « na 1ª vez, o run faz o pull sozinho
+Unable to find image 'hello-world:latest' locally
+latest: Pulling from library/hello-world
+…
+$ docker images                « na 2ª vez, já está aqui
+REPOSITORY    TAG      IMAGE ID       CREATED        SIZE
+hello-world   latest   a1b2c3d4e5f6   2 weeks ago    18.2kB</pre>
+
+<h3>Apelidando imagem: docker tag</h3>
+<p>O comando <code>docker tag</code> cria uma nova linha na tabela apuntando para o <strong>mesmo IMAGE ID</strong> — é um apelido, não uma cópia:</p>
+<pre class="term">$ docker tag nginx:alpine meu-nginx:dev
+$ docker images
+REPOSITORY   TAG       IMAGE ID       CREATED        SIZE
+nginx        alpine    b2c3d4e5f6a1   5 days ago     48.2MB
+meu-nginx    dev       b2c3d4e5f6a1   5 days ago     48.2MB   « mesmo ID!
+$ docker run -d --name site meu-nginx:dev   « roda igualzinho</pre>
+<p>É assim que você marca uma imagem antes de mandar para o registry (ex.: <code>docker tag meuapp:latest ana/meuapp:1.0</code>) — aula <a href="docker-tag-push.html">docker tag e push</a>.</p>
+
+<hr>
+
+<h2>Imagem × container: a tabelinha que salva</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th></th><th>docker images</th><th>docker ps -a</th></tr>
+<tr><td>Mostra</td><td>Receitas (imagens)</td><td>Bolos (containers)</td></tr>
+<tr><td>Apagado por</td><td><code>docker rmi</code></td><td><code>docker rm</code></td></tr>
+<tr><td>Quantos dá para ter</td><td>Várias por máquina</td><td>Vários por imagem</td></tr>
+<tr><td>Sobrevive a</td><td>— (fica até você apagar)</td><td>Reinício da máquina? sim, se tiver volume; <code>rm</code>? não</td></tr>
+</table>
+</div>
+
+<div class="warning">
+<strong>"Baixei a imagem, mas o programa não está rodando"</strong>
+<p>Normal: <code>docker images</code> só mostra o que está <strong>guardado</strong>. Para o programa rodar de verdade, precisa de um container — <code>docker run</code> (e aí ele aparece no <code>docker ps</code>).</p>
+</div>
+
+<hr>
+
+<h2>O que tem dentro de uma imagem? docker history</h2>
+<p>Cada imagem guarda o histórico das camadas (cada instrução do Dockerfile virou uma camada). Dá para ver:</p>
+<pre class="term">$ docker history nginx:alpine
+IMAGE          CREATED        CREATED BY                                      SIZE
+b2c3d4e5f6a1   5 days ago     CMD ["nginx" "-g" "daemon off;"]                0B
+&lt;missing&gt;      5 days ago     EXPOSE 80                                       0B
+&lt;missing&gt;      5 days ago     COPY docker-entrypoint.sh … # buildkit           4.5kB
+&lt;missing&gt;      5 days ago     …                                               44MB
+&lt;missing&gt;      3 weeks ago    #(nop) ADD alpine base                          8MB</pre>
+<p>Cada linha é uma camada; a coluna <code>SIZE</code> mostra quanto aquela instrução adicionou. É assim que se entende por que uma imagem pesa o que pesa — e por que a ordem das instruções no Dockerfile muda o cache (aula <a href="camadas-cache.html">camadas e cache</a>). Para ver as camadas de verdade no disco: <a href="image-dive.html">dive</a>.</p>
+
+<h3>Filtros avançados</h3>
+<pre class="term">$ docker images --filter "dangling=true"      « só as &lt;none&gt; (sem tag)
+$ docker images --filter "before=nginx:alpine"  « imagens criadas antes dessa
+$ docker images --filter "since=python:3.12-slim" « criadas depois dessa
+$ docker images --filter "reference=node:*"    « só o repositório node, qualquer tag</pre>
+
+<hr>
+
+<h2>Resumo</h2>
+<ul>
+  <li><code>docker images</code> lista as <strong>receitas</strong> locais; cada linha é <code>REPOSITORY:TAG</code> + <code>IMAGE ID</code> + <code>CREATED</code> + <code>SIZE</code>.</li>
+  <li><code>CREATED</code> é a idade da imagem no registro (não a data do seu pull).</li>
+  <li>Mesmo IMAGE ID em duas linhas = mesma imagem, tags diferentes (apelido).</li>
+  <li>Imagens <code>&lt;none&gt;</code> (dangling) são builds antigos sem tag — limpe com <code>docker image prune</code> / <code>docker system prune</code>.</li>
+  <li>Variações: <code>-a</code> (todas), <code>-q</code> (só IDs), <code>docker images nginx</code> (filtro), <code>--format</code> (saída própria).</li>
+  <li>Espaço em disco: <code>docker system df</code>. Remover imagem: <code>docker rmi</code> (próxima aula depois do pull).</li>
+</ul>
+
+<div class="tip"><strong>Próxima aula:</strong> <a href="docker-pull.html">docker pull: baixando imagens</a> — de onde vêm essas imagens e como baixar antes de rodar.</div>
+
+</div>
+</main>
+</div>
+<script src="assets/site.js?v=4"></script>
+</body>
+</html>

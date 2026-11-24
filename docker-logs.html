@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>docker logs — vendo a saída de um container | Guia Docker</title>
+<meta name="description" content="Como ver os logs de um container com docker logs: a saída completa do Nginx na inicialização, -f para acompanhar em tempo real (tipo tail -f, Ctrl+C sai), --tail N para as últimas N linhas, --since para filtrar por tempo, --timestamps, logs de container parado (hello-world), a diferença entre logs e exec, e o aviso de que os logs somem com docker rm. Missões no simulador.">
+<link rel="stylesheet" href="assets/style.css?v=4">
+<script>try{var t=localStorage.getItem("tema");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<meta http-equiv="Cache-Control" content="no-store, must-revalidate">
+<script>try{history.scrollRestoration="manual"}catch(e){}(function(){var n=0;function t(){window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;if(++n<60)setTimeout(t,50)}t();window.addEventListener("pagehide",function(){window.scrollTo(0,0);document.documentElement.scrollTop=0;});window.addEventListener("pageshow",function(){window.scrollTo(0,0)});window.addEventListener("load",function(){window.scrollTo(0,0)});})();document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(a){var h=a.getAttribute("href")||"";if(/[.]html($|[?#])/.test(h)&&a.host===location.host){window.scrollTo(0,0);document.documentElement.scrollTop=0;}}});</script>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" id="sidebar" aria-label="Tópicos"></nav>
+<main class="main">
+<div class="content">
+
+<div class="pager"></div>
+
+<h1>docker <span class="hl">logs</span></h1>
+
+<p class="intro">Todo container guarda o que imprime no <strong>stdout/stderr</strong> (o que apareceria no terminal se ele estivesse grudado na sua tela). O <code>docker logs</code> mostra isso — <strong>mesmo depois que o container parou</strong>. É a primeira coisa que se olha quando "o serviço não subiu".</p>
+
+<div class="note">
+<strong>Você vai aprender</strong>
+<ul>
+  <li><code>docker logs NOME</code>: a saída inteira do container.</li>
+  <li><code>-f</code>: acompanhar em tempo real (igual <code>tail -f</code>; <kbd>Ctrl</kbd>+<kbd>C</kbd> sai).</li>
+  <li><code>--tail N</code>, <code>--since 10m</code>, <code>--timestamps</code>.</li>
+  <li>Logs de container parado (hello-world) e a diferença entre <code>logs</code> e <code>exec</code>.</li>
+  <li>Que os logs somem quando o container é apagado (<code>docker rm</code>).</li>
+</ul>
+</div>
+
+<hr>
+
+<h2>A cena: o site da Ana não abre</h2>
+<p>Ela subiu o Nginx com <code>-d</code> (segundo plano), então não viu nada na tela. O primeiro passo de qualquer debug: olhar os logs.</p>
+<pre class="term">$ docker run -d --name meu-site nginx:alpine
+$ docker ps
+… Up 3 seconds   meu-site</pre>
+
+<div class="try" data-goal="docker-entrypoint" data-solucao="docker logs meu-site"><p class="try-task"><strong>Missão:</strong> com um nginx rodando (<code>docker run -d --name meu-site nginx:alpine</code>), rode <code>docker logs meu-site</code>.</p></div>
+
+<pre class="term">$ docker logs meu-site
+/docker-entrypoint.sh: /docker-entrypoint.d/ is not empty, will attempt to perform configuration
+/docker-entrypoint.sh: Looking for shell scripts in /docker-entrypoint.d/
+/docker-entrypoint.sh: Launching /docker-entrypoint.d/10-listen-on-ipv6-by-default.sh
+10-listen-on-ipv6-by-default.sh: info: Enabled listen on IPv6 in /etc/nginx/conf.d/default.conf
+/docker-entrypoint.sh: Launching /docker-entrypoint.d/20-envsubst-on-templates.sh
+/docker-entrypoint.sh: Launching /docker-entrypoint.d/30-tune-worker-processes.sh
+/docker-entrypoint.sh: Configuration complete; ready for start up</pre>
+
+<p>Repare na última linha: <code>Configuration complete; ready for start up</code> — o Nginx está no ar. Se aqui aparecesse um erro (ex.: <code>nginx: [emerg] invalid number of arguments…</code>), era esse o problema.</p>
+
+<dl class="anatomy">
+  <dt>docker logs meu-site</dt><dd>"Mostre tudo o que o container <code>meu-site</code> já imprimiu" (dá para passar ID curto também, e vários nomes).</dd>
+  <dt>/docker-entrypoint.sh: …</dt><dd>Linhas do script de inicialização da imagem oficial do Nginx — cada imagem imprime o que quiser aqui.</dd>
+</dl>
+
+<hr>
+
+<h2>-f: acompanhar em tempo real</h2>
+<p>Com <code>-f</code> (de <em>follow</em>), o comando fica grudado mostrando as linhas novas, como o <code>tail -f</code> de um arquivo:</p>
+<pre class="term">$ docker logs -f meu-site
+… (linhas antigas)
+172.17.0.1 - - [24/Nov/2025:13:40:01] "GET / HTTP/1.1" 200 615   « cada acesso ao site aparece aqui na hora
+^C                                          « Ctrl+C sai do modo follow (o container CONTINUA rodando)</pre>
+<p>Cada requisição que chega no Nginx vira uma linha de log (é o "access log"). <kbd>Ctrl</kbd>+<kbd>C</kbd> só solta a sua tela do log — o container segue vivo (confira com <code>docker ps</code>).</p>
+
+<hr>
+
+<h2>--tail: só o final</h2>
+<pre class="term">$ docker logs --tail 20 meu-site    « só as últimas 20 linhas
+$ docker logs --tail 50 -f meu-site « últimas 50 + continua seguindo</pre>
+
+<h2>--since: só as recentes</h2>
+<pre class="term">$ docker logs --since 10m meu-site   « só o que foi impresso nos últimos 10 minutos
+$ docker logs --since "2025-11-24T13:00:00" meu-site   « ou uma data/hora exata</pre>
+
+<h2>--timestamps: com hora em cada linha</h2>
+<pre class="term">$ docker logs --timestamps meu-site
+2025-11-24T13:40:01.123456789Z /docker-entrypoint.sh: Configuration complete; ready for start up
+2025-11-24T13:41:10.987654321Z 172.17.0.1 - - "GET / HTTP/1.1" 200 615</pre>
+
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Comando</th><th>Quando usar</th></tr>
+<tr><td><code>docker logs X</code></td><td>Ver tudo o que o container já imprimiu (debug geral).</td></tr>
+<tr><td><code>docker logs -f X</code></td><td>Acompanhar ao vivo (ver requisições chegando, erros na hora).</td></tr>
+<tr><td><code>docker logs --tail 100 X</code></td><td>Só o final (logs grandes).</td></tr>
+<tr><td><code>docker logs --since 30m X</code></td><td>"O que aconteceu só agora há pouco?"</td></tr>
+<tr><td><code>docker logs --timestamps X</code></td><td>Correlacionar horário dos logs com outros eventos.</td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>Logs de container parado (hello-world)</h2>
+<p>O <code>logs</code> funciona <strong>também em container parado</strong> — é justamente quando você mais precisa (o processo morreu e você quer saber por quê):</p>
+
+<div class="try" data-goal="Hello from Docker" data-solucao="docker run --name meu-hello hello-world">
+<p class="try-task"><strong>Missão:</strong> rode <code>docker run --name meu-hello hello-world</code> (o container imprime e sai) e depois <code>docker logs meu-hello</code> para ver a mensagem de novo, mesmo parado.</p>
+</div>
+
+<pre class="term">$ docker run --name meu-hello hello-world
+… Hello from Docker! …
+$ docker ps -a
+… Exited (0) 5 seconds ago   meu-hello
+$ docker logs meu-hello
+
+Hello from Docker!
+This message shows that your installation appears to be working correctly.
+…</pre>
+
+<hr>
+
+<h2>Erros e avisos</h2>
+<div class="warning">
+<strong>Logs somem com docker rm</strong>
+<p>Os logs ficam grudados no container. Se você apagar o container (<code>docker rm</code>), os logs vão junto. Se precisar guardar, redirecione para um arquivo: <code>docker logs meu-site &gt; logs.txt</code>. Em produção, o certo é configurar um <strong>driver de log</strong> (ex.: <code>json-file</code> com rotação, ou enviar para um sistema central) — aula <a href="logging.html">Drivers de log</a>.</p>
+</div>
+
+<div class="warning">
+<strong>Erro real: container que não existe</strong>
+<pre class="term">$ docker logs nao-existe
+Error response from daemon: No such container: nao-existe</pre>
+<p>Nome errado ou container já apagado — confira com <code>docker ps -a</code>.</p>
+</div>
+
+<h3>logs × exec: não confunda</h3>
+<div class="table-wrap">
+<table class="ref">
+<tr><th></th><th>docker logs X</th><th>docker exec X …</th></tr>
+<tr><td>O que faz</td><td>Mostra o que o container <strong>já imprimiu</strong> (histórico)</td><td>Roda um <strong>comando novo</strong> dentro do container agora</td></tr>
+<tr><td>Precisa estar rodando?</td><td>Não (funciona parado também)</td><td>Sim</td></tr>
+<tr><td>Exemplo</td><td><code>docker logs meu-site</code></td><td><code>docker exec meu-site cat /etc/nginx/nginx.conf</code> (próxima aula: <a href="docker-exec.html">exec</a>)</td></tr>
+</table>
+</div>
+
+<div class="mc" data-answer="2">
+<p class="mc-q">Para que serve o <code>-f</code> no <code>docker logs -f meu-site</code>?</p>
+<label><input type="radio" name="q1"> Apaga os logs depois de ler</label>
+<label><input type="radio" name="q1"> Acompanha os logs em tempo real (mostra as linhas novas na hora, como tail -f)</label>
+<label><input type="radio" name="q1"> Filtra erros</label>
+<label><input type="radio" name="q1"> Limita a 1 linha</label>
+</div>
+
+<div class="mc" data-answer="1">
+<p class="mc-q">O container morreu (Exited (1)). Como você vê o que ele imprimiu antes de morrer?</p>
+<label><input type="radio" name="q2"> <code>docker logs nome-do-container</code> — logs funcionam em container parado</label>
+<label><input type="radio" name="q2"> Não dá mais, os logs sumiram</label>
+<label><input type="radio" name="q2"> Só com <code>docker exec</code></label>
+<label><input type="radio" name="q2"> Com <code>docker images</code></label>
+</div>
+
+<div class="mc" data-answer="2">
+<p class="mc-q">Você deu <code>docker rm meu-site</code> e depois quis ver os logs dele. O que acontece?</p>
+<label><input type="radio" name="q3"> Os logs continuam para sempre</label>
+<label><input type="radio" name="q3"> Eles foram apagados junto com o container</label>
+<label><input type="radio" name="q3"> Dá erro, mas dá para recuperar com docker restore</label>
+<label><input type="radio" name="q3"> Ficam na imagem</label>
+</div>
+
+<hr>
+
+<h2>Logs de uma aplicação real (ex.: API Node)</h2>
+<p>Um programa seu imprime o que quiser — e vira log. Veja uma API mínima em Node dentro de um container:</p>
+<pre class="term">$ docker run -d --name api -p 3000:3000 node:22-alpine node -e "require('http').createServer((q,s)=>{console.log(new Date().toISOString()+' '+q.method+' '+q.url);s.end('ok')}).listen(3000)"
+$ curl -s http://localhost:3000/ola
+ok
+$ docker logs api
+2025-11-24T13:40:01.123Z GET /ola
+$ docker logs -f api     « e cada chamada nova aparece na hora:
+2025-11-24T13:41:55.456Z GET /ola
+2025-11-24T13:41:58.789Z GET /outra</pre>
+<p>É assim que se debuga um serviço rodando em segundo plano: <code>console.log</code> no código vira linha de log, e <code>docker logs -f</code> mostra na hora.</p>
+
+<h3>Onde os logs ficam no host?</h3>
+<p>Por padrão (driver <code>json-file</code>), o Docker guarda os logs em um arquivo JSON por container, em <code>/var/lib/docker/containers/&lt;ID&gt;/&lt;ID&gt;-json.log</code> (no Linux). Dá para ler direto, mas o certo é usar <code>docker logs</code>. Se os logs estão enchendo o disco, configure a rotação na hora do run:</p>
+<pre class="term">$ docker run -d --log-opt max-size=10m --log-opt max-file=3 --name api node:22-alpine …
+« guarda no máximo 3 arquivos de 10MB (30MB no total) por container — quando enche, apaga o mais antigo</pre>
+<p>Isso e outros drivers (syslog, journald, enviar para um servidor central) têm aula própria: <a href="logging.html">Drivers de log e rotação</a>.</p>
+
+<div class="warning">
+<strong>Container que imprime demais pode encher o disco</strong>
+<p>Sem limite (<code>--log-opt max-size</code>), um container que imprime em loop (um erro que se repete) pode gravar gigabytes no <code>-json.log</code> e encher o disco da máquina. Em produção, sempre configure rotação ou um driver externo.</p>
+</div>
+
+<hr>
+
+<h2>Filtrando os logs (grep) e contando erros</h2>
+<p>O <code>docker logs</code> joga tudo na tela; no terminal dá para filtrar com <code>grep</code>:</p>
+<pre class="term">$ docker logs api | grep -i error          « só linhas com "error"
+$ docker logs api | grep -c "GET /ola"     « quantas vezes acessaram /ola
+12
+$ docker logs --since 1h api | tail -50    « última hora, só as últimas 50 linhas</pre>
+
+<h3>Logs no Compose (vários containers de uma vez)</h3>
+<p>Quando o projeto sobe com Compose (nível 2), dá para ver os logs de <strong>todos os serviços</strong> juntos ou de um só:</p>
+<pre class="term">$ docker compose logs            « tudo, misturado (cada linha ganha o nome do serviço na frente)
+web-1  | 172.17.0.1 - "GET / HTTP/1.1" 200
+api-1  | 2025-11-24T13:40:01 GET /ola
+$ docker compose logs -f api       « só do serviço "api", ao vivo
+$ docker compose logs --tail 20 db</pre>
+
+<div class="warning">
+<strong>"Não aparece nada no logs"</strong>
+<p>Se o <code>docker logs</code> está vazio, o programa provavelmente não imprime nada no stdout (ou imprime em arquivo). programa que loga em arquivo dentro do container precisa de volume nesse arquivo — ou você lê com <code>docker exec X cat /var/log/app.log</code>. Outro caso clássico: o processo escribe para o stderr e você está vendo só stdout — o <code>docker logs</code> mostra os dois juntos, então se estiver vazio de verdade, o programa não está logando.</p>
+</div>
+
+<hr>
+
+<h2>Erros comuns de logs</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Situação</th><th>Causa</th><th>Solução</th></tr>
+<tr><td><code>No such container: X</code></td><td>Nome errado ou container apagado</td><td><code>docker ps -a</code> para conferir o nome</td></tr>
+<tr><td>Logs vazios num container rodando</td><td>O programa não imprime no stdout (loga em arquivo)</td><td><code>docker exec X cat /var/log/app.log</code> ou monte o arquivo via volume</td></tr>
+<tr><td>Logs enormes e o disco enchendo</td><td>Sem limite de tamanho configurado</td><td>Recrie com <code>--log-opt max-size=10m --log-opt max-file=3</code></td></tr>
+<tr><td>Depois de <code>docker rm</code>, os logs sumiram</td><td>Logs ficam grudados no container</td><td>Redirecione para arquivo antes (<code>docker logs X &gt; log.txt</code>) ou use driver externo</td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>Salvando os logs antes de apagar o container</h2>
+<p>Se o container vai ser apagado e você quer guardar o histórico:</p>
+<pre class="term">$ docker logs meu-site > logs-meu-site.txt 2>&1    « stdout E stderr no arquivo
+$ docker logs --since 2025-11-24 meu-site >> log-dia.txt   « só o do dia, anexando
+$ wc -l logs-meu-site.txt
+1284</pre>
+<p>O <code>2&gt;&amp;1</code> manda o stderr (erros) para o mesmo lugar do stdout — no Docker ambos já aparecem juntos no <code>logs</code>, mas o redirecionamento vale para qualquer comando.</p>
+
+<hr>
+
+<h2>Resumo</h2>
+<ul>
+  <li><code>docker logs X</code> mostra tudo o que o container imprimiu no stdout/stderr — funciona <strong>rodando ou parado</strong>.</li>
+  <li><code>-f</code> acompanha em tempo real (<kbd>Ctrl</kbd>+<kbd>C</kbd> solta a tela, o container continua); <code>--tail N</code> pega só o final; <code>--since 10m</code> filtra por tempo; <code>--timestamps</code> põe hora em cada linha.</li>
+  <li>É a primeira ferramenta de debug: "o serviço não subiu? olha os logs".</li>
+  <li>Logs ficam grudados no container: <code>docker rm</code> apaga eles junto. Para guardar: redirecione para arquivo ou configure driver de log.</li>
+  <li>Erro real: <code>No such container: X</code>. Não confunda com <code>docker exec</code> (roda comando novo dentro do container).</li>
+</ul>
+
+<div class="tip"><strong>Próxima aula:</strong> <a href="modo-interativo.html">Modo interativo (-it) e sair sem parar (Ctrl-P Ctrl-Q)</a> — e se você quiser entrar <em>dentro</em> do container para fuçar ao vivo, em vez de só ler logs.</div>
+
+</div>
+</main>
+</div>
+<script src="assets/site.js?v=4"></script>
+</body>
+</html>

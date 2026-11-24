@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>docker tag e push — publicar sua imagem no registry | Guia Docker</title>
+<meta name="description" content="Como publicar sua imagem no Docker Hub: docker login (com o aviso real sobre a senha salva em texto plano e a dica do token de acesso), a anatomia completa do nome usuario/repositorio:tag, docker tag para renomear a imagem local (apelido com o mesmo IMAGE ID, sem copiar nada) e docker push para enviar as camadas ao registry (Pushed vs Mounted from), o digest sha256 imutável, erros reais de permissão (denied, unauthorized, lowercase) e o fluxo típico de CI/CD.">
+<link rel="stylesheet" href="assets/style.css?v=4">
+<script>try{var t=localStorage.getItem("tema");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<meta http-equiv="Cache-Control" content="no-store, must-revalidate">
+<script>try{history.scrollRestoration="manual"}catch(e){}(function(){var n=0;function t(){window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;if(++n<60)setTimeout(t,50)}t();window.addEventListener("pagehide",function(){window.scrollTo(0,0);document.documentElement.scrollTop=0;});window.addEventListener("pageshow",function(){window.scrollTo(0,0)});window.addEventListener("load",function(){window.scrollTo(0,0)});})();document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(a){var h=a.getAttribute("href")||"";if(/[.]html($|[?#])/.test(h)&&a.host===location.host){window.scrollTo(0,0);document.documentElement.scrollTop=0;}}});</script>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" id="sidebar" aria-label="Tópicos"></nav>
+<main class="main">
+<div class="content">
+
+<div class="pager"></div>
+
+<h1><span class="hl">docker tag e push</span> — publicar sua imagem</h1>
+
+<p class="intro">Até aqui as imagens da Ana vivent só no notebook dela (<code>ana@notebook</code>). Funcionam, mas têm dois problemas: se o notebook quebrar, as imagens somem; e ninguém da equipe consegue baixar. Para guardar, compartilhar e colocar em produção, você manda a imagem para um <strong>registry</strong> — um servidor que guarda imagens. O <strong>Docker Hub</strong> é o público e padrão (hub.docker.com). São dois passos: o <code>docker tag</code> dá um nome de publicação à imagem local e o <code>docker push</code> envia as camadas para o registry.</p>
+
+<div class="note">
+<strong>Você vai aprender</strong>
+<ul>
+  <li>A anatomia completa do nome de uma imagem: <code>[registry/][usuario/]repositório:tag</code>.</li>
+  <li>Como autenticar no Docker Hub com <code>docker login</code> — e por que usar token no lugar da senha.</li>
+  <li><code>docker tag</code>: renomear sem copiar nada (mesmo IMAGE ID).</li>
+  <li><code>docker push</code>: enviar camadas ao registry (<code>Pushed</code> × <code>Mounted from</code>) e o digest sha256.</li>
+  <li>Os erros reais de permissão (<code>denied</code>, <code>unauthorized</code>, letra maiúscula).</li>
+  <li>Como isso vira pipeline de CI/CD (link para a aula de CI).</li>
+</ul>
+</div>
+
+<hr>
+
+<h2>A ideia: o armário de imagens da internet</h2>
+<p>Pense no registry como um armário de imagens na internet: você guarda lá as suas ("ana/minha-api:1.0"), qualquer pessoa autorizada pode pegar uma cópia (<code>docker pull</code>), e o armário ainda guarda o histórico de cada versão. A máquina local continua guardando uma cópia em cache — o pull só baixa de novo o que mudou.</p>
+
+<hr>
+
+<h2>A anatomia do nome da imagem</h2>
+<p>Toda imagem tem um nome completo no formato:</p>
+<pre class="file">[REGISTRY/] [USUÁRIO-OU-ORGANIZAÇÃO/] REPOSITÓRIO [:TAG]</pre>
+<p>Exemplos reais que a Ana usa:</p>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Nome</th><th>Onde mora</th><th>Quem pode baixar</th></tr>
+<tr><td><code>nginx:alpine</code></td><td>Biblioteca oficial do Docker Hub: na verdade <code>docker.io/library/nginx:alpine</code></td><td>Qualquer pessoa (público)</td></tr>
+<tr><td><code>ana/minha-api:1.0</code></td><td>Docker Hub, conta <code>ana</code>, repositório <code>minha-api</code>, tag <code>1.0</code></td><td>Público (ou privado, se ela marcar)</td></tr>
+<tr><td><code>registry.empresa.com/api:2.0</code></td><td>Registry privado da empresa (próxima aula)</td><td>Só quem tem login</td></tr>
+</table>
+</div>
+<p>Regras do nome: sem tag, o Docker assume <code>:latest</code> (a aula <a href="tags.html">Tags e versões</a> explica por que evitar depender dela em produção). O repositório só aceita <strong>letras minúsculas</strong>, números e os caracteres <code>_</code> <code>.</code> <code>-</code> <code>/</code>. Se o primeiro elemento tiver ponto ou dois-pontos (ex.: <code>registry.empresa.com</code>), o Docker entende que é um host de registry; se não tiver, assume Docker Hub.</p>
+
+<hr>
+
+<h2>Passo 1: docker login</h2>
+<p>O push precisa de autenticação. Entre com a sua conta do Docker Hub (crie grátis em hub.docker.com):</p>
+<pre class="term">$ docker login
+Username: ana
+Password:
+WARNING! Your password will be stored unencrypted in /home/ana/.docker/config.json.
+Configure a credential helper to remove this warning. See
+https://docs.docker.com/engine/reference/commandline/login/#credentials-store
+
+Login Succeeded</pre>
+<p>A credencial fica salva em <code>~/.docker/config.json</code> — por isso o aviso. Em máquina compartilhada ou CI, <strong>prefira um token de acesso</strong> no lugar da senha: no Docker Hub, crie em Account Settings → Security → New Access Token, e use <code>docker login -u ana -p dckr_pat_…</code> (ou passe o token pelo stdin com <code>--password-stdin</code>, que é o jeito seguro em scripts: <code>echo $TOKEN | docker login -u ana --password-stdin</code>). Para sair: <code>docker logout</code>.</p>
+
+<div class="warning"><strong>Nunca commite o <code>~/.docker/config.json</code> no git.</strong> O aviso de "stored unencrypted" é sério: quem tem esse arquivo tem acesso às suas contas de registry. Coloque <code>.docker/</code> no <code>.gitignore</code> e use tokens comescopo mínimo (só pull, ou só push) em vez da senha da conta.</div>
+
+<hr>
+
+<h2>Passo 2: docker tag (renomear localmente)</h2>
+<p>Você construiu a imagem <code>minha-api:1.0</code> local (aula <a href="docker-build.html">docker build</a>). Para publicar na sua conta, crie um <strong>apelido</strong> com o nome completo:</p>
+<pre class="term" data-cwd="~/minha-api">$ docker build -t minha-api:1.0 .
+…
+Successfully tagged minha-api:1.0
+
+$ docker tag minha-api:1.0 ana/minha-api:1.0   « não imprime nada: deu certo
+
+$ docker images
+REPOSITORY      TAG       IMAGE ID       CREATED          SIZE
+minha-api       1.0       b2c3d4e5f6a1   2 minutes ago    189MB
+ana/minha-api   1.0       b2c3d4e5f6a1   2 minutes ago    189MB
+nginx           alpine    c3d4e5f6a1b2   5 days ago       48.2MB</pre>
+<p>Repare no <strong>IMAGE ID igual</strong>: o <code>docker tag</code> não copia nada — só aponta outro nome para a mesma imagem. Uma imagem pode ter vários nomes (várias tags), e apagar um nome com <code>docker rmi</code> não apaga a imagem enquanto existir outro nome (aula <a href="docker-rmi.html">docker rmi</a>).</p>
+
+<div class="try" data-goal="ana/minha-api" data-solucao="docker tag nginx:alpine ana/minha-api:1.0">
+<p class="try-task"><strong>Missão:</strong> crie o apelido <code>ana/minha-api:1.0</code> para a imagem <code>nginx:alpine</code> com <code>docker tag</code> e confira a lista com <code>docker images</code>.</p>
+</div>
+
+<hr>
+
+<h2>Passo 3: docker push (enviar ao registry)</h2>
+<p>Agora é a hora de subir. Só as camadas que o registry ainda não tem são enviadas de verdade — o resto é reutilizado:</p>
+<pre class="term">$ docker push ana/minha-api:1.0
+The push refers to repository [docker.io/ana/minha-api]
+e5f6a1b2c3d4: Pushed
+a1b2c3d4e5f6: Mounted from library/nginx      « o registry já tinha essa camada
+1.0: digest: sha256:9f3ab2c1d4e5f60718… size: 2621</pre>
+<p>Cada linha é uma camada: <code>Pushed</code> (enviada agora) ou <code>Mounted from …</code> (já existia no registry, reutilizada — por isso o push da segunda versão é bem mais rápido). No fim, o <strong>digest</strong> (<code>sha256:…</code>) identifica a imagem de forma imutável: é esse digest que garante que o que você testou é exatamente o que vai rodar no servidor, não importa a tag. Em produção, dá para referenciar a imagem pelo digest: <code>ana/minha-api@sha256:9f3ab2…</code>.</p>
+
+<div class="try" data-goal="Login Succeeded" data-solucao="docker login">
+<p class="try-task"><strong>Missão:</strong> rode <code>docker login</code> (no simulador qualquer senha vale), depois <code>docker push ana/minha-api:1.0</code> — o simulador avisa que o envio real acontece só num registry de verdade.</p>
+</div>
+
+<hr>
+
+<h2>Baixando de volta: docker pull</h2>
+<p>Em qualquer máquina com Docker (um servidor de produção, o notebook de um colega), basta rodar o pull com o nome completo:</p>
+<pre class="term">$ docker pull ana/minha-api:1.0
+1.0: Pulling from ana/minha-api
+e5f6a1b2c3d4: Pull complete
+a1b2c3d4e5f6: Pull complete
+Status: Downloaded newer image for ana/minha-api:1.0
+
+$ docker run -d -p 3000:3000 ana/minha-api:1.0   « a mesma imagem, no servidor</pre>
+<p>Se a imagem for <strong>privada</strong> (repositório marcado como private no Hub), o pull sem login falha com <code>denied</code> — é a próxima aula, <a href="registry-privado.html">registry privado</a>.</p>
+
+<hr>
+
+<h2>Fluxo completo: do código ao registry</h2>
+<p>No dia a dia da Ana, o fluxo é sempre o mesmo:</p>
+<ol class="passo">
+  <li>Ela edita o código em <code>~/minha-api</code> e testa local com <code>docker compose up</code> (projetos do guia).</li>
+  <li>Quando dá certo, roda <code>docker build -t minha-api:1.1 .</code> (versão nova, <a href="tags.html">tags</a>).</li>
+  <li>Cria o apelido público: <code>docker tag minha-api:1.1 ana/minha-api:1.1</code> — e também <code>ana/minha-api:latest</code>, se quiser atualizar a tag padrão.</li>
+  <li>Faz <code>docker login</code> (com token, via <code>--password-stdin</code>) e <code>docker push ana/minha-api:1.1</code> (e o <code>:latest</code>).</li>
+  <li>No servidor de produção, <code>docker pull ana/minha-api:1.1</code> e reinicia o serviço apontando para a nova tag (ou melhor, para o digest).</li>
+</ol>
+<p>Esse mesmo fluxo roda automaticamente numa pipeline de CI (GitHub Actions etc.) toda vez que ela dá push no git — é a aula <a href="docker-ci.html">Docker em pipelines de CI</a>, e a <a href="build-otimizado.html">otimização de builds para CI</a> mostra como deixar esse build rápido.</p>
+
+<hr>
+
+<h2>Erros comuns</h2>
+<div class="warning"><strong>Push sem login:</strong> <code>denied: requested access to the resource is denied</code> ou <code>unauthorized: authentication required</code>. Solução: <code>docker login</code> antes do push — e, em CI, sempre <code>--password-stdin</code> com token.</div>
+<div class="warning"><strong>Nome com letra maiúscula:</strong> <code>docker tag nginx:alpine Ana/Minha-API:1.0</code> devolve <code>invalid reference format: repository name must be lowercase</code>. Repositório só aceita minúsculas (o <code>ana</code> do usuário também).</div>
+<div class="warning"><strong>Permissão negada no repositório:</strong> se o repositório pertence a outra conta ou organização (ex.: <code>docker push loja/minha-api:1.0</code> sem a Ana ter acesso), o push falha com <code>denied</code> — peça acesso de write na organização ou publique na sua própria conta.</div>
+<div class="warning"><strong>Tag <code>latest</code> enganosa:</strong> dar push só em <code>:latest</code> faz todo mundo rodar "o que estiver hoje", sem saber o quê — a aula <a href="tags.html">Tags</a> mostra a convenção de usar versão semântica (<code>:1.0</code>, <code>:1.1</code>) e deixar <code>:latest</code> só como apelido móvel.</div>
+
+<hr>
+
+<h2>Várias tags, mesma imagem: a convenção da Loja Aurora</h2>
+<p>A Ana apelida cada build com <strong>duas tags</strong>: a versão exata e o <code>latest</code> móvel. Assim o servidor de produção pode apontar para a versão fixa (seguro) e o notebook dela pode seguir o <code>latest</code> (conveniente):</p>
+<pre class="term" data-cwd="~/minha-api">$ docker build -t minha-api:1.1 .
+$ docker tag minha-api:1.1 ana/minha-api:1.1
+$ docker tag minha-api:1.1 ana/minha-api:latest
+$ docker push ana/minha-api:1.1
+$ docker push ana/minha-api:latest
+
+$ docker images ana/minha-api
+REPOSITORY      TAG       IMAGE ID       CREATED          SIZE
+ana/minha-api   1.1       b2c3d4e5f6a1   2 minutes ago    195MB
+ana/minha-api   latest    b2c3d4e5f6a1   2 minutes ago    195MB   « mesmo ID: são apelidos</pre>
+<p>Regra de bolso da equipe: em producción, o deploy usa a tag de versão (<code>:1.1</code>) ou o digest; o <code>:latest</code> fica só para desenvolvimento. Assim ninguém é pego de surpresa por uma imagem que mudou debaixo do pé.</p>
+
+<hr>
+
+<h2>Quiz rápido</h2>
+<div class="mc" data-answer="2">
+<p class="mc-q">1. O que o <code>docker tag minha-api:1.0 ana/minha-api:1.0</code> faz?</p>
+<label><input type="radio" name="q1"> Copia a imagem para o Docker Hub</label>
+<label><input type="radio" name="q1"> Cria um apelido local com o nome completo — mesmo IMAGE ID, nada é copiado</label>
+<label><input type="radio" name="q1"> Renomeia o container</label>
+<label><input type="radio" name="q1"> Faz login automático</label>
+</div>
+
+<div class="mc" data-answer="3">
+<p class="mc-q">2. No saída do push, o que significa uma camada marcada como <code>Mounted from library/nginx</code>?</p>
+<label><input type="radio" name="q2"> Que a camada foi apagada</label>
+<label><input type="radio" name="q2"> Que ela foi emprestada de outro repositório</label>
+<label><input type="radio" name="q2"> Que o registry já tinha essa camada e não precisou receber de novo</label>
+<label><input type="radio" name="q2"> Que deu erro no envio</label>
+</div>
+
+<div class="mc" data-answer="4">
+<p class="mc-q">3. Qual destas práticas é mais segura para o <code>docker login</code> em scripts/CI?</p>
+<label><input type="radio" name="q3"> <code>docker login -u ana -p senha123</code> direto na linha de comando</label>
+<label><input type="radio" name="q3"> Commitar o <code>~/.docker/config.json</code> no repositório</label>
+<label><input type="radio" name="q3"> Salvar a senha da conta em um arquivo texto na pasta do projeto</label>
+<label><input type="radio" name="q3"> Usar um token de acesso com <code>echo $TOKEN | docker login -u ana --password-stdin</code></label>
+</div>
+
+<div class="mc" data-answer="1">
+<p class="mc-q">4. O que identifica uma imagem de forma imutável no fim do push?</p>
+<label><input type="radio" name="q4"> O <code>digest: sha256:…</code> — dá para referenciar a imagem por <code>ana/minha-api@sha256:…</code></label>
+<label><input type="radio" name="q4"> A tag <code>:latest</code></label>
+<label><input type="radio" name="q4"> O nome do usuário</label>
+<label><input type="radio" name="q4"> O IMAGE ID local</label>
+</div>
+
+<hr>
+
+<h2>Resumo</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Comando</th><th>O que faz</th></tr>
+<tr><td><code>docker login [-u usuário] [--password-stdin]</code></td><td>Autentica no Docker Hub (ou outro registry) e salva a credencial em <code>~/.docker/config.json</code>. Em CI, use token + <code>--password-stdin</code>.</td></tr>
+<tr><td><code>docker logout</code></td><td>Remove a credencial salva.</td></tr>
+<tr><td><code>docker tag ORIGEM DESTINO</code></td><td>Cria um apelido local para a imagem — sem copiar, mesmo IMAGE ID.</td></tr>
+<tr><td><code>docker push USUÁRIO/REPO:TAG</code></td><td>Envia as camadas da imagem ao registry (só as que o registry não tem). Devolve o digest sha256.</td></tr>
+<tr><td><code>docker pull USUÁRIO/REPO:TAG</code></td><td>Baixa uma imagem publicada por você ou por outra pessoa.</td></tr>
+</table>
+</div>
+<ul>
+  <li>Nome completo: <code>[registry/][usuário/]repositório:tag</code>; sem registry, assume Docker Hub; sem tag, assume <code>:latest</code>.</li>
+  <li>Erros reais: <code>denied</code>/<code>unauthorized</code> (sem login), <code>repository name must be lowercase</code> (maiúscula no nome).</li>
+  <li>Em produção, prefira referenciar pelo <strong>digest</strong> (<code>@sha256:…</code>) — a tag pode mudar, o digest não.</li>
+</ul>
+
+<div class="tip"><strong>Próxima aula:</strong> <a href="registry-privado.html">Registry privado e login (docker login)</a>.</div>
+
+<div class="pager"></div>
+
+</div>
+</main>
+</div>
+<script src="assets/site.js?v=4"></script>
+</body>
+</html>

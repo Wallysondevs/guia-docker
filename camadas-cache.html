@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Camadas e cache do build — por que a ordem do Dockerfile importa | Guia Docker</title>
+<meta name="description" content="Como funcionam as camadas (layers) da imagem: cada instrução do Dockerfile vira uma camada só de leitura, o container ganha uma camada gravável no topo (por isso apagar o container não estraga a imagem), o docker build reutiliza o cache passo a passo (Using cache / CACHED), a regra do cache (se um passo muda, todos os depois dele são refeitos), por que a ordem importa (código por último, dependências antes), docker history para ver as camadas, como invalidar o cache de propósito (--no-cache, --pull, truque do ARG CACHEBUST), erros reais e quiz. Docker Engine 27.x.">
+<link rel="stylesheet" href="assets/style.css?v=4">
+<script>try{var t=localStorage.getItem("tema");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<meta http-equiv="Cache-Control" content="no-store, must-revalidate">
+<script>try{history.scrollRestoration="manual"}catch(e){}(function(){var n=0;function t(){window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;if(++n<60)setTimeout(t,50)}t();window.addEventListener("pagehide",function(){window.scrollTo(0,0);document.documentElement.scrollTop=0;});window.addEventListener("pageshow",function(){window.scrollTo(0,0)});window.addEventListener("load",function(){window.scrollTo(0,0)});})();document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(a){var h=a.getAttribute("href")||"";if(/[.]html($|[?#])/.test(h)&&a.host===location.host){window.scrollTo(0,0);document.documentElement.scrollTop=0;}}});</script>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" id="sidebar" aria-label="Tópicos"></nav>
+<main class="main">
+<div class="content">
+
+<div class="pager"></div>
+
+<h1><span class="hl">Camadas</span> e <span class="hl">cache</span> do build</h1>
+
+<p class="intro">Uma imagem não é um bloco único: ela é uma <strong>pilha de camadas</strong> (layers), uma para cada instrução do Dockerfile. E é essa pilha que dá ao <code>docker build</code> o seu superpoder: o <strong>cache</strong>. Entender isso muda a ordem que você escreve o Dockerfile — e transforma builds de minutos em builds de segundos. A Ana sentiu essa diferença na pele; vamos ver por quê.</p>
+
+<div class="note">
+<strong>Você vai aprender</strong>
+<ul>
+  <li>Que cada instrução do Dockerfile vira uma camada só de leitura, e que o container ganha uma camada gravável no topo.</li>
+  <li>Como o cache funciona: passo reutilizado aparece como <code>Using cache</code> (ou <code>CACHED</code> no BuildKit).</li>
+  <li>A regra do cache: se um passo muda, ele e <strong>todos os seguintes</strong> são refeitos.</li>
+  <li>Por que a ordem importa: dependências antes, <code>COPY . .</code> sempre por último.</li>
+  <li><code>docker history</code> para ver as camadas da imagem e quanto cada uma pesa.</li>
+  <li>Como invalidar o cache de propósito: <code>--no-cache</code>, <code>--pull</code> e o truque do <code>ARG CACHEBUST</code>.</li>
+</ul>
+</div>
+
+<hr>
+
+<h2>A analogia: o bolo de camadas</h2>
+<p>Pense na imagem como um <strong>bolo de camadas</strong> (daí vem o nome layer). Cada instrução do Dockerfile despeja uma nova camada em cima da anterior: a base (<code>FROM</code>) é a primeira camada; o <code>WORKDIR</code> adiciona uma quase vazia; cada <code>RUN</code> e cada <code>COPY</code> adicionam a sua, com o resultado do comando ou os arquivos copiados. Nenhuma camada pode ser alterada depois de pronta — só dá para <strong>empilhar</strong> em cima.</p>
+<p>E o container? Quando ele roda, o Docker coloca uma <strong>camada gravável</strong> no topo da pilha. É nessa camada que o container escreve (arquivos de log, banco de dados local, arquivos temporários). Apagar o container apaga só essa camada do topo — as camadas da imagem, embaixo, continuam intactas. É por isso que um container não "estraga" a imagem de origem.</p>
+
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Camada</th><th>É gravável?</th><th>Some quando?</th></tr>
+<tr><td>Camadas da imagem (FROM, RUN, COPY…)</td><td>Não — só leitura</td><td>Só quando a imagem é apagada (<code>docker rmi</code>)</td></tr>
+<tr><td>Camada do container (a do topo)</td><td><strong>Sim</strong> — é onde o container escreve</td><td>Quando o container é removido (<code>docker rm</code>)</td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>Cada instrução vira uma camada</h2>
+<p>Quando o build executa um <code>RUN</code>, <code>COPY</code>, <code>ENV</code> etc., o resultado vira uma <strong>camada só de leitura</strong>, empilhada em cima da anterior. Veja o Dockerfile da Ana e as camadas que ele gera:</p>
+<pre class="term" data-cwd="~/minha-api">$ docker build -t minha-api:1.0 .
+Step 1/5 : FROM node:22-alpine      ← camada da imagem base (189MB)
+Step 2/5 : WORKDIR /app              ← camada (quase vazia, só muda o metadado)
+Step 3/5 : COPY package*.json ./     ← camada com os manifests (2kB)
+Step 4/5 : RUN npm install           ← camada com o node_modules (~45MB)
+Step 5/5 : COPY . .                  ← camada com o código-fonte (12kB)</pre>
+<p>Repare nos tamanhos: a camada do <code>npm install</code> é de longe a mais pesada. É por isso que você não quer refazê-la a cada mudancinha de código — e o cache existe justamente para isso.</p>
+
+<div class="tip"><strong>Camadas são compartilhadas:</strong> se duas imagens usam a mesma base (<code>node:22-alpine</code>), elas <strong>compartilham</strong> as camadas da base no disco — você não baixa 189MB duas vezes. É outro motivo para escolher bases oficiais populares.</div>
+
+<hr>
+
+<h2>O cache: cada passo é reutilizado se nada mudou</h2>
+<p>O build guarda o resultado de cada instrução. No próximo build, para cada passo ele compara: <strong>a instrução mudou? os arquivos que ela usou mudaram?</strong> Se não, ele pula o passo e imprime <code>Using cache</code>. A Ana muda uma linha do <code>server.js</code> e rebuilda:</p>
+<pre class="term" data-cwd="~/minha-api">$ docker build -t minha-api:1.0 .   « mudei só um arquivo de código
+Sending build context to Docker daemon  58.37kB
+Step 1/5 : FROM node:22-alpine
+ ---> Using cache
+Step 2/5 : WORKDIR /app
+ ---> Using cache
+Step 3/5 : COPY package*.json ./
+ ---> Using cache
+Step 4/5 : RUN npm install
+ ---> Using cache            « node_modules não foi recriado!
+Step 5/5 : COPY . .
+ ---> 3c4d5e6f7a8b            « só o código foi recopiado
+Successfully built 3c4d5e6f7a8b</pre>
+<p>Build em segundos, porque só o último passo foi refeito. No BuildKit moderno, o passo reutilizado aparece como <code>CACHED</code>:</p>
+<pre class="term" data-cwd="~/minha-api">$ docker build -t minha-api:1.0 .
+#1 [internal] load build definition from Dockerfile
+#2 [1/4] FROM docker.io/library/node:22-alpine
+#3 [2/4] WORKDIR /app  CACHED
+#4 [3/4] COPY package*.json ./  CACHED
+#5 [4/4] RUN npm install  CACHED
+#6 [5/5] COPY . .                  « esse refez
+[+] Building 1.2s (5/5) FINISHED</pre>
+
+<div class="warn"><strong>A regra do cache:</strong> se um passo muda, ele é refeito — e <strong>todos os passos depois dele também</strong>, porque cada camada depende da anterior. Mudar o <code>FROM</code> refaz tudo; mudar só o último <code>COPY</code> refaz só ele.</div>
+
+<hr>
+
+<h2>Ordem errada vs. ordem certa</h2>
+<p>O erro que mais atrasa build de iniciante: <strong>copiar o código antes de instalar as dependências</strong>.</p>
+<div class="warn"><strong>Ordem errada invalida tudo:</strong> se o <code>COPY . .</code> vem <em>antes</em> do <code>RUN npm install</code>, qualquer mudança no código invalida o cache do <code>npm install</code> — e ele roda de novo do zero (minutos a cada build):
+<pre class="file"># RUIM: código antes das dependências
+FROM node:22-alpine
+WORKDIR /app
+COPY . .                 ← muda toda hora (inclui o código)
+RUN npm install          ← cache quebrado a cada mudança de código
+CMD ["node", "server.js"]</pre>
+O <code>COPY . .</code> muda a cada edição, e tudo depois dele é refeito — o <code>npm install</code> de 45MB vai pro ralo a cada build.</div>
+
+<p>A ordem certa separa o que muda sempre do que muda pouco:</p>
+<pre class="file"># BOM: dependências primeiro, código por último
+FROM node:22-alpine
+WORKDIR /app
+COPY package*.json ./   ← muda só quando as dependências mudam
+RUN npm install         ← fica em cache na maioria dos builds
+COPY . .                ← o código muda toda hora, mas está no fim
+EXPOSE 3000
+CMD ["node", "server.js"]</pre>
+<p>Com essa ordem, trocar uma linha do <code>server.js</code> e rebuildar refaz <strong>só o último COPY</strong> — o <code>npm install</code> continua em cache. A aula <a href="dockerfile-copy-add.html">COPY, ADD e WORKDIR</a> mostrou essa mesma ordem no exemplo completo.</p>
+
+<div class="table-wrap">
+<table class="ref">
+<tr><th>O que muda</th><th>Com a ordem certa, o que é refeito</th></tr>
+<tr><td>Um arquivo de código (<code>server.js</code>)</td><td>Só o <code>COPY . .</code> final — build em segundos</td></tr>
+<tr><td>Uma dependência nova (<code>package.json</code>)</td><td>O <code>COPY package*.json</code>, o <code>RUN npm install</code> e o <code>COPY . .</code></td></tr>
+<tr><td>O Dockerfile inteiro (ex.: trocar a base)</td><td>Tudo, do <code>FROM</code> em diante</td></tr>
+<tr><td>Nada</td><td>Nada — tudo <code>Using cache</code></td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>Dependências de outras linguagens</h2>
+<p>A mesma lógica vale para qualquer linguagem — mude só o gerenciador e o arquivo de manifesto:</p>
+<pre class="file"># Python (pip)
+FROM python:3.12-slim
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY . .
+CMD ["python", "app.py"]</pre>
+<pre class="file"># Go (módulos)
+FROM golang:1.23-alpine AS build
+WORKDIR /app
+COPY go.mod go.sum ./     # manifesto primeiro!
+RUN go mod download
+COPY . .
+RUN go build -o app .</pre>
+
+<hr>
+
+<h2>Vendo as camadas: docker history</h2>
+<p>O comando <code>docker history</code> lista as camadas da imagem, da mais nova para a mais antiga, com o comando que gerou cada uma e o tamanho:</p>
+<pre class="term" data-cwd="~">$ docker history minha-api:1.0
+IMAGE          CREATED          CREATED BY                                      SIZE      COMMENT
+3c4d5e6f7a8b   2 minutes ago    COPY . .                                        12.4kB
+f6a1b2c3d4e5   2 minutes ago    RUN npm install                                 45.2MB
+b2c3d4e5f6a1   3 minutes ago    WORKDIR /app                                    0B
+d4e5f6a1b2c3   3 minutes ago    COPY package*.json ./                           2.1kB
+c3d4e5f6a1b2   3 minutes ago    node:22-alpine                                  189MB</pre>
+<p>Dá para ver claramente: a camada do <code>npm install</code> pesa 45MB, a do código só 12kB. Com <code>--no-trunc</code>, os IDs aparecem completos; com <code>-q</code>, só os IDs (útil em scripts). A aula <a href="image-dive.html">Analisando camadas (dive, docker history)</a> aprofunda a inspeção visual com a ferramenta <code>dive</code>.</p>
+
+<hr>
+
+<h2>Invalidando o cache de propósito</h2>
+<p>Às vezes você <strong>quer</strong> que um passo rode de novo — por exemplo, para baixar a imagem base atualizada ou refazer um <code>apt upgrade</code> de segurança:</p>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Situação</th><th>O que faz o cache</th></tr>
+<tr><td>Nada mudou no Dockerfile nem nos arquivos copiados</td><td>Todos os passos com <code>Using cache</code> — build em segundos.</td></tr>
+<tr><td>Você mudou uma instrução do Dockerfile</td><td>Essa instrução e <strong>todas as seguintes</strong> são refeitas.</td></tr>
+<tr><td>Você mudou um arquivo que um COPY usa</td><td>Aquele COPY e tudo depois dele são refeitos.</td></tr>
+<tr><td><code>docker build --no-cache …</code></td><td>Ignora o cache inteiro: todos os passos rodam de novo.</td></tr>
+<tr><td><code>docker build --pull …</code></td><td>Baixa a imagem base (FROM) atualizada antes de começar.</td></tr>
+<tr><td>Truque do <code>ARG CACHEBUST=1</code></td><td>Mudar o valor do ARG quebra o cache daquele ponto em diante (útil para forçar <code>apk upgrade</code>): <code>ARG CACHEBUST=1</code> + <code>RUN apk upgrade</code>, e no build: <code>--build-arg CACHEBUST=$(date +%s)</code>.</td></tr>
+</table>
+</div>
+<p>O cache mora em disco na máquina do Docker — dá para ver o quanto ele ocupa:</p>
+<pre class="term" data-cwd="~">$ docker system df
+TYPE            TOTAL     ACTIVE    SIZE      RECLAIMABLE
+Images          6         2         900MB     450MB (50%)
+Containers      3         1         15MB      10MB (66%)
+Local Volumes   2         1         1.2GB     600MB (50%)
+Build Cache     24        0         3.4GB     3.4GB</pre>
+
+<div class="try" data-goal="Build Cache" data-solucao="docker system df">
+<p class="try-task"><strong>Missão:</strong> rode <code>docker system df</code> no terminal abaixo e encontre a linha <code>Build Cache</code> — é o espaço que o cache dos builds ocupa em disco.</p>
+</div>
+
+<div class="try" data-goal="FINISHED" data-solucao="docker build --no-cache -t minha-api:1.0 .">
+<p class="try-task"><strong>Missão extra:</strong> force um build ignorando o cache: rode <code>docker build --no-cache -t minha-api:1.0 .</code> e veja o <code>FINISHED</code> no fim (no simulador, o --no-cache é aceito e o build roda inteiro).</p>
+</div>
+
+<hr>
+
+<h2>Erros e pegadinhas reais</h2>
+
+<div class="warn"><strong>ADD de URL quebra o cache sempre que a URL muda:</strong> <code>ADD https://…/arquivo.tar.gz /tmp/</code> faz o Docker baixar de novo se o conteúdo mudou — e como o conteúdo muda sem mudar a instrução, o cache daquele passo (e de tudo depois) cai. Se a URL não tem versão no nome, cada build baixa de novo. Prefira URLs com versão/tague no nome, ou <code>RUN curl</code> com arquitetura explícita.</div>
+
+<div class="warn"><strong>Mudar a ordem das instruções "só para organizar" refaz o build inteiro:</strong> reordenar linhas do Dockerfile muda as instruções de cada passo, e o cache só bate de passo em passo na mesma ordem. Mantenha a ordem estável; organize com comentários.</div>
+
+<div class="warn"><strong>O contexto inteiro é rehashado:</strong> mesmo com <code>COPY package.json</code> específico, o Docker calcula o hash de <strong>todo o contexto</strong> para o passo — por isso o .dockerignore (aula <a href="dockerignore.html">.dockerignore</a>) é o que deixa o cálculo rápido, não o COPY estreito.</div>
+
+<div class="warn"><strong>Variáveis de ambiente mudam o hash:</strong> se um <code>RUN</code> usa <code>$VERSAO</code> e o <code>ENV</code>/<code>ARG</code> mudou, aquele <code>RUN</code> (e tudo depois) é refeito — mesmo que o comando seja igual. É o comportamento esperado; só surprises quando a variável muda sem você perceber (ex.: <code>ARG</code> sem padrão recebendo valor do CI).</div>
+
+<hr>
+
+<h2>Referência rápida</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Comando / écrite</th><th>O que faz</th></tr>
+<tr><td>Uma instrução do Dockerfile = uma camada</td><td><code>RUN</code>, <code>COPY</code>, <code>ENV</code>… cada um vira uma camada só de leitura</td></tr>
+<tr><td><code>Using cache</code> / <code>CACHED</code></td><td>Passo reutilizado do build anterior</td></tr>
+<tr><td><code>docker history imagem</code></td><td>Lista as camadas, o comando de cada uma e o tamanho</td></tr>
+<tr><td><code>docker build --no-cache …</code></td><td>Ignora o cache inteiro</td></tr>
+<tr><td><code>docker build --pull …</code></td><td>Atualiza a imagem base antes do build</td></tr>
+<tr><td><code>ARG CACHEBUST=…</code> + <code>--build-arg</code></td><td>Quebra o cache num ponto específico de propósito</td></tr>
+<tr><td><code>docker system df</code></td><td>Mostra quanto o Build Cache ocupa em disco</td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>Quiz rápido</h2>
+
+<div class="mc" data-answer="2">
+<p class="mc-q">1. Por que cada instrução do Dockerfile vira uma camada separada?</p>
+<label><input type="radio" name="q1"> Porque o Docker gosta de arquivos separados</label>
+<label><input type="radio" name="q1"> Porque cada camada pode ser reutilizada pelo cache: se a instrução e seus arquivos não mudaram, o passo inteiro é pulado (<code>Using cache</code>)</label>
+<label><input type="radio" name="q1"> Porque camadas são mais bonitas no <code>docker history</code></label>
+<label><input type="radio" name="q1"> Não vira — a imagem é um bloco único</label>
+</div>
+
+<div class="mc" data-answer="3">
+<p class="mc-q">2. A Ana mudou só o <code>server.js</code>. Com a ordem certa do Dockerfile, o que acontece no rebuild?</p>
+<label><input type="radio" name="q2"> O build inteiro roda de novo, inclusive o <code>npm install</code></label>
+<label><input type="radio" name="q2"> Nada acontece, a imagem não muda</label>
+<label><input type="radio" name="q2"> Só o <code>COPY . .</code> final é refeito; o <code>npm install</code> fica em cache</label>
+<label><input type="radio" name="q2"> O cache é sempre ignorado quando qualquer arquivo muda</label>
+</div>
+
+<div class="mc" data-answer="4">
+<p class="mc-q">3. Se um passo do meio do Dockerfile muda, o que acontece com os passos depois dele?</p>
+<label><input type="radio" name="q3"> Continuam em cache normalmente</label>
+<label><input type="radio" name="q3"> Viram inválidos um a um, menos o último</label>
+<label><input type="radio" name="q3"> O build dá erro</label>
+<label><input type="radio" name="q3"> Todos são refeitos, porque cada camada depende da anterior</label>
+</div>
+
+<div class="mc" data-answer="1">
+<p class="mc-q">4. Qual comando mostra as camadas de uma imagem e o tamanho de cada uma?</p>
+<label><input type="radio" name="q4"> <code>docker history minha-api:1.0</code></label>
+<label><input type="radio" name="q4"> <code>docker layers</code></label>
+<label><input type="radio" name="q4"> <code>docker inspect --layers</code></label>
+<label><input type="radio" name="q4"> <code>docker ps --layers</code></label>
+</div>
+
+<hr>
+
+<h2>Resumo</h2>
+<ul>
+  <li>A imagem é uma pilha de <strong>camadas só de leitura</strong>, uma por instrução do Dockerfile; o container ganha uma camada <strong>gravável</strong> no topo, que some com o <code>docker rm</code>.</li>
+  <li>O cache compara cada passo: instrução igual + arquivos iguais → <code>Using cache</code> e o passo pula. Se um passo muda, ele e <strong>todos os seguintes</strong> são refeitos.</li>
+  <li>Ordem certa para cache: <code>FROM</code> → <code>WORKDIR</code> → <code>COPY manifests</code> → <code>RUN install</code> → <code>COPY . .</code> (código por último) → <code>EXPOSE</code>/<code>CMD</code>.</li>
+  <li><code>docker history</code> mostra as camadas e o peso de cada uma (a do install costuma ser a maior).</li>
+  <li>Para invalidar: <code>--no-cache</code> (tudo), <code>--pull</code> (só a base), ou <code>ARG CACHEBUST</code> (um ponto). O cache ocupa disco — veja em <code>docker system df</code> na linha <code>Build Cache</code>.</li>
+  <li>O contexto inteiro é rehashado a cada build — por isso o <a href="dockerignore.html">.dockerignore</a> também deixa o cache mais rápido.</li>
+</ul>
+
+<div class="tip"><strong>Próxima aula:</strong> <a href="volumes-tipos.html">Volumes nomeados, bind mounts e tmpfs</a> — como fazer os dados do container sobreviverem, agora que você já sabe criar imagens.</div>
+
+<div class="pager"></div>
+
+</div>
+</main>
+</div>
+<script src="assets/site.js?v=4"></script>
+</body>
+</html>

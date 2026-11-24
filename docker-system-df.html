@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>docker system df — espaço em disco do Docker | Guia Docker</title>
+<meta name="description" content="Onde o Docker gasta espaço em disco (imagens, containers, volumes e build cache em /var/lib/docker), como ler a tabela do docker system df (TYPE, TOTAL, ACTIVE, SIZE e RECLAIMABLE), o modo detalhado docker system df -v, --format com templates Go para filtrar a saída, a diferença entre docker system df e df -h, e quando vale a pena limpar.">
+<link rel="stylesheet" href="assets/style.css?v=4">
+<script>try{var t=localStorage.getItem("tema");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<meta http-equiv="Cache-Control" content="no-store, must-revalidate">
+<script>try{history.scrollRestoration="manual"}catch(e){}(function(){var n=0;function t(){window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;if(++n<60)setTimeout(t,50)}t();window.addEventListener("pagehide",function(){window.scrollTo(0,0);document.documentElement.scrollTop=0;});window.addEventListener("pageshow",function(){window.scrollTo(0,0)});window.addEventListener("load",function(){window.scrollTo(0,0)});})();document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(a){var h=a.getAttribute("href")||"";if(/[.]html($|[?#])/.test(h)&&a.host===location.host){window.scrollTo(0,0);document.documentElement.scrollTop=0;}}});</script>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" id="sidebar" aria-label="Tópicos"></nav>
+<main class="main">
+<div class="content">
+
+<div class="pager"></div>
+
+<h1><span class="hl">docker system df</span> — onde o Docker gasta espaço</h1>
+
+<p class="intro">Imagens, containers parados, volumes e cache de build vão se acumulando no disco. O <code>docker system df</code> mostra, numa tabela só, <strong>quanto o Docker está ocupando e quanto dá para recuperar</strong> — diferente do <code>df -h</code>, que mostra o disco inteiro. É o primeiro comando que se roda quando o notebook da Ana começa a dizer "disco cheio".</p>
+
+<div class="note">
+<strong>Você vai aprender</strong>
+<ul>
+  <li>Onde o Docker guarda os dados (<code>/var/lib/docker</code>).</li>
+  <li>Ler a tabela do <code>docker system df</code>: <code>TYPE</code>, <code>TOTAL</code>, <code>ACTIVE</code>, <code>SIZE</code> e <code>RECLAIMABLE</code>.</li>
+  <li>O modo detalhado <code>docker system df -v</code> (objeto por objeto) e imagens <em>dangling</em>.</li>
+  <li><code>--format</code> com templates Go para imprimir só o que interessa.</li>
+  <li>A diferença entre <code>docker system df</code> e <code>df -h</code> — e quando limpar.</li>
+</ul>
+</div>
+
+<hr>
+
+<h2>A história: o disco da Ana encheu</h2>
+<p>Numa segunda-feira, o <code>ana@notebook</code> começou a reclamar: o editor de texto decía "espaço insuficiente para salvar" e o navegador mostrava páginas pela metade. A Ana abriu o terminal e olhou o disco inteiro:</p>
+<pre class="term">$ df -h
+Filesystem      Size  Used Avail Use% Mounted on
+/dev/nvme0n1p2  98G   91G  2,1G  98% /</pre>
+<p>O disco está quase cheio — mas <em>quem</em> encheu? O sistema operacional? As fotos? O Docker? É aí que entra o <code>docker system df</code>, que olha <strong>só para dentro da gaveta do Docker</strong>:</p>
+<pre class="term">$ docker system df
+TYPE            TOTAL     ACTIVE    SIZE      RECLAIMABLE
+Images          6         2         874MB     512MB (58%)
+Containers      3         2         12.4MB    6.2MB (50%)
+Local Volumes   2         1         245MB     120MB (48%)
+Build Cache     41        0         1.84GB    1.84GB</pre>
+<p>Olhando as duas saídas juntas, a culpa é clara: de 91GB usados no disco, quase 3GB são do Docker (874MB de imagens + 1,84GB de cache de build + volumes) — e a coluna <strong>RECLAIMABLE</strong> diz que dá para recuperar boa parte disso com segurança. A próxima aula (<a href="docker-system-prune.html">docker system prune</a>) mostra a faxina.</p>
+
+<hr>
+
+<h2>Onde o Docker guarda as coisas</h2>
+<p>Por padrão (no Linux), tudo fica em <code>/var/lib/docker</code>:</p>
+<pre class="file" data-file="/var/lib/docker/">/var/lib/docker/
+├── image/       ← as imagens e suas camadas (overlay2)
+├── containers/  ← a camada gravável de cada container
+├── volumes/     ← os volumes nomeados (dados de banco, por exemplo)
+├── buildkit/    ← o cache do docker build
+├── network/     ← as redes
+└── overlay2/    ← as camadas das imagens e dos containers</pre>
+<p>Cada pasta dessa vira uma linha (<code>TYPE</code>) na tabela do <code>docker system df</code>. Dá para confirmar com o <code>du</code> (disk usage):</p>
+<pre class="term">$ sudo du -sh /var/lib/docker
+2.9G    /var/lib/docker
+$ sudo du -sh /var/lib/docker/* | sort -h
+12M     /var/lib/docker/containers
+245M    /var/lib/docker/volumes
+874M    /var/lib/docker/image
+1.8G    /var/lib/docker/buildkit</pre>
+<p>No macOS e no Windows (Docker Desktop), esses arquivos não ficam soltos no sistema: ficam dentro de uma VM/arquivo de disco virtual do próprio Docker Desktop — mas o <code>docker system df</code> continua valendo do mesmo jeito, porque ele pergunta para o daemon, não para o filesystem.</p>
+
+<hr>
+
+<h2>O comando</h2>
+<div class="try" data-goal="RECLAIMABLE" data-solucao="docker system df">
+<p class="try-task"><strong>Missão:</strong> rode <code>docker system df</code> no terminal e encontre a coluna <code>RECLAIMABLE</code> — o quanto dá para recuperar.</p>
+</div>
+
+<pre class="term">$ docker system df
+TYPE            TOTAL     ACTIVE    SIZE      RECLAIMABLE
+Images          6         2         874MB     512MB (58%)
+Containers      3         2         12.4MB    6.2MB (50%)
+Local Volumes   2         1         245MB     120MB (48%)
+Build Cache     41        0         1.84GB    1.84GB</pre>
+
+<dl class="anatomy">
+  <dt>docker system</dt><dd>a família de comandos de administração do Docker (ver <code>docker system --help</code>).</dd>
+  <dt>df</dt><dd><em>disk free</em>: mostra o uso de espaço — aqui, <strong>só do Docker</strong>, não do disco inteiro.</dd>
+  <dt>-v</dt><dd><em>verbose</em>: lista cada objeto individualmente (veremos já).</dd>
+  <dt>--format</dt><dd>imprime a saída com um template Go (veremos já também).</dd>
+</dl>
+
+<hr>
+
+<h2>As colunas, uma a uma</h2>
+<dl class="anatomy">
+  <dt>TYPE</dt><dd>O tipo de objeto: <code>Images</code>, <code>Containers</code>, <code>Local Volumes</code> ou <code>Build Cache</code>.</dd>
+  <dt>TOTAL</dt><dd>Quantos objetos existem desse tipo (6 imagens, 3 containers, 2 volumes, 41 itens de cache).</dd>
+  <dt>ACTIVE</dt><dd>Quantos estão <strong>em uso agora</strong>: imagem usada por algum container, container existente (rodando ou parado), volume anexado a algum container. No exemplo: 2 imagens em uso (as outras 4 estão órfãs), 2 containers ativos.</dd>
+  <dt>SIZE</dt><dd>Espaço total ocupado por esse tipo, <strong>contando camadas compartilhadas</strong> uma vez só por objeto.</dd>
+  <dt>RECLAIMABLE</dt><dd><strong>Quanto dá para apagar com segurança</strong> — a coluna que interessa na hora da limpeza. Se está em 100%, tudo daquele tipo pode ir embora sem afetar nada que esteja rodando.</dd>
+</dl>
+<p>Um detalhe importante: imagens compartilham camadas. Se <code>nginx:alpine</code> e a imagem da Ana usam as mesmas camadas base, o espaço delas não é contado duas vezes na hora de apagar — é por isso que <code>RECLAIMABLE</code> de imagens pode ser menor que <code>SIZE</code>.</p>
+
+<hr>
+
+<h2>-v: o detalhado, objeto por objeto</h2>
+<p>Com <code>-v</code> (ou <code>--verbose</code>), o comando lista cada imagem, container, volume e item de cache individualmente, com o tamanho único de cada um (<code>UNIQUE SIZE</code>) e se a camada é compartilhada (<code>SHARED SIZE</code>):</p>
+<pre class="term">$ docker system df -v
+Images Space Usage:
+
+REPOSITORY   TAG          IMAGE ID       CREATED       SIZE      SHARED SIZE   UNIQUE SIZE   TOTAL SIZE   CONTAINERS
+nginx        alpine       b2c3d4e5f6a1   5 days ago    48.2MB    0B            48.2MB        48.2MB       2
+node         22-alpine    c3d4e5f6a1b2   1 week ago    189MB     0B            189MB         189MB        1
+postgres     16-alpine    d4e5f6a1b2c3   3 days ago    245MB     245MB         0B            245MB        1
+&lt;none&gt;       &lt;none&gt;       e5f6a1b2c3d4   2 weeks ago   132MB     132MB         0B            132MB        0
+
+Containers Space Usage:
+
+CONTAINER ID   IMAGE          COMMAND                  LOCAL VOLUMES   SIZE      CREATED          STATUS             NAMES
+a1b2c3d4e5f6   nginx:alpine   "/docker-entrypoint.…"   0               1.2kB     10 minutes ago   Up 10 minutes      web
+c3d4e5f6a1b2   hello-world    "/hello"                 0               0B        2 hours ago      Exited (0) 2 hours   wizardly_curie
+f6a1b2c3d4e5   node:22-alpine "node server.js"         1               4.1kB     3 days ago       Exited (137) 3 days  api
+
+Local Volumes Space Usage:
+
+NAME               SIZE
+dados-postgres     245MB
+
+Build Cache Usage:
+
+CACHE ID   CACHE TYPE   SIZE      CREATED AT              LAST USED AT            USAGE   SHARED
+abc123…    regular      412MB     2 weeks ago             2 weeks ago             0       false
+…</pre>
+<p>Repare na imagem <code>&lt;none&gt;: &lt;none&gt;</code>: ela é uma imagem <strong>dangling</strong> ("órfã", sem tag) — sobrou de um build antigo cuja tag foi sobrescrita e que nenhum container usa (repare na coluna <code>CONTAINERS</code> = 0). É candidata certa à limpeza. O mesmo vale para o container <code>wizardly_curie</code> (parado há 2 horas) e para o cache de build inteiro (100% recuperável).</p>
+
+<hr>
+
+<h2>--format: filtrar a saída com templates Go</h2>
+<p>Assim como o <code>docker inspect --format</code> (aula <a href="docker-inspect.html">docker inspect</a>), o <code>docker system df</code> aceita <code>--format</code> com <strong>templates Go</strong>. Os campos disponíveis são <code>{{.Type}}</code>, <code>{{.TotalCount}}</code>, <code>{{.Active}}</code>, <code>{{.Size}}</code> e <code>{{.Reclaimable}}</code>:</p>
+<pre class="term">$ docker system df --format "{{.Type}}: ocupa {{.Size}}, libera {{.Reclaimable}}"
+Images: ocupa 874MB, libera 512MB (58%)
+Containers: ocupa 12.4MB, libera 6.2MB (50%)
+Local Volumes: ocupa 245MB, libera 120MB (48%)
+Build Cache: ocupa 1.84GB, libera 1.84GB
+$ docker system df --format "table {{.Type}}\t{{.Active}}/{{.TotalCount}}\t{{.Reclaimable}}"
+TYPE            ACTIVE/TOTAL   RECLAIMABLE
+Images          2/6            512MB (58%)
+Containers      2/3            6.2MB (50%)</pre>
+<p>O prefixo <code>table</code> imprime com cabeçalho e colunas alinhadas; sem ele, cada linha sai como você mandou. Útil em scripts — por exemplo, um alerta simples:</p>
+<pre class="term">$ docker system df --format "{{.Type}} {{.Reclaimable}}" | grep -i "100%" && echo "ALERTA: há 100% recuperável — rode docker system prune"</pre>
+
+<hr>
+
+<h2>docker system df × df -h</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th></th><th><code>df -h</code></th><th><code>docker system df</code></th></tr>
+<tr><td>O que mostra</td><td>O disco/partição inteira (a raiz <code>/</code>), incluindo o sistema operacional e os arquivos dele.</td><td>Só o que é do Docker (imagens, containers, volumes, cache).</td></tr>
+<tr><td>Onde mora</td><td>Em qualquer lugar — é o filesystem do Linux.</td><td>Em <code>/var/lib/docker</code> (Linux) ou dentro da VM do Docker Desktop (macOS/Windows).</td></tr>
+<tr><td>Para que serve</td><td>Ver se o disco está cheio, não importa o motivo.</td><td>Ver se o <em>Docker</em> é o culpado pelo disco cheio e quanto dá para recuperar.</td></tr>
+<tr><td>Complemento</td><td><code>du -sh /var/lib/docker</code> vê o tamanho real da pasta no disco.</td><td><code>docker system df -v</code> detalha objeto por objeto.</td></tr>
+</table>
+</div>
+<p>Se o <code>df -h</code> mostra o disco cheio, rode <code>docker system df</code> em seguida: se a coluna <code>RECLAIMABLE</code> estiver grande, o Docker é o responsável — e a próxima aula, <a href="docker-system-prune.html">docker system prune</a>, mostra como limpar.</p>
+<div class="warn"><strong>Erro real quando o disco enche durante um build ou pull:</strong>
+<pre class="term">$ docker build -t minhaapp .
+…
+error: failed to register layer: write /var/lib/docker/overlay2/…: no space left on device</pre>
+O build não termina porque o disco lotou — e o vilão quase sempre é o <code>Build Cache</code> ou imagens antigas. Veja a coluna <code>RECLAIMABLE</code> do <code>docker system df</code>, rode <code>docker system prune -f</code> e tente o build de novo. Se precisar, mude a pasta do Docker (<code>data-root</code> no <code>/etc/docker/daemon.json</code>) para outro disco. Mais casos em <a href="problemas.html">Erros Comuns e Soluções</a>.</div>
+
+<hr>
+
+<h2>Quando faz sentido limpar</h2>
+<p>Olhe sempre a coluna <strong>RECLAIMABLE</strong>: é o espaço que o Docker pode devolver sem machucar nada que esteja em uso. Regra prática:</p>
+<ul>
+  <li><code>Containers</code> recuperável → há containers parados que podem ser removidos.</li>
+  <li><code>Images</code> parcialmente recuperável → há imagens sem nenhum container usando (dangling ou não).</li>
+  <li><code>Build Cache</code> grande e 100% → builds antigos acumulando espaço; em máquina de desenvolvimento, é comum ver vários GB aqui.</li>
+  <li><code>Local Volumes</code> recuperável → há volumes órfãos. <strong>Cuidado redobrado:</strong> volume apagado não tem lixeira — só limpe volume se tiver certeza de que não há dados importantes (banco de teste, por exemplo).</li>
+</ul>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Sinal no docker system df</th><th>Diagnóstico</th><th>Próximo passo</th></tr>
+<tr><td><code>Build Cache</code> com vários GB e 100% recuperável</td><td>Builds antigos acumulando</td><td><code>docker system prune</code> (limpa o cache dangling) ou <code>docker builder prune</code></td></tr>
+<tr><td><code>Images</code> com RECLAIMABLE alto</td><td>Imagens órfãs/dangling de projetos antigos</td><td><code>docker image prune -a</code> (cuidado: apaga tudo que não está em uso)</td></tr>
+<tr><td><code>Containers</code> parado(s) há dias</td><td>Containers esquecidos</td><td><code>docker container prune</code></td></tr>
+<tr><td><code>Local Volumes</code> recuperável</td><td>Volumes de projetos já apagados</td><td>Conferir com <code>docker volume ls</code> e <code>docker system df -v</code> antes de apagar</td></tr>
+<tr><td>RECLAIMABLE baixo em tudo</td><td>O Docker não é o culpado do disco cheio</td><td>Voltar ao <code>df -h</code> e investigar outras pastas (<code>du -sh ~/*</code>)</td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>Quiz rápido</h2>
+<div class="mc" data-answer="3">
+<p class="mc-q">1. Na tabela do <code>docker system df</code>, o que significa a coluna <code>RECLAIMABLE</code>?</p>
+<label><input type="radio" name="q1"> O espaço total do disco da máquina</label>
+<label><input type="radio" name="q1"> O espaço que o Docker está usando agora</label>
+<label><input type="radio" name="q1"> O espaço que dá para apagar com segurança, sem afetar nada em uso</label>
+<label><input type="radio" name="q1"> O espaço livre que falta no disco</label>
+</div>
+
+<div class="mc" data-answer="2">
+<p class="mc-q">2. Qual a diferença entre <code>df -h</code> e <code>docker system df</code>?</p>
+<label><input type="radio" name="q2"> Nenhuma, são sinônimos</label>
+<label><input type="radio" name="q2"> <code>df -h</code> mostra o disco inteiro; <code>docker system df</code> mostra só o que é do Docker (imagens, containers, volumes, cache)</label>
+<label><input type="radio" name="q2"> <code>df -h</code> é só para SSD; <code>docker system df</code> é só para HD</label>
+<label><input type="radio" name="q2"> <code>docker system df</code> mostra espaço em RAM</label>
+</div>
+
+<div class="mc" data-answer="1">
+<p class="mc-q">3. O que é uma imagem <code>&lt;none&gt;: &lt;none&gt;</code> (dangling)?</p>
+<label><input type="radio" name="q3"> Uma imagem sem tag, "órfã", que sobrou de um build antigo e nenhum container usa</label>
+<label><input type="radio" name="q3"> A imagem oficial do Docker Hub</label>
+<label><input type="radio" name="q3"> Um container que não conseguiu subir</label>
+<label><input type="radio" name="q3"> Um volume vazio</label>
+</div>
+
+<hr>
+
+<h2>Resumo</h2>
+<ul>
+  <li>O Docker guarda tudo em <code>/var/lib/docker</code> (Linux): <code>image/</code>, <code>containers/</code>, <code>volumes/</code>, <code>buildkit/</code> (cache) etc.</li>
+  <li><code>docker system df</code> resume isso em 4 linhas: <code>Images</code>, <code>Containers</code>, <code>Local Volumes</code>, <code>Build Cache</code>.</li>
+  <li>Colunas: <code>TOTAL</code> (quantos existem), <code>ACTIVE</code> (quantos em uso), <code>SIZE</code> (espaço total), <code>RECLAIMABLE</code> (quanto dá para recuperar com segurança).</li>
+  <li><code>-v</code> detalha objeto por objeto e revela as imagens <code>&lt;none&gt;</code> (dangling) e os containers parados.</li>
+  <li><code>--format "{{.Type}}: {{.Reclaimable}}"</code> usa templates Go para imprimir só o campo desejado (bom para scripts).</li>
+  <li><code>df -h</code> vê o disco inteiro; <code>docker system df</code> responde "o Docker é o culpado? quanto dá para limpar?".</li>
+</ul>
+
+<div class="tip"><strong>Próxima aula:</strong> <a href="docker-system-prune.html">docker system prune: limpar tudo</a> — como recuperar esse espaço com um comando só.</div>
+
+</div>
+</main>
+</div>
+<script src="assets/site.js?v=4"></script>
+</body>
+</html>

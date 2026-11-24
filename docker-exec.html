@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>docker exec — rodando comandos num container que já está rodando | Guia Docker</title>
+<meta name="description" content="Como usar docker exec para rodar um comando dentro de um container já rodando: -it para shell interativo, exemplos com echo, ls, cat, ps dentro do container, a diferença entre docker run (cria novo) e docker exec (usa existente), os erros reais (container parado: 'is not running'; container inexistente: 'No such container') e docker exec -u para trocar de usuário. Missões no simulador.">
+<link rel="stylesheet" href="assets/style.css?v=4">
+<script>try{var t=localStorage.getItem("tema");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<meta http-equiv="Cache-Control" content="no-store, must-revalidate">
+<script>try{history.scrollRestoration="manual"}catch(e){}(function(){var n=0;function t(){window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;if(++n<60)setTimeout(t,50)}t();window.addEventListener("pagehide",function(){window.scrollTo(0,0);document.documentElement.scrollTop=0;});window.addEventListener("pageshow",function(){window.scrollTo(0,0)});window.addEventListener("load",function(){window.scrollTo(0,0)});})();document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(a){var h=a.getAttribute("href")||"";if(/[.]html($|[?#])/.test(h)&&a.host===location.host){window.scrollTo(0,0);document.documentElement.scrollTop=0;}}});</script>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" id="sidebar" aria-label="Tópicos"></nav>
+<main class="main">
+<div class="content">
+
+<div class="pager"></div>
+
+<h1>docker <span class="hl">exec</span></h1>
+
+<p class="intro"><code>docker run</code> cria um container <strong>novo</strong>. O <code>docker exec</code> roda um comando num container que <strong>já está rodando</strong>. É a diferença entre "abrir um programa novo" e "digitar um comando na janela que já está aberta".</p>
+
+<div class="note">
+<strong>Você vai aprender</strong>
+<ul>
+  <li><code>docker exec NOME comando</code>: rodar um comando ponctual num container no ar.</li>
+  <li><code>docker exec -it NOME sh</code>: abrir um shell interativo dentro dele.</li>
+  <li>A diferença entre <code>run</code> (novo) e <code>exec</code> (existente).</li>
+  <li>Erros reais: container parado (<code>is not running</code>) e inexistente (<code>No such container</code>).</li>
+  <li><code>-e</code> (variável só nesse comando) e <code>-u</code> (trocar de usuário).</li>
+</ul>
+</div>
+
+<hr>
+
+<h2>A cena: a Ana quer fuçar o Nginx que está no ar</h2>
+<pre class="term">$ docker run -d --name web nginx:alpine
+$ docker ps
+… Up 10 seconds   web</pre>
+<p>Em vez de criar outro container, ela entra no <code>web</code> com exec.</p>
+
+<hr>
+
+<h2>Um comando rápido</h2>
+<div class="try" data-goal="(exec:" data-solucao="docker exec web echo olá"><p class="try-task"><strong>Missão:</strong> rode <code>docker exec web echo olá</code> num container nginx rodando.</p></div>
+<pre class="term">$ docker exec web echo "olá do lado de dentro"
+olá do lado de dentro
+$ docker exec web ls /etc/nginx
+conf.d  fastcgi_params  mime.types  modules  nginx.conf  scgi_params  uwsgi_params
+$ docker exec web cat /etc/nginx/nginx.conf
+user  nginx;
+worker_processes  auto;
+…         « o arquivo de configuração, lido de dentro do container</pre>
+
+<dl class="anatomy">
+  <dt>docker exec web echo olá</dt><dd>"Rode <code>echo olá</code> dentro do container <code>web</code> e me mostre a saída".</dd>
+  <dt>web</dt><dd>O container (nome ou ID curto) — precisa estar <strong>rodando</strong>.</dd>
+  <dt>echo olá</dt><dd>O comando + argumentos, exatamente como você digitaria lá dentro.</dd>
+</dl>
+
+<p>Útil para: ver um arquivo de configuração, checar uma variável, rodar um teste, disparar um comando administrativo (ex.: <code>docker exec banco psql -U ana -c "SELECT 1"</code>).</p>
+
+<hr>
+
+<h2>Shell interativo: -it no exec</h2>
+<p>Com <code>-it</code>, em vez de um comando único, você abre um <strong>shell dentro do container que já existe</strong> — e sair dele não para o container:</p>
+<pre class="term">$ docker exec -it web sh
+/ # ls /
+bin  boot  dev  docker-entrypoint.d  docker-entrypoint.sh  etc  home  …
+/ # ps aux          « os processos rodando DENTRO do container
+PID   USER   COMMAND
+  1   root   nginx: master process nginx -g daemon off;
+ 31   nginx  nginx: worker process
+/ # cat /etc/os-release
+NAME="Alpine Linux" …
+/ # exit            « sai do shell; o container CONTINUA rodando</pre>
+<pre class="term">$ docker ps
+… Up 5 minutes   web    « continua no ar ✅</pre>
+
+<div class="try" data-goal="shell interativo" data-solucao="docker exec -it web sh">
+<p class="try-task"><strong>Missão:</strong> abra um shell dentro do container <code>web</code>: <code>docker exec -it web sh</code> (no simulador aparece a mensagem de shell interativo; no Docker real você estaría dentro).</p>
+</div>
+
+<hr>
+
+<h2>run × exec: a tabela</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th></th><th>docker run</th><th>docker exec</th></tr>
+<tr><td>Cria container novo?</td><td><strong>Sim</strong></td><td>Não (usa um existente)</td></tr>
+<tr><td>Precisa estar rodando?</td><td>Ele mesmo nasce rodando</td><td><strong>Sim</strong>, o alvo precisa estar Up</td></tr>
+<tr><td>Quando usar</td><td>Para subir um serviço</td><td>Para debugar, fuçar, rodar um comando ponctual</td></tr>
+<tr><td>Exemplo</td><td><code>docker run -d --name web nginx</code></td><td><code>docker exec web nginx -t</code> (testa a config)</td></tr>
+<tr><td>Sai e o container…</td><td>—</td><td><strong>continua rodando</strong> (se você não rodou o processo principal)</td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>Variações úteis</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Comando</th><th>O que faz</th></tr>
+<tr><td><code>docker exec web date</code></td><td>Roda <code>date</code> dentro do container e mostra a saída (e a hora de lá).</td></tr>
+<tr><td><code>docker exec -d web comando</code></td><td>Roda em segundo plano (detach) dentro do container.</td></tr>
+<tr><td><code>docker exec -e VAR=valor web printenv VAR</code></td><td>Passa uma variável de ambiente só para esse comando.</td></tr>
+<tr><td><code>docker exec -u root web id</code> / <code>-u 1000</code></td><td>Roda como outro usuário (padrão: o usuário definido na imagem, souvent root).</td></tr>
+<tr><td><code>docker exec -w /app web ls</code></td><td>Define o diretório de trabalho dentro do container (<code>-w</code>).</td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>Erros reais</h2>
+<div class="try" data-goal="is not running" data-solucao="docker exec web date">
+<p class="try-task"><strong>Missão:</strong> pare o container (<code>docker stop web</code>) e depois tente <code>docker exec web date</code> — veja o erro de container parado.</p>
+</div>
+<pre class="term">$ docker stop web
+web
+$ docker exec web date
+Error response from daemon: Container web is not running</pre>
+
+<div class="warning">
+<strong>Container parado não aceita exec</strong>
+<p>O <code>exec</code> precisa de um container <strong>rodando</strong> (ele cria um processo novo dentro dele). Se o container está parado, ou dá <code>docker start</code> nele, ou (se era um teste) rode de novo com <code>docker run</code>. Mensagem real: <code>Container X is not running</code>.</p>
+</div>
+
+<div class="warning">
+<strong>Container inexistente</strong>
+<pre class="term">$ docker exec nao-existe ls
+Error response from daemon: No such container: nao-existe</pre>
+<p>Nome errado ou já apagado — confira com <code>docker ps -a</code>.</p>
+</div>
+
+<div class="warning">
+<strong>Comando que não existe dentro do container</strong>
+<pre class="term">$ docker exec web comando-que-nao-existe
+OCI runtime exec failed: exec: "comando-que-nao-existe": executable file not found in $PATH: unknown</pre>
+<p>A imagem Alpine é mínima: nem sempre tem o comando que você espera (ex.: <code>curl</code> não vem no alpine padrão). Instale na hora (<code>apk add curl</code>) ou use uma imagem maior.</p>
+</div>
+
+<div class="mc" data-answer="2">
+<p class="mc-q">Qual a diferença entre <code>docker run</code> e <code>docker exec</code>?</p>
+<label><input type="radio" name="q1"> Nenhuma, são apelidos</label>
+<label><input type="radio" name="q1"> run cria e inicia um container NOVO; exec roda um comando num container que JÁ está rodando</label>
+<label><input type="radio" name="q1"> run apaga o container; exec cria</label>
+<label><input type="radio" name="q1"> run é para imagens; exec é para volumes</label>
+</div>
+
+<div class="mc" data-answer="3">
+<p class="mc-q">Por que <code>docker exec web date</code> deu "Container web is not running"?</p>
+<label><input type="radio" name="q2"> Porque o comando date não existe</label>
+<label><input type="radio" name="q2"> Porque a imagem web está corrompida</label>
+<label><input type="radio" name="q2"> Porque o container web está PARADO — exec só funciona em container rodando</label>
+<label><input type="radio" name="q2"> Porque faltou o -it</label>
+</div>
+
+<div class="mc" data-answer="1">
+<p class="mc-q">Para abrir um shell dentro de um container que já está no ar, o comando é:</p>
+<label><input type="radio" name="q3"> <code>docker exec -it web sh</code></label>
+<label><input type="radio" name="q3"> <code>docker run web sh</code></label>
+<label><input type="radio" name="q3"> <code>docker attach web</code> com -d</label>
+<label><input type="radio" name="q3"> <code>docker logs -it web</code></label>
+</div>
+
+<hr>
+
+<h2>Exec no dia a dia: para que a Ana usa</h2>
+<ul>
+  <li><strong>Testar a configuração antes de reiniciar</strong>: <code>docker exec web nginx -t</code> — o Nginx testa o <code>nginx.conf</code> e diz se tem erro; se tiver, você corrige <em>antes</em> do <code>docker restart web</code> quebrar o site.</li>
+  <li><strong>Entrar no banco para uma query rápida</strong>: <code>docker exec -it banco psql -U ana -d minha_loja -c "SELECT count(*) FROM produtos;"</code>.</li>
+  <li><strong>Backup de banco</strong>: <code>docker exec banco pg_dump -U ana minha_loja &gt; backup.sql</code> (o <code>&gt;</code> redireciona para um arquivo <em>da sua máquina</em>, não do container).</li>
+  <li><strong>Ver se o container enxerga outro serviço</strong> (rede interna): <code>docker exec web ping banco</code> ou <code>docker exec web wget -qO- http://banco:5432</code>.</li>
+  <li><strong>Checar processos e memória dentro dele</strong>: <code>docker exec web ps aux</code>, <code>docker exec web free -m</code>.</li>
+  <li><strong>Rodar uma tarefa ponctual</strong> (migração, seed, limpeza): <code>docker exec api node scripts/limpa-cache.js</code>.</li>
+</ul>
+
+<h3>Exec dentro de projetos Compose</h3>
+<p>Quando o projeto sobe com <code>docker compose up</code> (nível 2), os containers ganham nomes previsíveis (<code>meuprojeto-web-1</code>, <code>meuprojeto-db-1</code>) e o exec funciona igual:</p>
+<pre class="term">$ docker compose ps
+NAME              STATUS    PORTS
+meuprojeto-web-1  Up        0.0.0.0:8080->80/tcp
+meuprojeto-db-1   Up        5432/tcp
+$ docker exec meuprojeto-db-1 psql -U ana -c "SELECT 1"
+?column?
+ 1</pre>
+
+<div class="warning">
+<strong>Não "conserte na mão" dentro de container de produção</strong>
+<p>O exec é ótimo para investigar, mas qualquer mudança feita dentro de um container (arquivo editado, pacote instalado) <strong>some quando o container for recriado</strong> — e em produção containers são recriados o tempo todo. A regra: investigue com exec, mas aplique a correção na <strong>imagem</strong> (Dockerfile) e redeploy. A exceção: dados em <a href="volumes-intro.html">volumes</a> persistem de verdade.</p>
+</div>
+
+<hr>
+
+<h2>Exec em cadeia e em scripts</h2>
+<p>Como o <code>exec</code> devolve a saída na tela, dá para usar em scripts e encadear comandos:</p>
+<pre class="term">$ docker exec web hostname
+f3a1b2c3d4e5
+$ docker exec api node -e "console.log(process.version)"
+v22.11.0                       « a versão do Node DENTRO do container
+$ docker exec banco pg_dump -U postgres loja > backup-$(date +%F).sql   « backup com data no nome
+$ for c in $(docker ps -q); do docker exec $c sh -c "echo $c: $(date)"; done   « roda em todos os rodando</pre>
+
+<h3>Copiar arquivo com docker cp</h3>
+<pre class="term">$ docker cp ./config.json web:/etc/nginx/conf.d/   « manda arquivo para dentro do container rodando
+$ docker cp web:/var/log/nginx/access.log ./logs/   « traz arquivo de dentro para sua máquina</pre>
+<p>Funciona com container rodando <em>ou parado</em> — diferente do exec.</p>
+
+<div class="warning">
+<strong>exec não muda a imagem</strong>
+<p>Se você entrar num container e instalar um pacote (<code>apk add curl</code>), rodar um apt, ou editar um arquivo, essa mudança vale <strong>só naquele container</strong>. Se ele for apagado e recriado, a mudança some. Para mudança permanente: altere o Dockerfile e rebuild (nível 2).</p>
+</div>
+
+<hr>
+
+<h2>Exit code do exec (útil em scripts)</h2>
+<p>O <code>docker exec</code> devolve o <strong>código de saída do comando</strong> que rodou dentro do container — dá para usar em condicionais:</p>
+<pre class="term">$ docker exec web test -f /etc/nginx/nginx.conf && echo "config existe"
+config existe
+$ docker exec web nginx -t; echo "codigo: $?"
+nginx: the configuration file … syntax is ok
+codigo: 0
+$ docker exec api node -e "process.exit(3)"; echo "codigo: $?"
+codigo: 3                       « o código 3 veio de dentro do container</pre>
+
+<h3>Variáveis só para aquele exec</h3>
+<pre class="term">$ docker exec -e MODO=teste api node -e "console.log(process.env.MODO)"
+teste</pre>
+
+<hr>
+
+<h2>exec com shell encadeado (vários comandos)</h2>
+<p>Para rodar vários comandos de uma vez dentro do container, passe um <code>sh -c</code> com o conjunto:</p>
+<pre class="term">$ docker exec web sh -c "ls /etc/nginx &amp;&amp; nginx -v &amp;&amp; ps aux | head -3"
+conf.d  fastcgi_params  mime.types  modules  nginx.conf  scgi_params  uwsgi_params
+nginx version: nginx/1.27.3
+PID   USER   COMMAND
+  1   root   nginx: master process nginx -g daemon off;</pre>
+<p>O <code>sh -c "…"</code> abre um shell dentro do container, roda tudo e sai — sem precisar de <code>-it</code>.</p>
+
+<hr>
+
+<h2>Quando usar exec vs recriar o container</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Situação</th><th>Melhor caminho</th></tr>
+<tr><td>Ver um arquivo, rodar um teste, uma query rápida</td><td><code>docker exec</code> ✅</td></tr>
+<tr><td>Mudar configuração que já está na imagem (ex.: instalar pacote, trocar arquivo de config padrão)</td><td>Recriar com a imagem nova (Dockerfile) — mudança no exec não persiste</td></tr>
+<tr><td>Container caiu e você quer saber por quê</td><td><code>docker logs</code> primeiro; se precisar fuçar com ele parado, <code>docker run --rm -it … sh</code> em vez de start</td></tr>
+<tr><td>Precisa entrar várias vezes no mesmo container</td><td><code>docker exec -it X sh</code> quantas vezes quiser — o container segue Up</td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>Resumo</h2>
+<ul>
+  <li><code>docker exec NOME comando</code> roda um comando dentro de um container <strong>que já está rodando</strong> e mostra a saída.</li>
+  <li><code>docker exec -it NOME sh</code> abre um shell interativo lá dentro; ao sair (<code>exit</code>), o container continua no ar.</li>
+  <li><code>run</code> = container novo; <code>exec</code> = comando num existente. <code>attach</code> = grudar na saída do processo principal de um que já roda.</li>
+  <li>Variações: <code>-d</code> (segundo plano), <code>-e VAR=…</code>, <code>-u usuário</code>, <code>-w diretório</code>.</li>
+  <li>Erros reais: <code>Container X is not running</code> (parado), <code>No such container: X</code> (não existe), <code>executable file not found in $PATH</code> (comando não está na imagem).</li>
+</ul>
+
+<div class="tip"><strong>Próxima aula:</strong> <a href="portas.html">Publicando portas (-p 8080:80)</a> — o container tem rede própria; para acessar o serviço dele de fora (navegador, curl), você publica a porta com <code>-p</code>.</div>
+
+</div>
+</main>
+</div>
+<script src="assets/site.js?v=4"></script>
+</body>
+</html>

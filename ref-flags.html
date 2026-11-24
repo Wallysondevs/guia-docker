@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flags comuns do docker run (cola) — -d, -it, -p, -v, -e, --rm e todas as outras | Guia Docker</title>
+<meta name="description" content="Cola das flags mais usadas do docker run, agrupadas por função: modo (-d, -it, --rm), configuração (--name, -p, -e, -v, --network, -w, --entrypoint, --user, --hostname, --env-file, --add-host), recursos (--memory, --cpus, --restart), segurança (--read-only, --tmpfs, --cap-drop, --security-opt, --privileged com aviso), logs e diagnóstico (--log-driver, --health-cmd, -l, --pull, --platform), e a regra de ouro: flags depois do nome da imagem viram comando. Inclui exemplo real juntando flags e tabela situação → flags.">
+<link rel="stylesheet" href="assets/style.css?v=4">
+<script>try{var t=localStorage.getItem("tema");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<meta http-equiv="Cache-Control" content="no-store, must-revalidate">
+<script>try{history.scrollRestoration="manual"}catch(e){}(function(){var n=0;function t(){window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;if(++n<60)setTimeout(t,50)}t();window.addEventListener("pagehide",function(){window.scrollTo(0,0);document.documentElement.scrollTop=0;});window.addEventListener("pageshow",function(){window.scrollTo(0,0)});window.addEventListener("load",function(){window.scrollTo(0,0)});})();document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(a){var h=a.getAttribute("href")||"";if(/[.]html($|[?#])/.test(h)&&a.host===location.host){window.scrollTo(0,0);document.documentElement.scrollTop=0;}}});</script>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" id="sidebar" aria-label="Tópicos"></nav>
+<main class="main">
+<div class="content">
+
+<div class="pager"></div>
+
+<h1>Flags comuns do <span class="hl">docker run</span> (cola)</h1>
+
+<p class="intro">O <code>docker run</code> tem dezenas de opções. Esta cola traz as <strong>flags que você vai usar todo dia</strong>, agrupadas pela função que cumplen, com sintaxe, exemplo e o efeito de cada uma. A regra geral da sintaxe: <code>docker run [OPÇÕES] IMAGEM [COMANDO] [ARG…]</code> — e atenção: <strong>tudo que vem depois do nome da imagem vira comando dentro do container</strong>, não flag (veja a última seção).</p>
+
+<div class="note">
+<strong>Você vai aprender</strong>
+<ul>
+  <li>Flags de <strong>modo</strong>: <code>-d</code>, <code>-it</code>, <code>--rm</code>, <code>--pull</code>.</li>
+  <li>Flags de <strong>configuração</strong>: <code>--name</code>, <code>-p</code>, <code>-e</code>, <code>--env-file</code>, <code>-v</code>, <code>--network</code>, <code>-w</code>, <code>--entrypoint</code>, <code>--user</code>, <code>--hostname</code>, <code>--add-host</code>.</li>
+  <li>Flags de <strong>recursos e reinício</strong>: <code>--memory</code>/<code>-m</code>, <code>--cpus</code>, <code>--restart</code>.</li>
+  <li>Flags de <strong>segurança</strong>: <code>--read-only</code>, <code>--tmpfs</code>, <code>--cap-drop</code>/<code>--cap-add</code>, <code>--security-opt</code>, <code>--privileged</code> (com aviso forte), <code>--user</code>.</li>
+  <li>Flags de <strong>logs e diagnóstico</strong>: <code>--log-driver</code>, <code>--log-opt</code>, <code>--health-cmd</code>, <code>-l</code>/<code>--label</code>, <code>--platform</code>.</li>
+  <li>A tabela final: situação do dia a dia → combinação de flags.</li>
+</ul>
+</div>
+
+<hr>
+
+<h2>Modo: como o container se comporta</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Flag</th><th>Sintaxe / valor</th><th>O que faz</th></tr>
+<tr><td><code>-d</code></td><td><code>--detach</code></td><td>Roda em <strong>segundo plano</strong>: devolve o ID do container na hora e libera o terminal.</td></tr>
+<tr><td><code>-it</code></td><td><code>-i -t</code></td><td><strong>Terminal interativo</strong> dentro do container: <code>-i</code> mantém a entrada aberta, <code>-t</code> aloca um terminal (cores, prompt, Ctrl+C). Para sair sem parar o container: <strong>Ctrl-P, Ctrl-Q</strong>.</td></tr>
+<tr><td><code>--rm</code></td><td>sem valor</td><td><strong>Apaga o container automaticamente</strong> quando ele termina — ideal para testes e tarefas one-shot (rodar testes, um script, um curl interno).</td></tr>
+<tr><td><code>--pull</code></td><td><code>--pull always</code> (ou <code>missing</code>/<code>never</code>)</td><td>Força o <code>docker pull</code> da imagem antes de rodar (<code>always</code>) ou só se não existir local (<code>missing</code>, padrão).</td></tr>
+</table>
+</div>
+
+<pre class="term">$ docker run -d --name web nginx:alpine
+a1b2c3d4e5f6…   « devolve o ID na hora, terminal livre
+$ docker run -it --rm python:3.12-slim python
+&gt;&gt;&gt; print("olá do container")
+olá do container   « ao sair (exit), o container é apagado sozinho por causa do --rm</pre>
+
+<hr>
+
+<h2>Configuração: nome, portas, variáveis, pastas, rede</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Flag</th><th>Sintaxe / valor</th><th>O que faz</th></tr>
+<tr><td><code>--name</code></td><td><code>--name meu-site</code></td><td>Dá um <strong>nome único</strong> ao container (senão o Docker inventa um, tipo <code>keen_blackwell</code>). Nomes facilitam <code>stop</code>, <code>logs</code>, <code>rm</code>.</td></tr>
+<tr><td><code>-p</code></td><td><code>-p 8080:80</code></td><td><strong>Publica porta</strong>: formato <code>HOST:CONTAINER</code>. A porta 80 do container passa a responder na 8080 da sua máquina. Variações: <code>-p 127.0.0.1:8080:80</code> (só o próprio host acessa), <code>-p 8080:80/udp</code> (protocolo UDP), <code>-P</code> (maiúsculo, publica todas as portas do EXPOSE em portas aleatórias do host).</td></tr>
+<tr><td><code>-e</code></td><td><code>-e CHAVE=valor</code></td><td>Define <strong>variável de ambiente</strong> dentro do container (ex.: <code>-e POSTGRES_PASSWORD=segredo</code>). Sem <code>=valor</code>, copia a variável do seu shell: <code>-e HOME</code>.</td></tr>
+<tr><td><code>--env-file</code></td><td><code>--env-file .env</code></td><td>Lê várias variáveis de um arquivo (uma por linha, <code>CHAVE=valor</code>) — prático para não encher o comando de <code>-e</code>.</td></tr>
+<tr><td><code>-v</code></td><td><code>-v origem:destino[:opções]</code></td><td><strong>Monta volume ou pasta</strong>: <code>-v dados:/var/lib/postgresql/data</code> (volume nomeado), <code>-v $(pwd)/site:/usr/share/nginx/html:ro</code> (bind mount, <code>ro</code> = somente leitura), <code>-v /caminho/só:/destino</code> (absoluto).</td></tr>
+<tr><td><code>--network</code></td><td><code>--network minha-rede</code></td><td>Conecta o container a uma rede: <code>bridge</code> (padrão), <code>host</code> (usa a rede do próprio host — sem isolamento de porta), <code>none</code> (sem rede), ou uma rede criada por você.</td></tr>
+<tr><td><code>-w</code></td><td><code>-w /app</code></td><td>Define o <strong>diretório de trabalho</strong> dentro do container (onde o comando vai rodar).</td></tr>
+<tr><td><code>--entrypoint</code></td><td><code>--entrypoint /bin/sh</code></td><td>Sobrescreve o <strong>ENTRYPOINT</strong> definido na imagem (o programa fixo do container).</td></tr>
+<tr><td><code>--user</code> / <code>-u</code></td><td><code>--user 1000:1000</code> ou <code>--user node</code></td><td>Roda o processo do container como <strong>outro usuário</strong> (UID:GID ou nome) — importante para não rodar como root (aula <a href="usuario-nao-root.html">Usuário não-root</a>).</td></tr>
+<tr><td><code>-h</code></td><td><code>-h meu-host</code></td><td>Define o <strong>hostname</strong> dentro do container (por padrão é o ID curto do container).</td></tr>
+<tr><td><code>--add-host</code></td><td><code>--add-host api.local:172.17.0.5</code></td><td>Adiciona uma entrada no <code>/etc/hosts</code> do container (apelido → IP).</td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>Recursos e reinício automático</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Flag</th><th>Sintaxe / valor</th><th>O que faz</th></tr>
+<tr><td><code>--memory</code> / <code>-m</code></td><td><code>--memory 512m</code> ou <code>-m 1g</code></td><td><strong>Limite de memória</strong> do container — se passar, o Docker mata o processo (OOM). Aceita <code>b</code>, <code>k</code>, <code>m</code>, <code>g</code>.</td></tr>
+<tr><td><code>--cpus</code></td><td><code>--cpus 1.5</code></td><td><strong>Limite de CPUs</strong> (1.5 = uma CPU e meia).</td></tr>
+<tr><td><code>--restart</code></td><td><code>--restart unless-stopped</code></td><td>Política de reinício automático: <code>no</code> (padrão), <code>always</code>, <code>on-failure[:N]</code>, <code>unless-stopped</code>. O daemon reinicia o container sozinho quando ele cai.</td></tr>
+</table>
+</div>
+<p>Essas flags são o equivalente em linha de comando do que no Compose vira <code>deploy.resources.limits</code> e <code>restart:</code> (veja <a href="ref-compose.html">ref-compose</a>).</p>
+
+<hr>
+
+<h2>Segurança (nível 3, mas vale saber agora)</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Flag</th><th>Sintaxe / valor</th><th>O que faz</th></tr>
+<tr><td><code>--read-only</code></td><td>sem valor</td><td>Monta o <strong>sistema de arquivos do container como somente leitura</strong> — nada pode ser gravado (use com <code>--tmpfs</code> para exceções). Aula <a href="read-only.html">--read-only</a>.</td></tr>
+<tr><td><code>--tmpfs</code></td><td><code>--tmpfs /tmp:rw,size=64m</code></td><td>Monta um caminho na <strong>memória RAM</strong> (rápido e descartável) — a saída de um <code>--read-only</code> para apps que precisam escrever temporariamente.</td></tr>
+<tr><td><code>--cap-drop</code></td><td><code>--cap-drop ALL</code> (ou <code>NET_RAW</code>…)</td><td>Remove <strong>capabilities do Linux</strong> do container. <code>ALL</code> tira todas; combine com <code>--cap-add</code> para devolver só as necessárias. Aula <a href="cap-drop.html">cap-drop</a>.</td></tr>
+<tr><td><code>--security-opt</code></td><td><code>--security-opt no-new-privileges:true</code></td><td>Opções de segurança extras: perfil seccomp/apparmor personalizado, <code>no-new-privileges</code> (impede o processo de ganhar mais privilégios via sudo/setuid), <code>label=…</code>. Aula <a href="seccomp.html">seccomp</a>.</td></tr>
+<tr><td><code>--privileged</code></td><td>sem valor</td><td>Dá <strong>TODOS</strong> os privilégios ao container (acesso a dispositivos, módulos do kernel…). <strong>Evite</strong> — é como rodar como root no host com tudo liberado. Prefira as flags específicas (<code>--device</code>, <code>--cap-add</code>).</td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>Logs, labels e diagnóstico</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Flag</th><th>Sintaxe / valor</th><th>O que faz</th></tr>
+<tr><td><code>--log-driver</code></td><td><code>--log-driver json-file</code></td><td>Escolhe como os logs do container são gravados: <code>json-file</code> (padrão, com rotação via <code>--log-opt</code>), <code>journald</code>, <code>syslog</code>, <code>none</code>… Aula <a href="logging.html">Logging</a>.</td></tr>
+<tr><td><code>--log-opt</code></td><td><code>--log-opt max-size=10m --log-opt max-file=3</code></td><td>Opções do driver de log — o par clássico é o limite de tamanho e a rotação (quantos arquivos manter).</td></tr>
+<tr><td><code>--health-cmd</code></td><td><code>--health-cmd "curl -f http://localhost/ || exit 1"</code></td><td>Comando do <strong>healthcheck</strong> definido na hora do run (sobrescreve o <code>HEALTHCHECK</code> da imagem). Com <code>--health-interval</code>, <code>--health-retries</code>, <code>--health-start-period</code>.</td></tr>
+<tr><td><code>-l</code> / <code>--label</code></td><td><code>-l app=web -l versao=1.0</code></td><td>Adiciona <strong>metadados (labels)</strong> ao container — aparecem no <code>docker inspect</code> e dá para filtrar no <code>ps</code> com <code>--filter label=app=web</code>.</td></tr>
+<tr><td><code>--platform</code></td><td><code>--platform linux/arm64</code></td><td>Força a arquitetura da imagem (útil em máquinas ARM rodando imagens amd64 via emulação, ou vice-versa).</td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>Juntando as flags num exemplo real</h2>
+<p>Um run de "produção de bolso" para a API do projeto 2, com tudo comentado:</p>
+<pre class="term" data-cwd="~/api">$ docker run -d \
+    --name minha-api \
+    -p 3000:3000 \
+    -e NODE_ENV=production \
+    -v /home/ana/dados:/app/dados \
+    --memory 512m \
+    --cpus 1 \
+    --restart unless-stopped \
+    --read-only --tmpfs /tmp \
+    --log-opt max-size=10m --log-opt max-file=3 \
+    -l app=minha-api \
+    api:latest
+a1b2c3d4e5f6…
+$ docker ps
+CONTAINER ID   IMAGE          STATUS         PORTS                   NAMES
+a1b2c3d4e5f6   api:latest     Up 5 seconds   0.0.0.0:3000->3000/tcp  minha-api
+$ docker inspect minha-api --format '{{.HostConfig.RestartPolicy.Name}}'
+unless-stopped</pre>
+<p>O <code></code> no fim de cada linha é só para continuar o comando na próxima linha no terminal — o Docker recebe tudo numa linha só.</p>
+
+<div class="warn"><strong>Atenção:</strong> <code>--read-only</code> sozinho quebra qualquer app que grava em disco (banco de dados, uploads, cache). Nesses casos, combine com <code>--tmpfs</code> nos caminhos de escrita ou monte um <code>-v</code> nesses pontos.</div>
+
+<div class="warn"><strong>A pegadinha da ordem:</strong> no <code>docker run [OPÇÕES] IMAGEM [COMANDO]</code>, <strong>tudo depois da imagem é comando do container</strong>, não flag. Então <code>docker run nginx:alpine -d</code> tenta rodar o comando <code>-d</code> dentro do nginx (e quebra), enquanto <code>docker run -d nginx:alpine</code> roda em segundo plano. Flags sempre <em>antes</em> do nome da imagem.</div>
+
+<div class="try" data-goal="Hello from Docker!" data-solucao="docker run --rm hello-world">
+<p class="try-task"><strong>Missão:</strong> rode <code>docker run --rm hello-world</code> e repare que, com <code>--rm</code>, o container é apagado sozinho depois de imprimir a mensagem (confira com <code>docker ps -a</code>).</p>
+</div>
+
+<hr>
+
+<h2>Mapa rápido: situação → flags</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Situação</th><th>Comando</th></tr>
+<tr><td>Subir site/app e deixar rodando</td><td><code>docker run -d --name web -p 8080:80 nginx:alpine</code></td></tr>
+<tr><td>Entrar num container para debugar</td><td><code>docker run -it --rm ubuntu:24.04 bash</code></td></tr>
+<tr><td>Rodar teste/script uma vez só</td><td><code>docker run --rm minhaapp:test npm test</code></td></tr>
+<tr><td>Banco de dados com dados persistentes</td><td><code>docker run -d --name db -e POSTGRES_PASSWORD=segredo -v pgdata:/var/lib/postgresql/data --restart unless-stopped postgres:16-alpine</code></td></tr>
+<tr><td>App com limite de memória</td><td><code>docker run -d -m 256m --cpus 0.5 …</code></td></tr>
+<tr><td>App que não pode gravar em disco</td><td><code>docker run -d --read-only --tmpfs /tmp …</code></td></tr>
+<tr><td>Dois containers se achando pelo nome</td><td><code>docker network create app</code> + <code>docker run -d --network app --name api …</code> + <code>docker run -d --network app --name web …</code></td></tr>
+<tr><td>Só o próprio computador acessa a porta</td><td><code>docker run -d -p 127.0.0.1:8080:80 …</code></td></tr>
+<tr><td>Forçar atualização da imagem antes de rodar</td><td><code>docker run --pull always …</code></td></tr>
+<tr><td>Rodar como usuário sem privilégios</td><td><code>docker run -d --user 1000:1000 …</code></td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>Resumo</h2>
+<ul>
+  <li>Sintaxe: <code>docker run [OPÇÕES] IMAGEM [COMANDO]</code> — flags antes da imagem; depois dela é comando interno.</li>
+  <li>Modo: <code>-d</code> (segundo plano), <code>-it</code> (terminal interativo), <code>--rm</code> (apaga ao sair), <code>--pull always</code>.</li>
+  <li>Configuração: <code>--name</code>, <code>-p HOST:CONTAINER</code>, <code>-e</code>/<code>--env-file</code>, <code>-v</code>, <code>--network</code>, <code>-w</code>, <code>--entrypoint</code>, <code>--user</code>, <code>-h</code>, <code>--add-host</code>.</li>
+  <li>Recursos: <code>-m/--memory</code>, <code>--cpus</code>, <code>--restart</code>.</li>
+  <li>Segurança: <code>--read-only</code> + <code>--tmpfs</code>, <code>--cap-drop/--cap-add</code>, <code>--security-opt</code>, evite <code>--privileged</code>.</li>
+  <li>Logs/diagnóstico: <code>--log-driver</code> + <code>--log-opt</code>, <code>--health-cmd</code>, <code>-l</code>, <code>--platform</code>.</li>
+  <li>Não lembra? <code>docker run --help</code> lista todas as flags da sua versão.</li>
+</ul>
+
+<div class="tip"><strong>Próxima aula:</strong> <a href="glossario.html">Glossário</a></div>
+
+</div>
+</main>
+</div>
+<script src="assets/site.js?v=4"></script>
+</body>
+</html>

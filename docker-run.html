@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>docker run — anatomia completa do comando mais importante | Guia Docker</title>
+<meta name="description" content="A anatomia completa do docker run: -d (segundo plano), -it (interativo), --name, -p (portas), -e (variáveis), -v (volumes), --rm, --network, --restart, comando sobrescrito depois da imagem. Exemplos reais com nginx, node, python e postgres, conferidos no Docker Engine 27, tabela de quando usar cada opção, erros reais (imagem inexistente, nome duplicado, falta de argumento) e missões no simulador.">
+<link rel="stylesheet" href="assets/style.css?v=4">
+<script>try{var t=localStorage.getItem("tema");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<meta http-equiv="Cache-Control" content="no-store, must-revalidate">
+<script>try{history.scrollRestoration="manual"}catch(e){}(function(){var n=0;function t(){window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;if(++n<60)setTimeout(t,50)}t();window.addEventListener("pagehide",function(){window.scrollTo(0,0);document.documentElement.scrollTop=0;});window.addEventListener("pageshow",function(){window.scrollTo(0,0)});window.addEventListener("load",function(){window.scrollTo(0,0)});})();document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(a){var h=a.getAttribute("href")||"";if(/[.]html($|[?#])/.test(h)&&a.host===location.host){window.scrollTo(0,0);document.documentElement.scrollTop=0;}}});</script>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" id="sidebar" aria-label="Tópicos"></nav>
+<main class="main">
+<div class="content">
+
+<div class="pager"></div>
+
+<h1><span class="hl">docker run</span> — anatomia do comando</h1>
+
+<p class="intro">O <code>docker run</code> é o comando que você mais vai usar: ele <strong>cria e inicia</strong> um container a partir de uma imagem. Parece simples, mas tem dezenas de opções. Nesta aula, cada uma é explicada com um exemplo real — e a Ana vai usá-las para subir o primeiro site dela no <code>notebook</code>.</p>
+
+<div class="note">
+<strong>Você vai aprender</strong>
+<ul>
+  <li>A sintaxe geral: <code>docker run [OPÇÕES] IMAGEM [COMANDO]</code>.</li>
+  <li>Cada opção essencial: <code>-d</code>, <code>--name</code>, <code>-p</code>, <code>-e</code>, <code>-v</code>, <code>-it</code>, <code>--rm</code>, <code>--restart</code>.</li>
+  <li>Sobrescrever o comando padrão da imagem (depois do nome dela).</li>
+  <li>A tabela "quando usar cada opção".</li>
+  <li>Os erros reais: imagem inexistente, nome repetido, falta de argumento.</li>
+</ul>
+</div>
+
+<div class="note">
+<strong>Sintaxe geral</strong>
+<pre class="file">docker run [OPÇÕES] IMAGEM [COMANDO] [ARGS…]</pre>
+<p>As <strong>OPÇÕES</strong> (flags) moldam o container: <code>-d</code>, <code>-p</code>, <code>-e</code>, <code>-v</code>, <code>--name</code>… A <strong>IMAGEM</strong> é a receita. O <strong>COMANDO</strong> opcional sobrescreve o comando padrão da imagem.</p>
+</div>
+
+<hr>
+
+<h2>O básico</h2>
+<pre class="term">$ docker run hello-world</pre>
+<p>Cria um container da imagem <code>hello-world</code>, inicia, mostra a saída no seu terminal e, quando o container termina, devolve o terminal. O container fica parado (não some — veja <code>docker ps -a</code> na aula <a href="primeiro-container.html">primeiro container</a>).</p>
+
+<h3>Anatomia completa de um comando real</h3>
+<p>Este é o comando que a Ana vai usar para publicar o site dela — cada pedaço explained:</p>
+<pre class="term">$ docker run -d -p 8080:80 --name meu-site nginx:alpine</pre>
+<dl class="anatomy">
+  <dt>docker</dt><dd>O cliente (CLI).</dd>
+  <dt>run</dt><dd>"Crie e inicie um container novo".</dd>
+  <dt>-d</dt><dd><em>detach</em>: roda em segundo plano e devolve o terminal na hora (imprime só o ID do container).</dd>
+  <dt>-p 8080:80</dt><dd><em>publish</em>: porta 8080 da máquina da Ana → porta 80 do container. Formato <code>-p HOST:CONTAINER</code> (aula <a href="portas.html">Portas</a>).</dd>
+  <dt>--name meu-site</dt><dd>Dá o nome <code>meu-site</code> ao container (em vez do aleatório tipo <code>keen_blackwell</code>). Nomes facilitam <code>stop</code>, <code>logs</code>, <code>exec</code>.</dd>
+  <dt>nginx:alpine</dt><dd>A imagem (receita) — última parte antes de um comando opcional.</dd>
+</dl>
+
+<hr>
+
+<h2>-d: rodar em segundo plano (detach)</h2>
+<p>Sem <code>-d</code>, o terminal fica preso no container (bom para programas que imprimem na tela, como o hello-world). Com <code>-d</code>, o container roda "soltinho" e o comando devolve na hora o ID do container:</p>
+<pre class="term">$ docker run -d nginx:alpine
+f3a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5
+$ docker ps
+CONTAINER ID   IMAGE          STATUS         PORTS     NAMES
+f3a1b2c3d4e5   nginx:alpine   Up 5 seconds   80/tcp    keen_blackwell</pre>
+<p>Repare: o Nginx fica rodando e expõe a porta <code>80/tcp</code> <em>dentro</em> da rede do container — só que ainda não dá para acessar de fora (isso é o <code>-p</code>, na aula <a href="portas.html">portas</a>).</p>
+
+<div class="try" data-goal="nginx:alpine" data-solucao="docker run -d nginx:alpine">
+<p class="try-task"><strong>Missão:</strong> rode <code>docker run -d nginx:alpine</code> para subir um Nginx em segundo plano e depois veja com <code>docker ps</code>.</p>
+</div>
+
+<hr>
+
+<h2>--name: dar um nome ao container</h2>
+<p>Sem <code>--name</code>, o Docker inventa um nome aleatório (<code>keen_blackwell</code>, <code>clever_curie-42</code>…). Com a opção, você escolhe:</p>
+<pre class="term">$ docker run -d --name meu-site nginx:alpine
+$ docker ps
+… NAMES
+… meu-site</pre>
+<p>O nome precisa ser <strong>único na máquina</strong> (dois containers não podem ter o mesmo nome). É útil para scripts e para os comandos que usam o nome: <code>docker stop meu-site</code>, <code>docker logs meu-site</code>, <code>docker exec meu-site …</code>.</p>
+
+<div class="warning">
+<strong>Erro real: nome já existe</strong>
+<pre class="term">$ docker run -d --name meu-site nginx:alpine
+$ docker run -d --name meu-site redis:7-alpine
+docker: Error response from daemon: Conflict. The container name "/meu-site" is already in use by container "f3a1…". You have to remove (or rename) that container to be able to reuse that name.</pre>
+<p>Como consertar: escolha outro nome (<code>--name meu-site2</code>) ou remova o antigo (<code>docker rm -f meu-site</code>).</p>
+</div>
+
+<hr>
+
+<h2>-p: publicar portas</h2>
+<p>O container tem a sua própria rede interna. Para acessar de fora, você <strong>publica</strong> uma porta do container numa porta da sua máquina:</p>
+<dl class="anatomy">
+  <dt>-p 8080:80</dt><dd>Porta <strong>8080</strong> da sua máquina → porta <strong>80</strong> do container. Formato: <code>-p HOST:CONTAINER</code>.</dd>
+  <dt>-p 127.0.0.1:8080:80</dt><dd>Publica só no localhost (mais seguro — ninguém de fora acessa).</dd>
+  <dt>-p 80</dt><dd>Porta aleatória da máquina → porta 80 do container (o Docker escolhe a porta do host; veja qual foi no <code>docker ps</code>).</dd>
+</dl>
+<pre class="term">$ docker run -d -p 8080:80 --name meu-site nginx:alpine
+$ docker ps
+… PORTS
+… 0.0.0.0:8080->80/tcp</pre>
+<p>Agora <code>http://localhost:8080</code> abre o Nginx do container. A aula <a href="portas.html">Publicando portas</a> detalha todas as variações.</p>
+
+<hr>
+
+<h2>-e: variáveis de ambiente</h2>
+<pre class="term">$ docker run -d -e POSTGRES_PASSWORD=segredo -e POSTGRES_USER=ana --name banco postgres:16-alpine</pre>
+<p>Define variáveis dentro do container na hora da criação. Muitas imagens oficiais (postgres, mysql, redis…) são configuradas assim — a página da imagem no Hub lista as variáveis que ela aceita. A aula <a href="variaveis-ambiente.html">Variáveis de ambiente</a> mostra mais, inclusive <code>--env-file</code>.</p>
+
+<hr>
+
+<h2>-v: volumes (pastas que persistem)</h2>
+<pre class="term">$ docker run -d -v /home/ana/site:/usr/share/nginx/html:ro --name meu-site nginx:alpine</pre>
+<p>Monta uma pasta da sua máquina dentro do container. Formato: <code>-v HOST:CONTAINER:ro</code> (<code>ro</code> = somente leitura). Sem volume, tudo que o container grava some quando ele é apagado. A aula <a href="volumes-intro.html">Volumes</a> aprofunda.</p>
+
+<hr>
+
+<h2>-it: modo interativo</h2>
+<pre class="term">$ docker run -it --rm python:3.12-slim python
+&gt;&gt;&gt; print("olá do container")
+olá do container
+&gt;&gt;&gt; 2 + 2
+4
+&gt;&gt;&gt; exit()</pre>
+<p><code>-i</code> mantém a entrada aberta (o container recebe o que você digita); <code>-t</code> aloca um terminal (prompt, cores, <kbd>Ctrl</kbd>+<kbd>C</kbd> funciona). Juntos, você entra "dentro" do container. Para sair <strong>sem parar</strong> o container: <kbd>Ctrl</kbd>+<kbd>P</kbd> <kbd>Ctrl</kbd>+<kbd>Q</kbd> (aula <a href="modo-interativo.html">modo interativo</a>).</p>
+
+<hr>
+
+<h2>--rm: apagar ao sair</h2>
+<pre class="term">$ docker run --rm hello-world   « rodou, imprimiu e o container foi apagado sozinho
+$ docker ps -a                    « não aparece nada</pre>
+<p>Ótimo para testes e comandos descartáveis — não deixa container parado enchendo a lista.</p>
+
+<hr>
+
+<h2>Sobrescrevendo o comando da imagem</h2>
+<p>Toda imagem tem um comando padrão (o que roda quando você não diz nada — no nginx é o próprio servidor; no python é o interpretador). Você pode trocar esse comando pondo ele <strong>depois do nome da imagem</strong>:</p>
+<pre class="term">$ docker run --rm python:3.12-slim python -c "print('oi do python')"
+oi do python
+$ docker run --rm alpine echo "oi do alpine"
+oi do alpine
+$ docker run --rm alpine ls /          « lista a raiz do container
+bin  dev  etc  home  lib  …</pre>
+<p>Isso é muito comum: a imagem <code>postgres</code>, por exemplo, inicia o banco por padrão; mas <code>docker run postgres psql</code> abre o cliente de linha de comando dentro dela. A ordem é sempre: <code>docker run [OPÇÕES] IMAGEM [COMANDO…]</code> — primeiro a imagem, depois o comando.</p>
+
+<hr>
+
+<h2>Juntando tudo: exemplo real</h2>
+<p>A API da Ana, com tudo de uma vez:</p>
+<pre class="term">$ docker run -d \
+    --name minha-api \
+    -p 3000:3000 \
+    -e NODE_ENV=production \
+    -v /home/ana/dados:/app/dados \
+    --restart unless-stopped \
+    node:22-alpine node server.js</pre>
+<dl class="anatomy">
+  <dt>--restart unless-stopped</dt><dd>Se o container cair (ou a máquina reiniciar), o Docker liga ele de novo sozinho — essencial para serviços. Opções: <code>no</code>, <code>always</code>, <code>on-failure</code>, <code>unless-stopped</code>.</dd>
+  <dt>node server.js</dt><dd>O comando que roda dentro do container (em vez do padrão da imagem).</dd>
+</dl>
+
+<hr>
+
+<h2>Tabela: quando usar cada opção</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Opção</th><th>Quando usar</th></tr>
+<tr><td><code>-d</code></td><td>Serviços que ficam rodando (web, banco, API) — você não quer o terminal preso.</td></tr>
+<tr><td><code>-it</code></td><td>Quando você quer entrar no container (shell, REPL, debug).</td></tr>
+<tr><td><code>--name</code></td><td>Sempre que o container for importante (facilita stop/logs/exec e scripts).</td></tr>
+<tr><td><code>-p</code></td><td>Quando o serviço precisa ser acessado de fora (site, API).</td></tr>
+<tr><td><code>-e</code></td><td>Quando a imagem precisa de configuração (senhas, portas internas, modo).</td></tr>
+<tr><td><code>-v</code></td><td>Quando os dados precisam sobreviver ao container (banco de dados, uploads).</td></tr>
+<tr><td><code>--rm</code></td><td>Testes rápidos e containers descartáveis (hello-world, scripts one-shot).</td></tr>
+<tr><td><code>--restart unless-stopped</code></td><td>Serviços de produção que devem voltar sozinhos se cair.</td></tr>
+<tr><td><code>COMANDO</code> depois da imagem</td><td>Quando você quer rodar outra coisa dentro da imagem (ex.: <code>sh</code>, <code>psql</code>).</td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>Erros reais do docker run</h2>
+
+<div class="warning">
+<strong>Esqueci a imagem</strong>
+<div class="try" data-goal="requires at least 1 argument" data-solucao="docker run">
+<p class="try-task"><strong>Missão:</strong> rode <code>docker run</code> sem nada depois e veja o erro.</p>
+</div>
+<pre class="term">$ docker run
+docker: 'docker run' requires at least 1 argument.
+See 'docker run --help'.</pre>
+</div>
+
+<div class="warning">
+<strong>Imagem que não existe</strong>
+<div class="try" data-goal="pull access denied" data-solucao="docker run imagem-que-nao-existe">
+<p class="try-task"><strong>Missão:</strong> rode <code>docker run imagem-que-nao-existe</code> e veja o que acontece quando a imagem não existe no Hub.</p>
+</div>
+<pre class="term">$ docker run imagem-que-nao-existe
+Unable to find image 'imagem-que-nao-existe' locally
+imagem-que-nao-existe: Pulling from library/imagem-que-nao-existe
+Status: Downloaded newer image for imagem-que-nao-existe
+docker: pull access denied for imagem-que-nao-existe, repository does not exist or may require 'docker login'.
+See 'docker run --help'.</pre>
+<p>O Docker tentou baixar (pull automático), o Hub disse que o repositório não existe, e o comando falhou. Nome de imagem errado = esse erro. Confira o nome no <a href="imagens-oficiais.html">Hub</a>.</p>
+</div>
+
+<div class="warning">
+<strong>Nome repetido</strong>
+<p>Já vimos acima: <code>Conflict. The container name "/meu-site" is already in use…</code> — cada nome é único por máquina.</p>
+</div>
+
+<div class="mc" data-answer="2">
+<p class="mc-q">Qual comando sobe um Nginx em segundo plano, com nome e porta 8080 publicado?</p>
+<label><input type="radio" name="q1"> <code>docker run nginx:alpine</code></label>
+<label><input type="radio" name="q1"> <code>docker run -d --name meu-site -p 8080:80 nginx:alpine</code></label>
+<label><input type="radio" name="q1"> <code>docker start -d -p 8080:80 nginx:alpine</code></label>
+<label><input type="radio" name="q1"> <code>docker run -it -p 8080:80 nginx</code></label>
+</div>
+
+<div class="mc" data-answer="3">
+<p class="mc-q">O que faz o <code>-d</code> no <code>docker run</code>?</p>
+<label><input type="radio" name="q2"> Apaga o container depois que ele roda</label>
+<label><input type="radio" name="q2"> Dá um nome aleatório ao container</label>
+<label><input type="radio" name="q2"> Faz o container rodar em segundo plano e devolve o terminal na hora</label>
+<label><input type="radio" name="q2"> Baixa a imagem do Hub</label>
+</div>
+
+<div class="mc" data-answer="1">
+<p class="mc-q">Em <code>docker run -p 8080:80 nginx</code>, o que é <code>8080:80</code>?</p>
+<label><input type="radio" name="q3"> Porta 8080 do host → porta 80 do container</label>
+<label><input type="radio" name="q3"> Porta 80 do host → porta 8080 do container</label>
+<label><input type="radio" name="q3"> Duas portas do mesmo container</label>
+<label><input type="radio" name="q3"> A versão do nginx e da imagem</label>
+</div>
+
+<hr>
+
+<h2>Resumo</h2>
+<ul>
+  <li>Sintaxe: <code>docker run [OPÇÕES] IMAGEM [COMANDO…]</code> — opções moldam o container; depois da imagem vem um comando opcional que sobrescreve o padrão.</li>
+  <li><code>-d</code> roda em segundo plano (devolve o ID); sem ele, o terminal fica grudado na saída do container.</li>
+  <li><code>--name</code> dá nome único e legível; <code>-p H:C</code> publica porta do host no container; <code>-e</code> passa variável; <code>-v</code> monta pasta; <code>-it</code> entra no container; <code>--rm</code> apaga ao sair; <code>--restart</code> religa sozinho.</li>
+  <li>Erros reais: falta a imagem (<code>requires at least 1 argument</code>), imagem inexistente (<code>pull access denied</code>), nome repetido (<code>Conflict. The container name … is already in use</code>).</li>
+  <li>Depois do <code>run</code>, confira com <code>docker ps</code> — a próxima aula.</li>
+</ul>
+
+<div class="tip"><strong>Próxima aula:</strong> <a href="docker-ps.html">docker ps: vendo os containers rodando</a> — depois de subir vários containers, como ver a lista deles e ler cada coluna. Depois: <a href="portas.html">Portas</a>, <a href="variaveis-ambiente.html">Variáveis</a> e <a href="volumes-intro.html">Volumes</a>.</div>
+
+</div>
+</main>
+</div>
+<script src="assets/site.js?v=4"></script>
+</body>
+</html>

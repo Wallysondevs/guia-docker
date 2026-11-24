@@ -1,0 +1,314 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>docker build — criando a imagem a partir do Dockerfile | Guia Docker</title>
+<meta name="description" content="O comando docker build: sintaxe docker build -t nome:tag ., a anatomia completa do comando, o que é o contexto de build (a pasta enviada ao daemon) e como ver o tamanho do envio, a saída passo a passo (Step N/M, Using cache, Successfully built/tagged) e a saída nova do BuildKit ([+] Building … FINISHED), -f para Dockerfile alternativo, --build-arg, --no-cache, --pull, --target, -q e --progress=plain, build a partir de URL/git, erros reais (Dockerfile não encontrado, contexto gigante sem .dockerignore) e quiz. Conferido no Docker Engine 27.x.">
+<link rel="stylesheet" href="assets/style.css?v=4">
+<script>try{var t=localStorage.getItem("tema");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<meta http-equiv="Cache-Control" content="no-store, must-revalidate">
+<script>try{history.scrollRestoration="manual"}catch(e){}(function(){var n=0;function t(){window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;if(++n<60)setTimeout(t,50)}t();window.addEventListener("pagehide",function(){window.scrollTo(0,0);document.documentElement.scrollTop=0;});window.addEventListener("pageshow",function(){window.scrollTo(0,0)});window.addEventListener("load",function(){window.scrollTo(0,0)});})();document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(a){var h=a.getAttribute("href")||"";if(/[.]html($|[?#])/.test(h)&&a.host===location.host){window.scrollTo(0,0);document.documentElement.scrollTop=0;}}});</script>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" id="sidebar" aria-label="Tópicos"></nav>
+<main class="main">
+<div class="content">
+
+<div class="pager"></div>
+
+<h1><span class="hl">docker build</span> — criando a imagem</h1>
+
+<p class="intro">O <code>docker build</code> é o comando que lê o seu <code>Dockerfile</code> e <strong>monta a imagem</strong>, instrução por instrução. Você vai rodar ele toda vez que o código ou o Dockerfile mudar — então vale a pena entender cada pedacinho: a sintaxe, o tal do "contexto", como ler a saída passo a passo e as opções que salvam tempo (e dor de cabeça). A Ana roda esse comando o dia inteiro no notebook dela; vamos acompanhar.</p>
+
+<div class="note">
+<strong>Você vai aprender</strong>
+<ul>
+  <li>A sintaxe completa: <code>docker build -t nome:tag .</code>, parte por parte.</li>
+  <li>O que é o <strong>contexto do build</strong>, por que ele é enviado ao daemon e como medir o tamanho do envio.</li>
+  <li>Ler a saída passo a passo: <code>Step N/M</code>, <code>---> hash</code>, <code>Using cache</code>, <code>Successfully built/tagged</code> — e a cara nova do BuildKit (<code>[+] Building … FINISHED</code>).</li>
+  <li>As opções que mais usamos: <code>-f</code>, <code>--build-arg</code>, <code>--no-cache</code>, <code>--pull</code>, <code>--target</code>, <code>-q</code>, <code>--progress=plain</code>.</li>
+  <li>Build a partir de uma URL ou repositório git (contexto remoto).</li>
+  <li>Erros reais: Dockerfile não encontrado, contexto gigante, build sem permissão.</li>
+</ul>
+</div>
+
+<hr>
+
+<h2>A sintaxe, parte por parte</h2>
+<dl class="anatomy">
+  <dt>docker build</dt><dd>o comando que monta a imagem a partir de um Dockerfile.</dd>
+  <dt>-t minha-api:1.0</dt><dd><code>--tag</code>: dá nome e tag à imagem (<code>nome:tag</code>). Você pode repetir o <code>-t</code> para dar várias tags à mesma imagem. Sem <code>-t</code>, a imagem fica sem nome (<code>&lt;none&gt;</code>).</dd>
+  <dt>.</dt><dd>o <strong>contexto do build</strong>: a pasta cujo conteúdo é enviado ao Docker. O <code>.</code> é "a pasta atual" — e é dentro dela que o comando procura o arquivo <code>Dockerfile</code>.</dd>
+</dl>
+<pre class="term" data-cwd="~/minha-api">$ docker build -t minha-api:1.0 .</pre>
+
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Parte</th><th>O que é</th><th>Exemplo</th></tr>
+<tr><td>Comando</td><td><code>docker build</code></td><td>—</td></tr>
+<tr><td>Tag</td><td><code>-t nome:tag</code></td><td><code>-t minha-api:1.0</code> (pode repetir)</td></tr>
+<tr><td>Arquivo alternativo</td><td><code>-f caminho</code></td><td><code>-f Dockerfile.dev</code></td></tr>
+<tr><td>Contexto</td><td>o último argumento posicional</td><td><code>.</code> ou <code>~/minha-api</code> ou uma URL git</td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>O Dockerfile que esse build lê</h2>
+<p>Para o comando fazer sentido, lembre do arquivo que ele lê — comentado linha a linha:</p>
+<pre class="file"># arquivo: Dockerfile (na raiz do contexto)
+FROM node:22-alpine            # 1. base: Node 22 enxuto (build começa aqui)
+WORKDIR /app                  # 2. cria /app e passa a trabalhar nela
+COPY package*.json ./         # 3. copia só os manifests (cache amigo)
+RUN npm install --omit=dev    # 4. instala dependências NO build (vira camada)
+COPY . .                      # 5. copia o código por último (muda toda hora)
+EXPOSE 3000                   # 6. documenta a porta (não publica; isso é -p no run)
+CMD ["node", "server.js"]     # 7. comando padrão quando o container inicia</pre>
+<p>Cada linha desse arquivo vira um <code>Step N/M</code> na saída do build — e a ordem 3→4→5 é a que deixa o cache voando (aula <a href="camadas-cache.html">Camadas e cache</a>).</p>
+
+<hr>
+
+<h2>O contexto do build: a pasta que viaja inteira</h2>
+<p>O Docker não manda o Dockerfile sozinho: ele <strong>compacta e envia a pasta inteira</strong> (o contexto) para o daemon, que é quem executa o build de verdade. Por isso a primeira linha da saída é sempre essa:</p>
+<pre class="term" data-cwd="~/minha-api">$ docker build -t minha-api:1.0 .
+Sending build context to Docker daemon  58.37kB</pre>
+<p>Consequências práticas:</p>
+<ul>
+  <li><strong>Só o que está no contexto pode ser copiado</strong> para a imagem com <code>COPY</code>. Se o seu projeto está em <code>~/minha-api</code>, rode o build de dentro dela (<code>cd ~/minha-api</code>) ou aponte o contexto: <code>docker build -t minha-api:1.0 ~/minha-api</code>.</li>
+  <li><strong>Quanto maior o contexto, mais lento o envio</strong> — e o envio acontece a <strong>cada</strong> build, mesmo que nada tenha mudado. Pastas grandes demais deixam tudo lento; é aí que entra o <a href="dockerignore.html">.dockerignore</a>.</li>
+  <li><strong>Segredos no contexto são perigo</strong>: se um <code>.env</code> está na pasta e o Dockerfile tem <code>COPY . .</code>, o segredo vai para dentro da imagem (aula <a href="dockerignore.html">.dockerignore</a>).</li>
+</ul>
+
+<div class="warn"><strong>Contexto gigante sem querer:</strong> sem <code>.dockerignore</code>, um <code>node_modules</code> de 400MB e a pasta <code>.git</code> são enviados ao daemon a cada build:
+<pre class="term" data-cwd="~/minha-api">$ docker build -t minha-api:1.0 .
+Sending build context to Docker daemon  480.5MB   « lento e desnecessário</pre>
+Com um <code>.dockerignore</code> listando essas pastas, o mesmo build envia míseros kilobytes. A primeira linha da saída entrega o tamanho — fique de olho nela.</div>
+
+<hr>
+
+<h2>Lendo a saída passo a passo (saída clássica)</h2>
+<p>Cada instrução do Dockerfile vira um <code>Step N/M</code> na saída. No fim, o Docker imprime o ID da imagem criada e confirma a tag:</p>
+<pre class="term" data-cwd="~/minha-api">$ docker build -t minha-api:1.0 .
+Sending build context to Docker daemon  58.37kB
+Step 1/5 : FROM node:22-alpine
+ ---> c3d4e5f6a1b2
+Step 2/5 : WORKDIR /app
+ ---> Running in a1b2c3d4e5f6
+Removing intermediate container a1b2c3d4e5f6
+ ---> b2c3d4e5f6a1
+Step 3/5 : COPY package*.json ./
+ ---> d4e5f6a1b2c3
+Step 4/5 : RUN npm install
+ ---> Running in e5f6a1b2c3d4
+Removing intermediate container e5f6a1b2c3d4
+ ---> f6a1b2c3d4e5
+Step 5/5 : CMD ["node", "server.js"]
+ ---> Running in 1a2b3c4d5e6f
+Removing intermediate container 1a2b3c4d5e6f
+ ---> 2b3c4d5e6f7a
+Successfully built 2b3c4d5e6f7a
+Successfully tagged minha-api:1.0</pre>
+<dl class="anatomy">
+  <dt>Step N/M</dt><dd>a instrução N de M do Dockerfile sendo executada.</dd>
+  <dt>Running in …</dt><dd>o comando <code>RUN</code> rodou num container temporário (que será apagado já já).</dd>
+  <dt>Removing intermediate container …</dt><dd>o container temporário foi descartado; o resultado virou camada da imagem.</dd>
+  <dt>---> hash</dt><dd>o ID da camada criada naquele passo. <code>Using cache</code> no lugar significa que o passo foi reutilizado.</dd>
+  <dt>Successfully built / tagged</dt><dd>a imagem final foi montada e etiquetada com a tag pedida.</dd>
+</dl>
+
+<h3>A cara nova: BuildKit</h3>
+<p>Nas versões recentes do Docker (Engine 23+), o build roda por padrão no <strong>BuildKit</strong>, que imprime uma saída mais bonita e paralela:</p>
+<pre class="term" data-cwd="~/minha-api">$ docker build -t minha-api:1.0 .
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 234B done
+#2 [internal] load .dockerignore
+#3 [1/4] FROM docker.io/library/node:22-alpine
+#4 [2/4] WORKDIR /app
+#5 [3/4] COPY package*.json ./
+#6 [4/4] RUN npm install
+#6 exporting layers
+#7 writing image sha256:2b3c4d5e6f7a…
+#7 naming to docker.io/library/minha-api:1.0
+[+] Building 12.4s (8/8) FINISHED</pre>
+<p>O que muda para você: as etapas aparecem como <code>#N [i/j]</code>, o resumo final vem como <code>[+] Building … FINISHED</code>, e dá para ver o cache claramente (<code>CACHED</code>). Para ver a saída clássica antiga, use <code>DOCKER_BUILDKIT=0 docker build …</code> (só para teste — o BuildKit é mais rápido).</p>
+
+<p>Depois do build, a imagem aparece no <code>docker images</code> e pode rodar com <code>docker run</code>:</p>
+<pre class="term" data-cwd="~/minha-api">$ docker images minha-api
+REPOSITORY   TAG   IMAGE ID       CREATED          SIZE
+minha-api    1.0   2b3c4d5e6f7a   30 seconds ago   195MB
+$ docker run -d -p 3000:3000 --name api minha-api:1.0
+9f8e7d6c5b4a</pre>
+
+<hr>
+
+<h2>-f: Dockerfile com outro nome ou lugar</h2>
+<p>Por padrão o comando procura o arquivo <code>Dockerfile</code> dentro do contexto. Com <code>-f</code> você escolhe outro arquivo — clássico para ter um <code>Dockerfile.dev</code> com hot reload ao lado do de produção:</p>
+<pre class="term" data-cwd="~/minha-api">$ ls
+Dockerfile  Dockerfile.dev  src  package.json
+$ docker build -f Dockerfile.dev -t minha-api:dev .
+…
+Successfully tagged minha-api:dev</pre>
+<p>O <code>-f</code> pode apontar para um arquivo <strong>fora</strong> do contexto (ex.: <code>docker build -f docker/Dockerfile.prod -t minha-api:1.0 .</code>) — desde que o arquivo exista, o contexto continua sendo o <code>.</code>.</p>
+
+<div class="warn"><strong>Erro real: -f apontando para arquivo que não existe.</strong> <code>docker build -f Dockerfile.prod .</code> numa pasta sem esse arquivo dá <code>failed to read dockerfile: open Dockerfile.prod: no such file or directory</code> — mesmo erro de quando o <code>Dockerfile</code> padrão falta. Confira o nome e o caminho.</div>
+
+<hr>
+
+<h2>O cache: rebuilds que voam</h2>
+<p>Se nada mudou desde o último build, cada passo imprime <code>Using cache</code> (ou <code>CACHED</code> no BuildKit) e o build termina em segundos — o Docker reutiliza as camadas prontas (aula <a href="camadas-cache.html">Camadas e cache do build</a>):</p>
+<pre class="term" data-cwd="~/minha-api">$ docker build -t minha-api:1.0 .
+Sending build context to Docker daemon  58.37kB
+Step 1/5 : FROM node:22-alpine
+ ---> Using cache
+Step 2/5 : WORKDIR /app
+ ---> Using cache
+Step 3/5 : COPY package*.json ./
+ ---> Using cache
+Step 4/5 : RUN npm install
+ ---> Using cache
+Step 5/5 : COPY . .
+ ---> 3c4d5e6f7a8b
+Successfully built 3c4d5e6f7a8b</pre>
+<p>Para forçar o build do zero, ignorando o cache: <code>docker build --no-cache -t minha-api:1.0 .</code> — útil quando você desconfia que uma camada antiga está envenenando o build.</p>
+
+<hr>
+
+<h2>Outras opções úteis</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Opção</th><th>O que faz</th><th>Quando a Ana usa</th></tr>
+<tr><td><code>-t nome:tag</code></td><td>Dá nome e tag à imagem (pode repetir para várias tags)</td><td>Sempre: <code>-t minha-api:1.0</code></td></tr>
+<tr><td><code>-f ARQUIVO</code></td><td>Usa outro arquivo no lugar do <code>Dockerfile</code> padrão</td><td>Build de dev: <code>-f Dockerfile.dev</code></td></tr>
+<tr><td><code>--build-arg NOME=valor</code></td><td>Entrega valor para um <code>ARG</code> do Dockerfile (aula <a href="dockerfile-expose-env.html">EXPOSE, ENV e ARG</a>)</td><td>Release: <code>--build-arg VERSAO=2.3</code></td></tr>
+<tr><td><code>--no-cache</code></td><td>Ignora o cache e executa todos os passos de novo</td><td>Quando o cache parece "preso" num resultado estranho</td></tr>
+<tr><td><code>--pull</code></td><td>Baixa a imagem base (FROM) atualizada antes de buildar</td><td>Segunda-feira de patch de segurança</td></tr>
+<tr><td><code>--target ETAPA</code></td><td>Builda só até a etapa nomeada do multi-stage (<code>AS build</code>)</td><td>Rodar só os testes do build: <code>--target test</code></td></tr>
+<tr><td><code>-q</code></td><td>Modo silencioso: imprime só o ID da imagem</td><td>Em scripts: <code>IMG=$(docker build -q .)</code></td></tr>
+<tr><td><code>--progress=plain</code></td><td>Saída de texto puro (sem barra de progresso) — ótimo em logs de CI</td><td>Pipeline no GitHub Actions</td></tr>
+<tr><td><code>--label chave=valor</code></td><td>Grava metadados na imagem</td><td><code>--label versao=2.3</code></td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>Build a partir de URL ou git: contexto remoto</h2>
+<p>O contexto não precisa ser uma pasta local: pode ser um <strong>repositório git</strong> ou uma <strong>URL</strong> que contenha um Dockerfile na raiz (ou num subdiretório, com <code>#branch</code>/<code>:subdir</code>):</p>
+<pre class="term">$ docker build -t meu-app:git https://github.com/meu-org/meu-app.git
+$ docker build -t meu-app:git https://github.com/meu-org/meu-app.git#main:docker</pre>
+<p>O Docker clona o repositório (raso) e builda a partir dele. Útil para CI: builda direto do código no GitHub, sem precisar baixar nada antes. A segunda forma aponta para a subpasta <code>docker/</code> do branch <code>main</code>.</p>
+
+<hr>
+
+<h2>Quando dá errado</h2>
+
+<div class="warn"><strong>Dockerfile não encontrado:</strong> rodar o build na pasta errada (sem <code>cd</code>) dá <code>ERROR: failed to solve: failed to read dockerfile: open Dockerfile: no such file or directory</code>. <strong>Como consertar:</strong> <code>cd</code> para a pasta do projeto ou passe o contexto: <code>docker build -t app ~/projeto</code>.</div>
+
+<div class="warn"><strong>Permissão negada ao enviar o contexto:</strong> se a pasta tem arquivos que o usuário do Docker não pode ler, o envio falha com <code>permission denied</code> ao montar o contexto. <strong>Como consertar:</strong> ajuste as permissões da pasta ou rode com o usuário que tem acesso (o Docker no Linux normalmente exige que o usuário esteja no grupo <code>docker</code> — aula <a href="instalar.html">Instalar o Docker</a>).</div>
+
+<div class="warn"><strong>Espaço em disco cheio no meio do build:</strong> o daemon guarda as camadas em <code>/var/lib/docker</code>; se o disco enche, o build morre com <code>no space left on device</code>. <strong>Como consertar:</strong> <code>docker system df</code> para ver o uso e <code>docker system prune</code> para limpar (aulas de <a href="docker-system-df.html">espaço em disco</a> e <a href="docker-system-prune.html">limpeza</a>).</div>
+
+<div class="warn"><strong>Comando inválido dentro do RUN:</strong> se o <code>RUN</code> chama um comando que não existe na imagem base, o build falha <strong>naquele passo</strong> e mostra a saída do erro:
+<pre class="term">$ docker build -t app .
+…
+Step 4/5 : RUN apt install vim
+ ---> Running in e5f6a1b2c3d4
+/bin/sh: apt: not found        « o Alpine não tem apt (é apk)!
+error: failed to solve: process … did not complete successfully</pre>
+<strong>Como consertar:</strong> use o gerenciador certo da base (<code>apk</code> no Alpine, <code>apt</code> no Debian) — trocar de base no meio do build não adianta.</div>
+
+<hr>
+
+<h2>Referência rápida</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Comando</th><th>Resultado</th></tr>
+<tr><td><code>docker build -t nome:tag .</code></td><td>Builda o Dockerfile da pasta atual e etiqueta a imagem</td></tr>
+<tr><td><code>docker build -t nome:tag CAMINHO</code></td><td>Usa outra pasta como contexto (ex.: <code>~/minha-api</code>)</td></tr>
+<tr><td><code>docker build -f Dockerfile.dev -t nome:dev .</code></td><td>Usa outro arquivo de instruções</td></tr>
+<tr><td><code>docker build --build-arg VERSAO=2.3 -t api:2.3 .</code></td><td>Passa argumento para o ARG do Dockerfile</td></tr>
+<tr><td><code>docker build --no-cache -t nome .</code></td><td>Ignora o cache: todos os passos rodam de novo</td></tr>
+<tr><td><code>docker build --pull -t nome .</code></td><td>Atualiza a imagem base antes de buildar</td></tr>
+<tr><td><code>docker build -q .</code></td><td>Imprime só o ID da imagem (bom para scripts)</td></tr>
+<tr><td><code>docker build URL_GIT</code></td><td>Builda direto de um repositório remoto</td></tr>
+</table>
+</div>
+
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Na saída do build</th><th>Significado</th></tr>
+<tr><td><code>Sending build context … kB/MB</code></td><td>Tamanho da pasta enviada ao daemon (olho no .dockerignore se estiver grande)</td></tr>
+<tr><td><code>Step N/M</code> / <code>#N [i/j]</code></td><td>Instrução N de M sendo executada</td></tr>
+<tr><td><code>Using cache</code> / <code>CACHED</code></td><td>Passo reutilizado do build anterior</td></tr>
+<tr><td><code>Successfully built / tagged</code></td><td>Imagem montada e etiquetada (BuildKit: <code>[+] Building … FINISHED</code>)</td></tr>
+<tr><td><code>failed to read dockerfile: … no such file</code></td><td>Não achou o Dockerfile no contexto</td></tr>
+</table>
+</div>
+
+<div class="try" data-goal="FINISHED" data-solucao="docker build --help">
+<p class="try-task"><strong>Missão:</strong> rode <code>docker build --help</code> no terminal abaixo e veja a saída do comando que monta imagens a partir do Dockerfile.</p>
+</div>
+
+<div class="try" data-goal="Successfully tagged minha-api:1.0" data-solucao="docker build -t minha-api:1.0 .">
+<p class="try-task"><strong>Missão extra:</strong> rode um build de verdade no simulador: <code>docker build -t minha-api:1.0 .</code> e acompanhe até o <code>FINISHED</code>.</p>
+</div>
+
+<hr>
+
+<h2>Quiz rápido</h2>
+
+<div class="mc" data-answer="2">
+<p class="mc-q">1. O que é o "contexto do build" no <code>docker build -t app .</code>?</p>
+<label><input type="radio" name="q1"> O arquivo Dockerfile sozinho</label>
+<label><input type="radio" name="q1"> A pasta inteira indicada no fim do comando (aqui, a pasta atual <code>.</code>), que é enviada ao daemon</label>
+<label><input type="radio" name="q1"> A imagem base</label>
+<label><input type="radio" name="q1"> O cache de builds anteriores</label>
+</div>
+
+<div class="mc" data-answer="3">
+<p class="mc-q">2. A Ana quer um build do zero, ignorando o cache. Qual flag ela usa?</p>
+<label><input type="radio" name="q2"> <code>--force</code></label>
+<label><input type="radio" name="q2"> <code>-f</code></label>
+<label><input type="radio" name="q2"> <code>--no-cache</code></label>
+<label><input type="radio" name="q2"> <code>--clean</code></label>
+</div>
+
+<div class="mc" data-answer="4">
+<p class="mc-q">3. O build da Ana ficou lento e a primeira linha mostra <code>Sending build context to Docker daemon 480.5MB</code>. O que ela faz?</p>
+<label><input type="radio" name="q3"> Compra um disco maior</label>
+<label><input type="radio" name="q3"> Roda o build com <code>--no-cache</code></label>
+<label><input type="radio" name="q3"> Aumenta a memória do computador</label>
+<label><input type="radio" name="q3"> Cria um <code>.dockerignore</code> para excluir <code>node_modules</code>, <code>.git</code> etc. do contexto</label>
+</div>
+
+<div class="mc" data-answer="1">
+<p class="mc-q">4. O build falhou com <code>failed to read dockerfile: open Dockerfile: no such file or directory</code>. Causa mais provável?</p>
+<label><input type="radio" name="q4"> O comando rodou numa pasta que não tem o arquivo <code>Dockerfile</code></label>
+<label><input type="radio" name="q4"> A imagem base não existe</label>
+<label><input type="radio" name="q4"> O CMD está errado</label>
+<label><input type="radio" name="q4"> O disco está cheio</label>
+</div>
+
+<hr>
+
+<h2>Resumo</h2>
+<ul>
+  <li><code>docker build -t nome:tag .</code>: o <code>.</code> é o <strong>contexto</strong> (pasta enviada ao daemon, com o Dockerfile dentro); o <code>-t</code> etiqueta a imagem.</li>
+  <li>A primeira linha da saída (<code>Sending build context …</code>) mostra o tamanho do envio — se estiver em MB/GB, crie um <code>.dockerignore</code>.</li>
+  <li>Cada instrução vira um <code>Step N/M</code>; passos inalterados aparecem como <code>Using cache</code> e o build voa. No BuildKit moderno, a saída vem como <code>#N [i/j]</code> e termina com <code>[+] Building … FINISHED</code>.</li>
+  <li>Opções do dia a dia: <code>-f</code> (outro Dockerfile), <code>--build-arg</code> (valor para ARG), <code>--no-cache</code> (build do zero), <code>--pull</code> (base atualizada), <code>--target</code> (etapa do multi-stage), <code>-q</code> (só o ID), <code>--progress=plain</code> (logs de CI).</li>
+  <li>O contexto pode ser remoto: <code>docker build https://github.com/org/repo.git</code> builda direto do git.</li>
+  <li>Erros reais: Dockerfile não achado (pasta errada), contexto gigante sem .dockerignore, <code>no space left on device</code>, comando inexistente no <code>RUN</code> (gerenciador errado da base).</li>
+</ul>
+
+<div class="tip"><strong>Próxima aula:</strong> <a href="dockerignore.html">.dockerignore</a> — como deixar o contexto do build enxuto e não enviar segredos para a imagem.</div>
+
+<div class="pager"></div>
+
+</div>
+</main>
+</div>
+<script src="assets/site.js?v=4"></script>
+</body>
+</html>

@@ -1,0 +1,309 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Docker em pipelines de CI (GitHub Actions) | Guia Docker</title>
+<meta name="description" content="Por que usar Docker no CI/CD e como montar um pipeline completo no GitHub Actions: a história da Ana e o deploy que quebrou, a anatomia do workflow YAML comentada linha a linha, build da imagem com docker/build-push-action, testes rodando dentro do container, login no Docker Hub com secrets (passo a passo para criar o token) e push com tags automáticas via metadata-action. Erros reais de CI e tabela das actions oficiais. Workflow pronto para copiar.">
+<link rel="stylesheet" href="assets/style.css?v=4">
+<script>try{var t=localStorage.getItem("tema");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<meta http-equiv="Cache-Control" content="no-store, must-revalidate">
+<script>try{history.scrollRestoration="manual"}catch(e){}(function(){var n=0;function t(){window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;if(++n<60)setTimeout(t,50)}t();window.addEventListener("pagehide",function(){window.scrollTo(0,0);document.documentElement.scrollTop=0;});window.addEventListener("pageshow",function(){window.scrollTo(0,0)});window.addEventListener("load",function(){window.scrollTo(0,0)});})();document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(a){var h=a.getAttribute("href")||"";if(/[.]html($|[?#])/.test(h)&&a.host===location.host){window.scrollTo(0,0);document.documentElement.scrollTop=0;}}});</script>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" id="sidebar" aria-label="Tópicos"></nav>
+<main class="main">
+<div class="content">
+
+<div class="pager"></div>
+
+<h1>Docker no <span class="hl">CI/CD</span> (GitHub Actions)</h1>
+
+<p class="intro">A Ana terminou a API do projeto 2, subiu o código no GitHub e... o deploy quebrou. "Mas funcionava na minha máquina!" — a frase mais famosa da programação. A causa: o servidor de produção tinha uma versão diferente do Node, faltava variável de ambiente, o <code>npm install</code> rodou diferente... Com Docker, o ambiente do CI (a máquina que testa o código sozinha) é <strong>idêntico</strong> ao da máquina dela e ao da produção: tudo acontece dentro de imagens. Nesta aula você monta um pipeline completo no GitHub Actions, do zero.</p>
+
+<div class="note">
+<strong>Você vai aprender</strong>
+<ul>
+  <li>O que é CI/CD e por que o runner do GitHub Actions já vem com Docker instalado.</li>
+  <li>A anatomia de um workflow YAML (<code>on</code>, <code>jobs</code>, <code>steps</code>, <code>uses</code>, <code>run</code>, <code>if</code>, <code>secrets</code>).</li>
+  <li>O workflow completo comentado: checkout → login → build → testes dentro do container → push com tags automáticas.</li>
+  <li>Como criar os secrets no repositório (DOCKERHUB_USERNAME e DOCKERHUB_TOKEN, com o passo a passo do token no Docker Hub).</li>
+  <li>Erros reais de CI: login interativo sem TTY, push negado, imagem não encontrada no passo de teste.</li>
+</ul>
+</div>
+
+<hr>
+
+<h2>O que é CI/CD, em uma frase</h2>
+<p><strong>CI</strong> (integração contínua) é a esteira que roda sozinha a cada <code>push</code>: ela baixa o código numa máquina limpa, compila, roda os testes e empacota o resultado. <strong>CD</strong> (entrega contínua) é o passo seguinte: se tudo passou, publica a imagem/deploy automaticamente. A gracia do Docker nesse processo: <strong>a esteira inteira acontece dentro de containers</strong>, então "funcionou no CI" passa a significar "vai funcionar em qualquer lugar".</p>
+<p>A máquina que roda o job no GitHub Actions chama-se <strong>runner</strong> — é uma máquina virtual limpa (Linux Ubuntu por padrão) que o GitHub empresta por alguns minutos. E ela já vem com o Docker Engine instalado:</p>
+<pre class="term">$ docker version   « dentro de um job rodando em ubuntu-latest
+Client:
+  Version:   27.3.1
+  OS/Arch:   linux/amd64
+
+Server: Docker Engine 27.3.1
+  Storage Driver: overlay2
+  Operating System: Ubuntu 24.04 LTS</pre>
+<p>Ou seja: no pipeline você usa os mesmos comandos <code>docker build</code>, <code>docker run</code>, <code>docker push</code> que usou no notebook — só que numa máquina que começa do zero a cada execução.</p>
+
+<hr>
+
+<h2>A anatomia de um workflow</h2>
+<p>Um workflow do GitHub Actions é um arquivo YAML dentro do seu repositório, no caminho <code>.github/workflows/</code> (ex.: <code>.github/workflows/ci.yml</code>). Ele tem quatro níveis:</p>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Nível</th><th>Chave YAML</th><th>O que declara</th></tr>
+<tr><td>Workflow</td><td><code>name:</code></td><td>O nome que aparece na aba Actions do GitHub.</td></tr>
+<tr><td>Gatilhos</td><td><code>on:</code></td><td>Quando roda: a cada <code>push</code> na <code>main</code>, em pull requests, por tag, por horário (<code>cron</code>)…</td></tr>
+<tr><td>Jobs</td><td><code>jobs:</code></td><td>Blocos paralelos que rodam em runners diferentes (ex.: um job de teste, um de build). Cada job declara <code>runs-on:</code> (o tipo de máquina).</td></tr>
+<tr><td>Passos</td><td><code>steps:</code></td><td>A lista ordenada dentro do job. Cada passo ou chama uma <strong>action</strong> (<code>uses: …</code>) ou roda um comando de shell (<code>run: …</code>).</td></tr>
+</table>
+</div>
+<p>YAML é chato com indentação: <strong>2 espaços</strong>, nunca tab. Um nível a mais ou a menos e o workflow quebra com erro de sintaxe. Dica: o próprio GitHub valida o arquivo na aba Actions e mostra a linha do erro.</p>
+
+<hr>
+
+<h2>O workflow completo, comentado linha a linha</h2>
+<p>Este é o arquivo que a Ana criou para a API dela — copie, adapte os nomes e use no seu repositório:</p>
+<pre class="file" data-file=".github/workflows/ci.yml"># Nome que aparece na aba Actions
+name: CI — build, teste e push
+
+# GATILHOS: roda a cada push na main e em qualquer pull request para a main
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:                       # um único job chamado "build"
+    runs-on: ubuntu-latest     # máquina virtual limpa; JÁ VEM COM DOCKER INSTALADO
+
+    steps:
+      # 1. Baixa o código do repositório para dentro do runner
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      # 2. Faz login no Docker Hub usando os secrets do repositório
+      - name: Login no Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # 3. Configura o Buildx (builder avançado do Docker, com cache)
+      - name: Setup do Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # 4. Gera as tags da imagem automaticamente (latest, sha curta, etc.)
+      - name: Metadados da imagem
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/minhaapp
+
+      # 5. Faz o BUILD da imagem (sem push ainda) e roda os TESTES dentro dela
+      - name: Build + testes
+        uses: docker/build-push-action@v6
+        with:
+          push: false              # só constrói — o push acontece no passo 8
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha     # lê o cache de builds anteriores (rápido!)
+          cache-to: type=gha,mode=max
+
+      # 6. Roda a suíte de testes DENTRO do container acabado de construir
+      - name: Testes
+        run: docker run --rm ${{ secrets.DOCKERHUB_USERNAME }}/minhaapp:latest npm test
+
+      # 7. (Opcional) Roda um "teste de fumaça": sobe o container e faz um curl
+      - name: Teste de fumaça
+        run: |
+          docker run -d -p 3000:3000 --name api-teste ${{ secrets.DOCKERHUB_USERNAME }}/minhaapp:latest
+          sleep 3
+          curl -sf http://localhost:3000/saude
+          docker rm -f api-teste
+
+      # 8. Faz o PUSH para o Docker Hub — só quando o gatilho foi push na main
+      - name: Push para o Docker Hub
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        uses: docker/build-push-action@v6
+        with:
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max</pre>
+
+<p>Pontos que valem atenção:</p>
+<ul>
+  <li><code>${{ secrets.NOME }}</code> referencia um <em>secret</em> configurado no repositório — o valor <strong>nunca aparece no log</strong> (o GitHub mascara automaticamente).</li>
+  <li><code>if: github.ref == 'refs/heads/main'</code> faz o push acontecer só na branch principal — pull requests rodam build+testes mas não publicam nada.</li>
+  <li>O passo 7 é o "teste de fumaça": sobe o container de verdade, espera 3s, chama <code>/saude</code> com <code>curl -sf</code> (o <code>-f</code> faz o curl falhar se o HTTP não for 2xx) e limpa o container com <code>rm -f</code>. Se o app não responder, o passo falha e o pipeline fica vermelho.</li>
+  <li><code>cache-from/cache-to: type=gha</code> guarda o cache das camadas entre execuções — a aula <a href="build-otimizado.html">Builds otimizados</a> detalha.</li>
+</ul>
+
+<hr>
+
+<h2>Tabela: as partes do YAML</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Parte do YAML</th><th>Exemplo</th><th>Para que serve</th></tr>
+<tr><td><code>on:</code></td><td><code>push: branches: [main]</code></td><td>Gatilho: a cada push na <code>main</code> (e PRs). Também dá para <code>on: [push, pull_request]</code>, por tag (<code>tags: ['v*']</code>) ou agendado (<code>schedule: - cron: '0 3 * * *'</code>).</td></tr>
+<tr><td><code>runs-on:</code></td><td><code>ubuntu-latest</code></td><td>Escolhe o runner: <code>ubuntu-latest</code>, <code>windows-latest</code>, <code>macos-latest</code> — todos com Docker (nos Linux, nativamente).</td></tr>
+<tr><td><code>uses:</code></td><td><code>actions/checkout@v4</code></td><td>Chama uma action pronta (baixa o código, faz login, faz build...). O <code>@v4</code> é a versão da action.</td></tr>
+<tr><td><code>with:</code></td><td><code>push: true</code></td><td>Parâmetros da action chamada pelo <code>uses</code> acima.</td></tr>
+<tr><td><code>run:</code></td><td><code>docker run --rm … npm test</code></td><td>Comando de shell direto no runner. O <code>|</code> depois do <code>run:</code> permite várias linhas.</td></tr>
+<tr><td><code>if:</code></td><td><code>github.ref == 'refs/heads/main'</code></td><td>Condição para o passo rodar. <code>github.ref</code>, <code>github.event_name</code> etc. são variáveis de contexto do próprio GitHub.</td></tr>
+<tr><td><code>secrets.*</code></td><td><code>${{ secrets.DOCKERHUB_TOKEN }}</code></td><td>Variáveis secretas do repositório — nunca aparecem no log e não dá para ler de volta.</td></tr>
+<tr><td><code>id:</code> + <code>steps.ID.outputs.*</code></td><td><code>id: meta</code> → <code>${{ steps.meta.outputs.tags }}</code></td><td>Uma action pode devolver valores (outputs); o passo com <code>id</code> permite usar esses valores nos passos seguintes.</td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>Build e testes dentro do container</h2>
+<p>Em vez de instalar Node e as dependências do projeto no runner, o pipeline constrói a imagem e <strong>roda os testes dentro dela</strong> — exatamente como a Ana faria no notebook:</p>
+<dl class="anatomy">
+  <dt>docker</dt><dd>o CLI, já instalado no runner <code>ubuntu-latest</code>.</dd>
+  <dt>run</dt><dd>cria e inicia um container.</dd>
+  <dt>--rm</dt><dd>apaga o container ao terminar — no CI tudo é descartável, não deixamos lixo.</dd>
+  <dt>minhaapp:latest</dt><dd>a imagem que acabou de ser construída no passo anterior.</dd>
+  <dt>npm test</dt><dd>o comando de teste rodando <strong>dentro</strong> do container.</dd>
+</dl>
+<pre class="term">$ docker build -t minhaapp:latest .
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 187B done
+#1 DONE 0.0s
+#2 [internal] load metadata for docker.io/library/node:22-alpine
+#2 DONE 0.6s
+#3 [1/5] FROM docker.io/library/node:22-alpine
+#3 DONE 0.0s
+#4 [2/5] WORKDIR /app
+#4 CACHED
+#5 [3/5] COPY package*.json ./
+#5 DONE 0.1s
+#6 [4/5] RUN npm install
+#6 2.87 added 58 packages in 3s
+#6 DONE 3.1s
+#7 [5/5] COPY . .
+#7 DONE 0.2s
+#8 exporting to image
+#8 writing image sha256:9f8e7d6c5b4a... done
+#8 naming to docker.io/library/minhaapp:latest done
+#8 DONE 0.4s
+
+$ docker run --rm minhaapp:latest npm test
+
+&gt; api@1.0.0 test
+&gt; node --test
+
+# pass 3
+# fail 0
+# duration_ms 412.7</pre>
+<p>Se qualquer teste falhar, o comando sai com <strong>código diferente de zero</strong> e o job inteiro falha — o pipeline fica vermelho na aba Actions e ninguém consegue fazer merge (se a branch tiver a proteção ligada). É o CI funcionando como rede de segurança.</p>
+
+<hr>
+
+<h2>Login e push: criando os secrets passo a passo</h2>
+<p>Para enviar a imagem para o Docker Hub, o pipeline precisa se autenticar — e a senha/token <strong>nunca</strong> vai escrita no YAML. O caminho é criar <em>secrets</em> no repositório:</p>
+<ol class="passo">
+  <li>No Docker Hub (hub.docker.com), a Ana entra em <strong>Account Settings → Security → New Access Token</strong>. Dá para dar um nome (ex.: "github-actions") e escolher a permissão: <strong>Read &amp; Write</strong> (o pipeline precisa escrever para fazer push).</li>
+  <li>Copia o token gerado <strong>na hora</strong> — o Docker Hub mostra ele uma vez só. Se perder, gera outro.</li>
+  <li>No repositório do GitHub: <strong>Settings → Secrets and variables → Actions → New repository secret</strong>.</li>
+  <li>Crie dois secrets: <code>DOCKERHUB_USERNAME</code> (seu usuário do Hub, ex.: <code>ana</code>) e <code>DOCKERHUB_TOKEN</code> (o token copiado).</li>
+  <li>Pronto: no workflow, <code>${{ secrets.DOCKERHUB_USERNAME }}</code> e <code>${{ secrets.DOCKERHUB_TOKEN }}</code> preenchem o login.</li>
+</ol>
+<p>Localmente, no notebook da Ana, o equivalente manual é:</p>
+<pre class="term">$ docker login -u ana
+Password:
+Login Succeeded
+
+$ docker tag minhaapp:latest ana/minhaapp:latest
+
+$ docker push ana/minhaapp:latest
+The push refers to repository [docker.io/ana/minhaapp]
+9f8e7d6c5b4a: Layer already exists
+...
+latest: digest: sha256:9f8e7d6c5b4a3f2e... size: 1786</pre>
+
+<div class="warn"><strong>Nunca commite credenciais:</strong> se um token aparecer no YAML, no código ou no log, qualquer pessoa pode publicar imagens em seu nome (e minerar criptomoeda no seu runner, que é cobrado por minuto em repositórios privados). Se vazar, revogue o token no Docker Hub na hora (Account Settings → Security). No CI, o erro clássico de quem tenta login interativo é <code>Error: Cannot perform an interactive login from a non TTY device</code> — no runner não existe terminal interativo, por isso usamos a <code>docker/login-action</code> com secrets, nunca <code>docker login</code> pedindo senha.</div>
+
+<div class="try" data-goal="Successfully tagged minhaapp" data-solucao="docker build -t minhaapp .">
+<p class="try-task"><strong>Missão:</strong> simule o passo de build do CI: rode <code>docker build -t minhaapp .</code> e depois <code>docker images</code> para ver a imagem nova na lista.</p>
+</div>
+
+<div class="try" data-goal="Login Succeeded" data-solucao="docker login -u ana">
+<p class="try-task"><strong>Missão:</strong> simule o login no registry (no CI isso é feito pela action com os secrets): rode <code>docker login -u ana</code>.</p>
+</div>
+
+<hr>
+
+<h2>Erros comuns no CI</h2>
+<div class="warn"><strong>Push negado:</strong> <code>denied: requested access to the resource is denied</code> — o token não tem permissão de escrita (Read &amp; Write), o nome de usuário não bate com o do repositório (<code>ana/minhaapp</code> precisa começar com o usuário <code>ana</code>), ou o repositório não existe/no Hub ele é criado sozinho no primeiro push. Revise o token e o <code>images:</code> do metadata-action.</div>
+<div class="warn"><strong>Login interativo:</strong> <code>Error: Cannot perform an interactive login from a non TTY device</code> — alguém colocou <code>docker login</code> num <code>run:</code>. Use <code>docker/login-action</code> com secrets.</div>
+<div class="warn"><strong>Imagem não encontrada no passo de teste:</strong> <code>Unable to find image 'minhaapp:latest' locally</code> — o passo de teste rodou antes do build, ou o build usou outra tag. A ordem dos <code>steps</code> importa: build primeiro, teste depois. Se usar o metadata-action, a tag pode não ser <code>latest</code> — confira <code>${{ steps.meta.outputs.tags }}</code>.</div>
+<div class="warn"><strong>YAML inválido:</strong> <code>YAMLException: bad indentation of a mapping entry</code> — indentação errada (tab em vez de espaço, ou um nível a mais). O GitHub mostra a linha exata na aba Actions.</div>
+<div class="warn"><strong>Cache do GHA encheu:</strong> o cache <code>type=gha</code> tem limite de 10GB por repositório; quando enche, o build continua mas o cache novo não é salvo (aparece um aviso). Alternativa: <code>type=registry</code> (guarda o cache como imagem no próprio Hub) — a aula <a href="build-otimizado.html">Builds otimizados</a> mostra.</div>
+
+<hr>
+
+<h2>As actions oficiais do Docker</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Action</th><th>O que faz</th><th>Quando usar</th></tr>
+<tr><td><code>actions/checkout@v4</code></td><td>Clona o repositório no runner.</td><td>Sempre, primeiro passo.</td></tr>
+<tr><td><code>docker/setup-buildx-action@v3</code></td><td>Configura o builder Buildx (cache avançado, multi-plataforma).</td><td>Antes do build-push-action.</td></tr>
+<tr><td><code>docker/login-action@v3</code></td><td>Login num registry (Docker Hub, GHCR, ECR…) usando secrets. Funciona com <code>username</code>/<code>password</code> ou só <code>password</code> como token.</td><td>Antes de qualquer push/pull privado.</td></tr>
+<tr><td><code>docker/metadata-action@v5</code></td><td>Gera tags automáticas: <code>latest</code>, <code>sha-abc1234</code>, <code>v1.2.3</code> (se a tag do git for semver), <code>branch</code>… e labels.</td><td>Para nomear a imagem sem pensar.</td></tr>
+<tr><td><code>docker/build-push-action@v6</code></td><td>Build com BuildKit + push opcional, com <code>cache-from</code>/<code>cache-to</code> (<code>type=gha</code>, <code>type=registry</code>), <code>platforms</code> (amd64+arm64) e <code>provenance</code>.</td><td>O coração do pipeline.</td></tr>
+<tr><td><code>docker/setup-qemu-action@v3</code></td><td>Emula outras arquiteturas (arm64) no runner x86.</td><td>Para builds multi-plataforma.</td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>Outros registries (GHCR, ECR…)</h2>
+<p>O GitHub tem o próprio registry, o <strong>GHCR</strong> (ghcr.io), que se autentica com o <code>GITHUB_TOKEN</code> automático do Actions — nem precisa de secret extra:</p>
+<pre class="file">      - name: Login no GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # imagem: ghcr.io/USUARIO/REPO:tag  (tudo em minúsculas!)</pre>
+<p>Regra do GHCR: o nome da imagem precisa ser <strong>minúsculas</strong> (<code>ghcr.io/Ana/App</code> é inválido; <code>ghcr.io/ana/app</code> é válido). No Docker Hub, o repositório também é sempre minúsculo.</p>
+
+<hr>
+
+<h2>Checklist do pipeline</h2>
+<ul>
+  <li>☐ O arquivo está em <code>.github/workflows/ci.yml</code> (indentação de 2 espaços, sem tab).</li>
+  <li>☐ Gatilhos definidos (<code>push</code> na main + <code>pull_request</code>).</li>
+  <li>☐ Secrets criados no repositório: <code>DOCKERHUB_USERNAME</code> e <code>DOCKERHUB_TOKEN</code> (Read &amp; Write).</li>
+  <li>☐ Passos na ordem: checkout → login → setup-buildx → metadata → build (push: false) → testes no container → push (só na main).</li>
+  <li>☐ O push só acontece em <code>github.ref == 'refs/heads/main'</code>.</li>
+  <li>☐ O primeiro run erschien verde na aba Actions; a imagem apareceu no Docker Hub com as tags do metadata-action.</li>
+</ul>
+
+<hr>
+
+<h2>Resumo</h2>
+<ul>
+  <li>CI = esteira automática por push; com Docker, build e testes rodam <strong>dentro de containers</strong> no runner <code>ubuntu-latest</code>, que já tem Docker.</li>
+  <li>Workflow YAML: <code>on</code> (gatilhos) → <code>jobs</code> (<code>runs-on</code>) → <code>steps</code> (<code>uses</code> = action, <code>run</code> = shell).</li>
+  <li>Credenciais vão em <strong>secrets</strong> do repositório e entram no YAML como <code>${{ secrets.NOME }}</code></li> — nunca no texto.</li>
+  <li>Actions oficiais: <code>checkout</code>, <code>setup-buildx</code>, <code>login-action</code>, <code>metadata-action</code> (tags automáticas), <code>build-push-action</code>.</li>
+  <li>Fluxo recomendado: build (push: false) → testes dentro do container → push só na main.</li>
+  <li>Erros típicos: login sem TTY, push negado (token sem Read&amp;Write), imagem não encontrada (ordem dos steps), YAML mal indentado.</li>
+</ul>
+
+<div class="tip"><strong>Próxima aula:</strong> <a href="build-otimizado.html">Otimizando builds para CI</a> — cache de camadas, <code>cache-from</code>, buildx, ordem das instruções no Dockerfile e multi-stage para deixar o pipeline rápido.</div>
+
+</div>
+</main>
+</div>
+<script src="assets/site.js?v=4"></script>
+</body>
+</html>

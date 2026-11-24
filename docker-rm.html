@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>docker rm — removendo containers | Guia Docker</title>
+<meta name="description" content="Como remover containers com docker rm: por nome, por ID curto, vários de uma vez, docker rm -f (forçar mesmo rodando), o erro real de tentar apagar container rodando sem -f (cannot remove container: container is running), docker container prune (remover todos os parados), o que acontece com os dados da camada gravável ao apagar, e a diferença entre rm e stop. Missões no simulador.">
+<link rel="stylesheet" href="assets/style.css?v=4">
+<script>try{var t=localStorage.getItem("tema");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<meta http-equiv="Cache-Control" content="no-store, must-revalidate">
+<script>try{history.scrollRestoration="manual"}catch(e){}(function(){var n=0;function t(){window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;if(++n<60)setTimeout(t,50)}t();window.addEventListener("pagehide",function(){window.scrollTo(0,0);document.documentElement.scrollTop=0;});window.addEventListener("pageshow",function(){window.scrollTo(0,0)});window.addEventListener("load",function(){window.scrollTo(0,0)});})();document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(a){var h=a.getAttribute("href")||"";if(/[.]html($|[?#])/.test(h)&&a.host===location.host){window.scrollTo(0,0);document.documentElement.scrollTop=0;}}});</script>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" id="sidebar" aria-label="Tópicos"></nav>
+<main class="main">
+<div class="content">
+
+<div class="pager"></div>
+
+<h1>docker <span class="hl">rm</span> — removendo containers</h1>
+
+<p class="intro">Container parado ocupa pouco, mas enche a lista do <code>docker ps -a</code> e pode segurar espaço de disco. O <code>docker rm</code> apaga o container <strong>de vez</strong> — diferente do <code>stop</code>, que só para. Nesta aula a Ana limpa a bagunça de testes dela.</p>
+
+<div class="note">
+<strong>Você vai aprender</strong>
+<ul>
+  <li>Remover por <strong>nome</strong> e por <strong>ID curto</strong>.</li>
+  <li>Remover <strong>vários de uma vez</strong> e o <code>-f</code> (forçar mesmo rodando).</li>
+  <li>O erro real de apagar container rodando sem <code>-f</code>.</li>
+  <li><code>docker container prune</code>: apagar todos os parados de uma vez.</li>
+  <li>O que acontece com os dados do container ao apagar (e por que existem volumes).</li>
+</ul>
+</div>
+
+<hr>
+
+<h2>A cena: a lista da Ana está cheia de testes</h2>
+<pre class="term">$ docker ps -a
+CONTAINER ID   IMAGE          STATUS                      PORTS     NAMES
+a1b2c3d4e5f6   nginx:alpine   Up 2 minutes                80/tcp    meu-site
+c3d4e5f6a1b2   hello-world    Exited (0) 10 minutes ago           clever_curie-42
+7d3a1b9c2e4f   hello-world    Exited (0) 5 minutes ago            boring_torvalds-7</pre>
+<p>Ela quer apagar os dois hello-world parados e manter o site no ar.</p>
+
+<hr>
+
+<h2>Por nome ou ID</h2>
+<div class="try" data-goal="meu-site" data-solucao="docker rm meu-site"><p class="try-task"><strong>Missão:</strong> crie um container parado (<code>docker run --name meu-site hello-world</code>) e remova com <code>docker rm meu-site</code>.</p></div>
+<pre class="term">$ docker rm clever_curie-42
+clever_curie-42
+$ docker rm 7d3a          « ID curto também funciona
+boring_torvalds-7
+$ docker ps -a
+CONTAINER ID   IMAGE          STATUS          PORTS     NAMES
+a1b2c3d4e5f6   nginx:alpine   Up 2 minutes    80/tcp    meu-site   « só sobrou o site</pre>
+
+<p>O comando imprime o <strong>nome do container removido</strong> — é a confirmação de que deu certo. Se o nome/ID não existir:</p>
+<pre class="term">$ docker rm nao-existe
+Error: No such container: nao-existe</pre>
+
+<hr>
+
+<h2>Apagar vários de uma vez</h2>
+<pre class="term">$ docker rm container1 container2 container3     « vários argumentos
+$ docker rm $(docker ps -aq)    « apaga TODOS os containers PARADOS (rodando dá erro sem -f)</pre>
+
+<hr>
+
+<h2>-f: forçar mesmo rodando</h2>
+<pre class="term">$ docker rm -f meu-site   « equivalente a stop + rm
+meu-site</pre>
+<p>O <code>-f</code> manda parar na marra (kill) e apaga em seguida. Prático para limpar rápido — mas lembre: os dados da camada gravável vão junto.</p>
+
+<hr>
+
+<h2>Erro comum: apagar container rodando</h2>
+<div class="try" data-goal="container is running" data-solucao="docker rm meu-site">
+<p class="try-task"><strong>Missão:</strong> suba um container rodando (<code>docker run -d --name meu-site nginx:alpine</code>) e tente apagar sem parar: <code>docker rm meu-site</code>. Veja o erro real.</p>
+</div>
+<pre class="term">$ docker run -d --name meu-site nginx:alpine
+$ docker rm meu-site
+Error response from daemon: cannot remove container "meu-site": container is running: stop the container before removing or force remove</pre>
+<p>Container rodando não pode ser removido sem <code>-f</code>. O Docker protege você de apagar algo em uso sem querer. <strong>Como consertar:</strong> <code>docker stop meu-site</code> e depois <code>docker rm meu-site</code> — ou direto <code>docker rm -f meu-site</code>.</p>
+
+<hr>
+
+<h2>docker container prune: limpar todos os parados</h2>
+<p>Em vez de apagar um por um, o prune remove <strong>todos os containers parados</strong> de uma vez (os rodando continuam):</p>
+<pre class="term">$ docker ps -a
+… vários Exited…
+$ docker container prune
+WARNING! This will remove all stopped containers.
+Are you sure you want to continue? [y/N] y
+Deleted Containers:
+clever_curie-42
+boring_torvalds-7
+Total reclaimed space: 2.5kB
+$ docker ps -a
+… só o que está rodando (ou vazio)</pre>
+<p>Existe também o <code>docker system prune</code>, que além dos containers parados apaga imagens dangling, redes não usadas e cache de build — aula <a href="docker-system-prune.html">docker system prune</a>.</p>
+
+<hr>
+
+<h2>stop × rm: a diferença que salva seus dados</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th></th><th>docker stop</th><th>docker rm</th></tr>
+<tr><td>O container depois</td><td>Existe, parado (<code>Exited</code> no <code>ps -a</code>)</td><td><strong>Não existe mais</strong> (sai até do <code>ps -a</code>)</td></tr>
+<tr><td>Arquivos gravados dentro dele</td><td>Continuam lá (dá para dar <code>start</code> e voltar)</td><td><strong>Somem</strong> com a camada gravável</td></tr>
+<tr><td>Pode dar start depois?</td><td>Sim</td><td>Não</td></tr>
+<tr><td>Libera espaço?</td><td>Muito pouco</td><td>Sim (a camada gravável)</td></tr>
+</table>
+</div>
+
+<div class="warning">
+<strong>Apagar container apaga os dados dele (se não tiver volume)</strong>
+<p>Se o container gravou arquivos (um banco de dados gravando em <code>/var/lib/postgresql/data</code>, um upload em <code>/app/uploads</code>), esses arquivos estão na camada gravável e <strong>somem com o <code>docker rm</code></strong>. A imagem continua (é só a receita), mas os dados vão embora. Para dados que devem sobreviver: monte um <a href="volumes-intro.html">volume</a> com <code>-v</code> — aí eles ficam fora do container e o <code>rm</code> não os apaga.</p>
+</div>
+
+<div class="mc" data-answer="2">
+<p class="mc-q">O que acontece se você der <code>docker rm</code> num container que está rodando (sem <code>-f</code>)?</p>
+<label><input type="radio" name="q1"> Ele é apagado mesmo assim</label>
+<label><input type="radio" name="q1"> Dá erro: "cannot remove container … container is running" — pare antes com stop ou use <code>-f</code></label>
+<label><input type="radio" name="q1"> O Docker pergunta se pode parar primeiro</label>
+<label><input type="radio" name="q1"> Nada acontece e o comando nem responde</label>
+</div>
+
+<div class="mc" data-answer="3">
+<p class="mc-q"><code>docker rm $(docker ps -aq)</code> faz o quê?</p>
+<label><input type="radio" name="q2"> Apaga todas as imagens</label>
+<label><input type="radio" name="q2"> Lista os IDs</label>
+<label><input type="radio" name="q2"> Apaga todos os containers (parados; os rodando dão erro sem -f)</label>
+<label><input type="radio" name="q2"> Para todos os containers</label>
+</div>
+
+<div class="mc" data-answer="2">
+<p class="mc-q">Depois do <code>docker rm meu-site</code>, os arquivos que o programa gravou dentro do container…</p>
+<label><input type="radio" name="q3"> Continuam, porque a imagem guarda tudo</label>
+<label><input type="radio" name="q3"> Somem — estavam na camada gravável do container; para durar, use volume (-v)</label>
+<label><input type="radio" name="q3"> Vão para a lixeira do sistema</label>
+<label><input type="radio" name="q3"> Ficam no Docker Hub</label>
+</div>
+
+<hr>
+
+<h2>Uma sessão de limpeza completa</h2>
+<p>Juntando tudo desta aula e da anterior (<a href="docker-stop-start.html">stop/start</a>): é assim que a Ana deixa a máquina dela limpa no fim do dia, sem perder nada importante:</p>
+<pre class="term">$ docker ps -a
+CONTAINER ID   IMAGE          STATUS                      PORTS     NAMES
+a1b2c3d4e5f6   nginx:alpine   Up 2 minutes                8080:80   meu-site
+c3d4e5f6a1b2   hello-world    Exited (0) 10 minutes ago           clever_curie-42
+7d3a1b9c2e4f   hello-world    Exited (0) 5 minutes ago            boring_torvalds-7
+9f8e7d6c5b4a   redis:7-alpine Exited (0) 1 minute ago             cache-teste
+$ docker rm clever_curie-42 boring_torvalds-7 cache-teste   « apagou os 3 testes de uma vez
+clever_curie-42
+boring_torvalds-7
+cache-teste
+$ docker ps -a
+CONTAINER ID   IMAGE          STATUS          PORTS      NAMES
+a1b2c3d4e5f6   nginx:alpine   Up 2 minutes    8080:80    meu-site   « só ficou o que importa
+$ docker images                « as imagens continuam todas (rm não mexe em imagem)
+REPOSITORY   TAG          IMAGE ID       CREATED         SIZE
+nginx        alpine       b2c3d4e5f6a1   5 days ago      48.2MB
+hello-world  latest       a1b2c3d4e5f6   2 weeks ago     18.2kB
+…</pre>
+
+<h3>Limpeza geral (quando a máquina encheu)</h3>
+<ol class="passo">
+  <li><code>docker ps -a</code> — veja todos os containers.</li>
+  <li><code>docker stop $(docker ps -q)</code> — para os rodando (se quiser manter algum, pare só ele pelo nome).</li>
+  <li><code>docker rm $(docker ps -aq)</code> — apaga todos.</li>
+  <li><code>docker images</code> — veja as imagens; apague as que não usa com <code>docker rmi</code> (<a href="docker-rmi.html">aula</a>).</li>
+  <li><code>docker system df</code> — confere quanto espaço sobrou.</li>
+  <li>Opcional, limpeza total: <code>docker system prune -a</code> (apaga containers parados + imagens sem container + cache; <strong>não</strong> apaga volumes por padrão).</li>
+</ol>
+
+<div class="warning">
+<strong>O que o rm NÃO apaga</strong>
+<p>O <code>docker rm</code> apaga só o container. A <strong>imagem</strong> continua (é a receita — <code>docker rmi</code> apaga ela), os <strong>volumes</strong> continuam (são dados separados — <code>docker volume rm</code> apaga) e as <strong>redes</strong> continuam. Ou seja: seus dados em volumes estão seguros; o que some é só a "casca" do container.</p>
+</div>
+
+<hr>
+
+<h2>Apagar container que usa volume: o volume fica</h2>
+<p>Regra importante: o <code>docker rm</code> apaga o container, <strong>mas não apaga os volumes</strong> que ele usava. Veja:</p>
+<pre class="term">$ docker run -d --name banco -v dados-postgres:/var/lib/postgresql/data -e POSTGRES_PASSWORD=x postgres:16-alpine
+$ docker rm -f banco
+banco
+$ docker volume ls
+DRIVER    VOLUME NAME
+local     dados-postgres     « o volume (e os dados) continuam ✅
+$ docker run -d --name banco2 -v dados-postgres:/var/lib/postgresql/data -e POSTGRES_PASSWORD=x postgres:16-alpine
+$ docker exec banco2 psql -U postgres -c "SELECT count(*) FROM clientes;"   « dados lá, firmes
+ 30</pre>
+<p>Ou seja: <code>rm</code> apaga a "casca"; o volume é o "cofre" e só sai com <code>docker volume rm NOME</code> (cuidado: aí os dados vão de vez).</p>
+
+<h3>prune de container × system prune</h3>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Comando</th><th>Apaga o quê</th></tr>
+<tr><td><code>docker container prune</code></td><td>Só containers parados</td></tr>
+<tr><td><code>docker image prune</code></td><td>Só imagens dangling (<code>&lt;none&gt;</code>)</td></tr>
+<tr><td><code>docker volume prune</code></td><td>Só volumes sem container usando (perigoso: dados!)</td></tr>
+<tr><td><code>docker network prune</code></td><td>Redes não usadas</td></tr>
+<tr><td><code>docker system prune</code></td><td>Containers parados + imagens dangling + redes + cache de build (volumes só com <code>-a</code>/<code>--volumes</code>)</td></tr>
+<tr><td><code>docker system prune -a</code></td><td>Tudo que não está em uso agora, <strong>inclusive imagens com tag</strong> (cuidado!)</td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>Erros de rm na prática</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Mensagem</th><th>Causa</th><th>Solução</th></tr>
+<tr><td><code>Error: No such container: X</code></td><td>Nome/ID errado ou já apagado</td><td><code>docker ps -a</code> para conferir</td></tr>
+<tr><td><code>cannot remove container "X": container is running…</code></td><td>Tentou rm num container Up, sem <code>-f</code></td><td><code>docker stop X</code> antes, ou <code>docker rm -f X</code></td></tr>
+<tr><td><code>You cannot remove a running container</code> (versões antigas)</td><td>O mesmo de acima</td><td>idem</td></tr>
+</table>
+</div>
+
+<h3>Remover só os que saíram com erro</h3>
+<p>Útil para limpar a bagunça de testes que falharam:</p>
+<pre class="term">$ docker rm $(docker ps -a -q --filter "status=exited" --filter "exited=1")
+…   « apaga só os containers parados que saíram com código 1 (erro)</pre>
+<p>O filtro <code>exited=1</code> pega só os que falharam; sem ele, pega todos os parados.</p>
+
+<hr>
+
+<h2>ID curto: quantos caracteres bastam?</h2>
+<p>O ID completo tem 64 caracteres, mas o Docker aceita um <strong>prefixo único</strong> — na prática, 3–4 caracteres já bastam na máquina local:</p>
+<pre class="term">$ docker ps -a
+CONTAINER ID   IMAGE   STATUS   NAMES
+f3a1b2c3d4e5…  nginx   Up       meu-site
+$ docker stop f3a        « 3 caracteres e já achou
+meu-site
+$ docker stop f3a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5   « o ID inteiro também funciona
+meu-site</pre>
+<p>Se o prefixo bater em mais de um container, o Docker avisa (<code>Error: ambiguous ID</code>) — aí é só usar mais caracteres.</p>
+
+<hr>
+
+<h2>Resumo</h2>
+<ul>
+  <li><code>docker rm NOME</code> (ou ID curto) apaga o container de vez e imprime o nome como confirmação; vários: <code>docker rm a b c</code>.</li>
+  <li>Container rodando não sai sem <code>-f</code>: erro real <code>cannot remove container "X": container is running: stop the container before removing or force remove</code>.</li>
+  <li><code>docker rm -f X</code> = stop + rm (mata na marra e apaga). <code>docker rm $(docker ps -aq)</code> apaga todos os parados.</li>
+  <li><code>docker container prune</code> remove todos os containers parados de uma vez (com confirmação).</li>
+  <li><strong>stop ≠ rm</strong>: stop guarda (dá para religar); rm apaga — e junto vão os arquivos da camada gravável (dados importantes = <a href="volumes-intro.html">volume</a>).</li>
+  <li>Erro: <code>Error: No such container: X</code> (nome errado ou já apagado).</li>
+</ul>
+
+<div class="tip"><strong>Próxima aula:</strong> <a href="docker-logs.html">docker logs: vendo a saída</a> — antes de apagar um container que deu erro, você precisa saber ler o que ele imprimiu. O <code>docker logs</code> mostra isso.</div>
+
+</div>
+</main>
+</div>
+<script src="assets/site.js?v=4"></script>
+</body>
+</html>

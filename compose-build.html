@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Build de imagens no Compose — build: e docker compose up --build | Guia Docker</title>
+<meta name="description" content="A chave build: do docker-compose.yml: build: . usa o Dockerfile da pasta, build com context, dockerfile alternativo e args; quando o Compose faz o build (primeira subida ou up --build) e a pegadinha da imagem já existente; docker compose build e --no-cache; exemplo completo de app Node.js + PostgreSQL com saída real do Compose v2; erros reais (Dockerfile inexistente, caminho fora do contexto).">
+<link rel="stylesheet" href="assets/style.css?v=4">
+<script>try{var t=localStorage.getItem("tema");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<meta http-equiv="Cache-Control" content="no-store, must-revalidate">
+<script>try{history.scrollRestoration="manual"}catch(e){}(function(){var n=0;function t(){window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;if(++n<60)setTimeout(t,50)}t();window.addEventListener("pagehide",function(){window.scrollTo(0,0);document.documentElement.scrollTop=0;});window.addEventListener("pageshow",function(){window.scrollTo(0,0)});window.addEventListener("load",function(){window.scrollTo(0,0)});})();document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(a){var h=a.getAttribute("href")||"";if(/[.]html($|[?#])/.test(h)&&a.host===location.host){window.scrollTo(0,0);document.documentElement.scrollTop=0;}}});</script>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" id="sidebar" aria-label="Tópicos"></nav>
+<main class="main">
+<div class="content">
+
+<div class="pager"></div>
+
+<h1><span class="hl">build:</span> no Compose — imagens próprias no projeto</h1>
+
+<p class="intro">Até agora os serviços usavam <code>image:</code> pronta, direto do Docker Hub. Mas quando a aplicação é <strong>a sua</strong> — o seu código, o seu Dockerfile — o Compose também constrói a imagem para você na hora da subida. É só trocar <code>image:</code> por <code>build:</code>. A Ana vai usar isso agora: a <code>minhaloja</code> dela tem uma API em Node.js, e ela quer que o <code>up</code> já deixe tudo no ar, imagem incluída.</p>
+
+<div class="note">
+<strong>Você vai aprender</strong>
+<ul>
+  <li><code>build: .</code> — usar o Dockerfile da pasta do projeto.</li>
+  <li><code>build</code> na forma longa: <code>context</code>, <code>dockerfile</code> alternativo e <code>args</code>.</li>
+  <li>Quando o build acontece (primeira subida) e a pegadinha de mudar o código sem rebuildar.</li>
+  <li><code>docker compose build</code>, <code>up --build</code> e <code>--no-cache</code>.</li>
+  <li>O nome que a imagem recebe (<code>projeto-servico</code>) e erros reais de build.</li>
+</ul>
+</div>
+
+<hr>
+
+<h2>De image: para build:</h2>
+<p>Compare os dois serviços no mesmo arquivo: o <code>banco</code> usa imagem pronta do Hub; o <code>api</code> constrói a imagem local a partir do Dockerfile da pasta:</p>
+<pre class="file" data-file="~/app/docker-compose.yml (trecho)">services:
+  api:
+    build: .              # usa o Dockerfile da pasta atual (onde está o docker-compose.yml)
+    ports:
+      - "3000:3000"
+  banco:
+    image: postgres:16-alpine</pre>
+<p>O Compose aceita misturar os dois no mesmo projeto sem problema — é exatamente o caso mais comum: <strong>imagens prontas para as dependências</strong> (banco, cache, fila) e <strong>build para o seu código</strong>.</p>
+
+<dl class="anatomy">
+  <dt>build:</dt><dd>Em vez de <code>image:</code>, constrói a imagem na hora da subida.</dd>
+  <dt>.</dt><dd>O <strong>contexto do build</strong>: a pasta atual. O Compose procura o <code>Dockerfile</code> dentro dela e envia essa pasta inteira para o daemon fazer o build (é o mesmo <code>.</code> do <code>docker build -t x .</code>, aula <a href="docker-build.html">docker build</a>).</dd>
+  <dt>context:</dt><dd>Muda a pasta do contexto (ex.: <code>context: ./api</code>).</dd>
+  <dt>dockerfile:</dt><dd>Nome/caminho alternativo do Dockerfile dentro do contexto (ex.: <code>dockerfile: Dockerfile.dev</code>).</dd>
+  <dt>args:</dt><dd>Valores para os <code>ARG</code> do Dockerfile (ex.: <code>NODE_ENV: production</code>).</dd>
+</dl>
+
+<pre class="file" data-file="docker-compose.yml (forma longa)">services:
+  api:
+    build:
+      context: ./api            # pasta com o código-fonte (relativa ao YAML)
+      dockerfile: Dockerfile    # arquivo dentro do contexto (esse já é o padrão)
+      args:
+        NODE_ENV: production    # vira ARG NODE_ENV no Dockerfile
+      cache_from:               # imagens para aquecer o cache do build
+        - app-api:latest</pre>
+
+<hr>
+
+<h2>O Dockerfile do projeto</h2>
+<p>O <code>build: .</code> precisa de um <code>Dockerfile</code> na mesma pasta do <code>docker-compose.yml</code>. Para a API Node da Ana, algo assim (as instruções <code>FROM</code>, <code>WORKDIR</code>, <code>COPY</code>, <code>RUN</code>, <code>EXPOSE</code> e <code>CMD</code> têm aulas próprias: <a href="dockerfile-intro.html">O que é um Dockerfile</a> e <a href="dockerfile-run-cmd.html">RUN e CMD</a>):</p>
+<pre class="file" data-file="~/app/Dockerfile"># syntax=docker/dockerfile:1
+FROM node:22-alpine
+WORKDIR /app
+COPY package*.json ./
+RUN npm install
+COPY . .
+EXPOSE 3000
+CMD ["node", "server.js"]</pre>
+<p>E a estrutura da pasta, que o Compose vê assim:</p>
+<pre class="file" data-file="~/app/">app/
+├── docker-compose.yml
+├── Dockerfile
+├── package.json
+├── server.js
+└── .dockerignore        # igual ao .gitignore, mas para o contexto do build (aula .dockerignore)</pre>
+<p>O <code>.dockerignore</code> evita que <code>node_modules/</code> e <code>.git</code> sejam copiados para dentro da imagem — detalhe que economiza gigabytes (aula <a href="dockerignore.html">.dockerignore</a>).</p>
+
+<hr>
+
+<h2>Exemplo completo: app Node + PostgreSQL</h2>
+<pre class="file" data-file="~/app/docker-compose.yml"># docker-compose.yml — projeto "app"
+services:
+  api:                        # a sua aplicação: imagem construída do Dockerfile local
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgres://ana:segredo@banco:5432/app   # @banco = nome do serviço na rede
+    depends_on:
+      - banco
+    restart: unless-stopped
+
+  banco:                      # imagem pronta do Docker Hub
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ana
+      POSTGRES_PASSWORD: segredo
+      POSTGRES_DB: app
+    volumes:
+      - dados:/var/lib/postgresql/data
+
+volumes:
+  dados:</pre>
+<p>Repare em <code>@banco</code> na <code>DATABASE_URL</code>: dentro da rede do projeto, o serviço é alcançado <strong>pelo próprio nome</strong> (DNS interno do Docker — aula <a href="containers-conversando.html">Containers se comunicando por nome</a>). A porta 5432 do banco nem precisa ser publicada no host: só os containers da rede chegam nela.</p>
+
+<hr>
+
+<h2>Quando o build acontece — e a pegadinha do código novo</h2>
+<p>Na <strong>primeira subida</strong> (ou quando a imagem ainda não existe na máquina), o Compose já faz o build sozinho. Se a imagem já existe, ele a <strong>reutiliza</strong> — e é aí que mora a pegadinha: depois de mudar o código, um <code>up</code> simples <strong>não</strong> refaz a imagem, e você testa a versão antiga achando que testou a nova. A Ana caiu nessa uma vez: mudou o <code>server.js</code>, rodou <code>up -d</code>, e o navegador continuava mostrando a página velha.</p>
+<p>Para forçar o rebuild, use <code>--build</code>:</p>
+<dl class="anatomy">
+  <dt>docker</dt><dd>o CLI.</dd>
+  <dt>compose</dt><dd>o plugin v2.</dd>
+  <dt>up</dt><dd>cria e inicia os serviços.</dd>
+  <dt>--build</dt><dd>reconstrói as imagens dos serviços com <code>build:</code> antes de subir.</dd>
+  <dt>-d</dt><dd>segundo plano.</dd>
+</dl>
+<pre class="term" data-cwd="~/app">$ docker compose up --build -d
+[+] Building 14.2s (9/9) FINISHED
+ => [internal] load build definition from Dockerfile
+ => => transferring dockerfile: 212B
+ => [1/5] FROM docker.io/library/node:22-alpine
+ => [2/5] WORKDIR /app
+ => [3/5] COPY package*.json ./
+ => [4/5] RUN npm install
+ => [5/5] COPY . .
+ => exporting to image
+ => => naming to docker.io/library/app-api
+[+] Running 4/4
+ ✔ Network app_default  Created                                    0.0s
+ ✔ Volume app_dados     Created                                    0.0s
+ ✔ Container app-banco-1  Started                                   0.5s
+ ✔ Container app-api-1    Started                                   0.5s</pre>
+<p>Dois detalhes na saída: o build usa o <strong>cache de camadas</strong> (aula <a href="camadas-cache.html">Camadas e cache do build</a>) — se só o <code>server.js</code> mudou, as camadas de <code>npm install</code> são reaproveitadas e o build leva segundos; e a imagem recebeu o nome automático <code>docker.io/library/app-api</code> (<strong>nome do projeto + nome do serviço</strong>).</p>
+<p>Também dá para buildar <strong>sem subir nada</strong> — só construir as imagens:</p>
+<pre class="term" data-cwd="~/app">$ docker compose build
+[+] Building 3.1s (9/9) FINISHED
+ => => naming to docker.io/library/app-api
+$ docker compose build --no-cache api   « ignora o cache: rebuild do zero (lento, útil para debugar build)</pre>
+
+<hr>
+
+<h2>Erros reais de build</h2>
+<div class="warn"><strong>Dockerfile não existe na pasta do contexto</strong> (a Ana esqueceu de subir o arquivo pro notebook):
+<pre class="term" data-cwd="~/app">$ docker compose up --build
+failed to read dockerfile: open /home/ana/app/Dockerfile: no such file or directory</pre>
+Conferira o <code>context</code> e se o arquivo se chama mesmo <code>Dockerfile</code> (com D maiúsculo, sem extensão).</div>
+<div class="warn"><strong>COPY apontando para fora do contexto:</strong>
+<pre class="file" data-file="Dockerfile (errado)">COPY ../comum/config.json /app/</pre>
+<pre class="term">$ docker compose build
+failed to compute cache key: failed to calculate checksum of ref ...: forbidden path outside the build context: ../comum/</pre>
+O contexto é a "fronteira" do build: o Dockerfile só pode copiar o que está dentro da pasta do <code>context</code> (por segurança). Solução: ajuste o <code>context</code> para a pasta certa ou copie o arquivo para dentro do projeto.</div>
+<div class="warn"><strong>Erro de sintaxe dentro do Dockerfile:</strong>
+<pre class="term">$ docker compose build
+#4 0.123 ERROR: failed to parse Dockerfile: unknown instruction: CPY
+ => [2/5] CPY . .</pre>
+<code>CPY</code> não existe — é <code>COPY</code>. O build para na instrução errada e mostra a linha. A lista completa está na aula <a href="ref-dockerfile.html">Instruções do Dockerfile</a>.</div>
+
+<hr>
+
+<h2>Build no Compose × build no terminal</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th></th><th><code>docker build</code> na mão</th><th><code>build:</code> no Compose</th></tr>
+<tr><td>Onde declara</td><td>Você decide a tag na hora (<code>-t</code>)</td><td>O Compose nomeia sozinho: <code>&lt;projeto&gt;-&lt;serviço&gt;</code></td></tr>
+<tr><td>Quando roda</td><td>Quando você manda</td><td>Na primeira subida, ou com <code>up --build</code> / <code>compose build</code></td></tr>
+<tr><td>Quantos serviços</td><td>Um por comando</td><td>Todos os que têm <code>build:</code>, de uma vez</td></tr>
+<tr><td>Vantagem</td><td>Controle total (tags, cache, multi-stage manual)</td><td>O projeto inteiro sobe com um comando, reproduzível para qualquer pessoa</td></tr>
+</table>
+</div>
+<p>Para imagens enxutas em produção (multi-stage), a técnica é a mesma dentro do <code>build:</code> — veja <a href="multi-stage.html">Multi-stage builds</a>.</p>
+
+<div class="try" data-goal="build das imagens do compose" data-solucao="docker compose build">
+<p class="try-task"><strong>Missão:</strong> construa só as imagens do projeto com <code>docker compose build</code>.</p>
+</div>
+
+<div class="try" data-goal="projeto iniciado" data-solucao="docker compose up --build">
+<p class="try-task"><strong>Missão:</strong> agora suba tudo rebuildando as imagens: <code>docker compose up --build</code>.</p>
+</div>
+
+<div class="try" data-goal="projeto iniciado" data-solucao="docker compose up -d">
+<p class="try-task"><strong>Missão:</strong> por fim, suba o projeto em segundo plano com <code>docker compose up -d</code> (sem rebuild — a imagem já existe).</p>
+</div>
+
+<hr>
+
+<h2>O ciclo do dia a dia: editar, rebuildar, subir</h2>
+<p>Enquanto desenvolve, o ritual da Ana no <code>ana@notebook</code> virou um trio de comandos:</p>
+<pre class="term" data-cwd="~/app">$ nano server.js            « editou o código
+$ docker compose up -d --build   « rebuild da imagem + recria só o serviço que mudou
+[+] Building 2.4s (9/9) FINISHED
+[+] Running 3/3
+ ✔ Container app-api-1    Recreated                                  0.4s
+ ✔ Container app-banco-1  Running
+$ docker compose logs -f api   « e acompanha os logs da API
+app-api-1  | API rodando na porta 3000</pre>
+<p>Repare que só o <code>api</code> foi <code>Recreated</code>: o <code>banco</code> continuou <code>Running</code>, porque nada nele mudou — e os dados do volume nem foram tocados. O Compose compara o arquivo com o estado atual e muda <strong>só o necessário</strong>.</p>
+<p>Se o build está lento demais, a primeira suspeita é o cache: se você mudou o <code>package.json</code>, a camada <code>RUN npm install</code> é refeita (e todas as seguintes). A ordem das instruções no Dockerfile importa — copie primeiro só o <code>package*.json</code>, rode o <code>npm install</code>, e só depois copie o resto do código (aula <a href="camadas-cache.html">Camadas e cache do build</a>).</p>
+
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Comando</th><th>Quando usar</th></tr>
+<tr><td><code>docker compose build</code></td><td>Construir/atualizar só as imagens, sem subir nada</td></tr>
+<tr><td><code>docker compose up -d</code></td><td>Subir o projeto reutilizando imagens existentes</td></tr>
+<tr><td><code>docker compose up -d --build</code></td><td>Rebuild das imagens com <code>build:</code> e recriar os serviços alterados</td></tr>
+<tr><td><code>docker compose build --no-cache</code></td><td>Build do zero, ignorando o cache (debug de build travado)</td></tr>
+<tr><td><code>docker compose up -d --force-recreate</code></td><td>Recriar os containers mesmo sem mudança no YAML (ex.: a aplicação leu variável de ambiente antiga)</td></tr>
+<tr><td><code>docker compose down</code></td><td>Derrubar tudo no fim do dia (volumes e dados ficam)</td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>Quiz rápido</h2>
+<div class="mc" data-answer="2">
+<p class="mc-q">1. Você mudou o código da API e rodou só <code>docker compose up -d</code>. O que aconteceu com a imagem?</p>
+<label><input type="radio" name="q1"> Foi reconstruída na hora, porque o Compose detecta mudança no código</label>
+<label><input type="radio" name="q1"> Nada — a imagem existente foi reutilizada; para rebuildar use <code>up --build</code></label>
+<label><input type="radio" name="q1"> A imagem foi apagada e o container parou</label>
+<label><input type="radio" name="q1"> O Dockerfile foi reescrito sozinho</label>
+</div>
+
+<div class="mc" data-answer="3">
+<p class="mc-q">2. Num projeto na pasta <code>app</code>, o serviço <code>api</code> com <code>build: .</code> gera imagem com que nome?</p>
+<label><input type="radio" name="q2"> <code>api:latest</code></label>
+<label><input type="radio" name="q2"> <code>node:22-alpine</code></label>
+<label><input type="radio" name="q2"> <code>app-api</code> (projeto + serviço)</label>
+<label><input type="radio" name="q2"> <code>docker.io/library/build</code></label>
+</div>
+
+<hr>
+
+<h2>Resumo</h2>
+<ul>
+  <li><code>build: .</code> diz ao Compose para construir a imagem a partir do <code>Dockerfile</code> da pasta do projeto; dá para misturar com <code>image:</code> no mesmo arquivo.</li>
+  <li>Forma longa: <code>context</code> (pasta do código), <code>dockerfile</code> (arquivo alternativo), <code>args</code> (valores para <code>ARG</code>).</li>
+  <li>O build acontece na primeira subida; se a imagem já existe, ela é reutilizada — mude o código? rode <code>docker compose up --build -d</code> (ou <code>compose build</code> só para buildar).</li>
+  <li>A imagem recebe o nome automático <code>&lt;projeto&gt;-&lt;serviço&gt;</code> (ex.: <code>app-api</code>).</li>
+  <li>O build respeita o contexto (nada de <code>COPY ../fora</code>) e o cache de camadas; <code>--no-cache</code> força rebuild do zero.</li>
+  <li>Erros reais: <code>failed to read dockerfile: ... no such file or directory</code>, <code>forbidden path outside the build context</code> e instrução desconhecida no Dockerfile.</li>
+</ul>
+
+<div class="tip"><strong>Próxima aula:</strong> <a href="docker-system-df.html">Espaço em disco (docker system df)</a> — depois de tanto build e imagem, vale ver o que está ocupando espaço na máquina.</div>
+
+</div>
+</main>
+</div>
+<script src="assets/site.js?v=4"></script>
+</body>
+</html>

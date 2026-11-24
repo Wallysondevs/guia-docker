@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Imagens, Containers, Registry e Docker Hub — os 4 conceitos | Guia Docker</title>
+<meta name="description" content="Os quatro conceitos fundamentais do Docker explicados com a analogia da padaria: imagem (a receita escrita), container (o bolo pronto), registry (o depósito de ingredientes) e Docker Hub (o supermercado público). Como o nome completo de uma imagem é montado (registry/namespace/repo:tag), o que é o docker.io/library, e missão no simulador.">
+<link rel="stylesheet" href="assets/style.css?v=4">
+<script>try{var t=localStorage.getItem("tema");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<meta http-equiv="Cache-Control" content="no-store, must-revalidate">
+<script>try{history.scrollRestoration="manual"}catch(e){}(function(){var n=0;function t(){window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;if(++n<60)setTimeout(t,50)}t();window.addEventListener("pagehide",function(){window.scrollTo(0,0);document.documentElement.scrollTop=0;});window.addEventListener("pageshow",function(){window.scrollTo(0,0)});window.addEventListener("load",function(){window.scrollTo(0,0)});})();document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(a){var h=a.getAttribute("href")||"";if(/[.]html($|[?#])/.test(h)&&a.host===location.host){window.scrollTo(0,0);document.documentElement.scrollTop=0;}}});</script>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" id="sidebar" aria-label="Tópicos"></nav>
+<main class="main">
+<div class="content">
+
+<div class="pager"></div>
+
+<h1>Imagens, Containers, <span class="hl">Registry</span> e Docker Hub</h1>
+
+<p class="intro">Quatro palavras que aparecem o tempo todo no Docker. Entender a diferença entre elas é entender o Docker. A analogia que vamos usar: uma <strong>padaria</strong>.</p>
+
+<div class="note">
+<strong>Você vai aprender</strong>
+<ul>
+  <li><strong>Imagem</strong> = a receita escrita (somente leitura, em camadas).</li>
+  <li><strong>Container</strong> = o bolo pronto, assado a partir da receita (instância viva, descartável).</li>
+  <li><strong>Registry</strong> = o depósito de ingredientes/imagens (onde elas ficam guardadas e de onde são distribuídas).</li>
+  <li><strong>Docker Hub</strong> = o supermercado público, o registry padrão (<code>docker.io</code>).</li>
+  <li>Como um nome de imagem é montado: <code>registry/namespace/repositório:tag</code>.</li>
+  <li>Por que apagar um container não apaga a imagem.</li>
+</ul>
+</div>
+
+<hr>
+
+<h2>A padaria do Docker</h2>
+<p>Toda padaria tem: <strong>a receita</strong> (escrita num caderno, não muda), <strong>o bolo</strong> (feito na hora, vendido e descartado), <strong>o depósito</strong> (onde ficam os sacos de farinha e fermento) e <strong>o supermercado</strong> (onde a padaria compra os ingredientes prontos). No Docker:</p>
+
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Na padaria</th><th>No Docker</th><th>Comando</th></tr>
+<tr><td>A receita escrita no caderno</td><td><strong>Imagem</strong> (image)</td><td><code>docker images</code></td></tr>
+<tr><td>O bolo pronto na vitrine</td><td><strong>Container</strong></td><td><code>docker ps</code> / <code>docker ps -a</code></td></tr>
+<tr><td>O depósito de ingredientes</td><td><strong>Registry</strong></td><td><code>docker pull</code> / <code>docker push</code></td></tr>
+<tr><td>O supermercado público</td><td><strong>Docker Hub</strong> (<code>docker.io</code>)</td><td>é o padrão de <code>docker pull</code></td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>Imagem = a receita</h2>
+<p>Arquivo somente leitura, em camadas, com o sistema base + tudo instalado. Você não altera a imagem depois de pronta — se precisar mudar, cria uma camada nova em cima (isso vira outra imagem, na aula de <a href="dockerfile-intro.html">Dockerfile</a>). A imagem fica guardada no disco da máquina e ocupa espaço (veja a coluna <code>SIZE</code> no <code>docker images</code>).</p>
+
+<dl class="anatomy">
+  <dt>Somente leitura</dt><dd>Nenhum container consegue modificar a imagem original. O que o programa grava vai para uma <strong>camada gravável</strong> em cima, que pertence só ao container.</dd>
+  <dt>Em camadas (layers)</dt><dd>A imagem é uma pilha de camadas. A base é um mini sistema operacional (ex.: Alpine Linux, ~5MB); em cima vêm as bibliotecas, o programa, as configurações. Camadas iguais são <strong>reutilizadas</strong> entre imagens diferentes e não ocupam espaço duplicado — a aula <a href="docker-pull.html">docker pull</a> mostra isso na prática.</dd>
+  <dt>Identificada por hash</dt><dd>Toda imagem tem um ID único (um hash <code>sha256</code>), além do nome. Duas tags podem apontar para o mesmo ID.</dd>
+</dl>
+
+<hr>
+
+<h2>Container = o bolo</h2>
+<p>Uma instância viva da imagem, com uma camada gravável em cima. Vários containers podem vir da mesma imagem — como assar vários bolos da mesma receita. Você pode parar, apagar e recriar containers à vontade: <strong>apagar o bolo não rasga a receita</strong>.</p>
+
+<pre class="term">$ docker run -d --name bolo1 nginx:alpine   « assou o bolo 1
+$ docker run -d --name bolo2 nginx:alpine   « assou o bolo 2, da MESMA receita
+$ docker ps
+CONTAINER ID   IMAGE          STATUS         NAMES
+aaa111bbb222   nginx:alpine   Up 3 seconds   bolo1
+ccc333ddd444   nginx:alpine   Up 2 seconds   bolo2
+$ docker rm -f bolo1 bolo2                  « jogou os bolos fora
+$ docker images
+…                  nginx:alpine   …          « a receita continua no caderno</pre>
+
+<div class="warning">
+<strong>Cuidado com a camada gravável</strong>
+<p>Os arquivos que um programa grava dentro do container ficam nessa camada gravável — e <strong>somem quando o container é apagado</strong> com <code>docker rm</code>. Se o container guardava dados importantes (um banco de dados, por exemplo), eles vão junto. A solução são <strong>volumes</strong>, a aula <a href="volumes-intro.html">Volumes (-v)</a>.</p>
+</div>
+
+<hr>
+
+<h2>Registry = o depósito</h2>
+<p>Um servidor que guarda e distribui imagens. O comando <code>docker pull</code> baixa de um registry; <code>docker push</code> envia para um. Pense no registry como o depósito da padaria: a receita pode estar no caderno local <em>ou</em> vir de fora, trazida pelo caminhão do depósito.</p>
+
+<ul>
+  <li>Quando a imagem <strong>não está</strong> na sua máquina, <code>docker run</code> faz <code>pull</code> automático do registry padrão.</li>
+  <li>Você pode indicar outro registry no próprio nome: <code>registry.empresa.com/time/meuapp:1.0</code> (a aula <a href="registry-privado.html">Registry privado</a> mostra isso).</li>
+  <li>Se nada for escrito, o Docker completa com <code>docker.io</code> — o Docker Hub.</li>
+</ul>
+
+<hr>
+
+<h2>Docker Hub = o supermercado público</h2>
+<p>O registry público oficial (hub.docker.com), mantido pela Docker Inc. Tem imagens oficiais (nginx, postgres, node…) e as da comunidade. O comando <code>docker pull nginx</code> baixa de lá por padrão — sem você escrever <code>docker.io</code>.</p>
+
+<h3>Anatomia completa de um nome de imagem</h3>
+<pre class="term">docker.io / library / nginx : alpine
+   │          │         │       └── tag (versão/variante)
+   │          │         └────────── repository (nome da imagem)
+   │          └──────────────────── namespace (quem publica)
+   └─────────────────────────────── registry (o depósito)</pre>
+
+<dl class="anatomy">
+  <dt>docker.io</dt><dd>O registry. Se omitir, o Docker assume <code>docker.io</code> (o Hub).</dd>
+  <dt>library</dt><dd>O namespace das <strong>imagens oficiais</strong>, mantidas pela equipe do próprio software ou pela Docker. <code>docker pull nginx</code> na verdade baixa <code>docker.io/library/nginx:latest</code>.</dd>
+  <dt>ana</dt><dd>Um namespace de usuário comum — ex.: <code>docker.io/ana/meuapp:1.0</code> seria uma imagem publicada pela usuária <code>ana</code>.</dd>
+  <dt>nginx</dt><dd>O repository: o nome da imagem.</dd>
+  <dt>:alpine</dt><dd>A tag: a variante baseada no Alpine Linux. Sem tag, vale <code>:latest</code> (aula <a href="tags.html">Tags</a>).</dd>
+</dl>
+
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Você escreve</th><th>O Docker entende</th></tr>
+<tr><td><code>nginx</code></td><td><code>docker.io/library/nginx:latest</code></td></tr>
+<tr><td><code>nginx:alpine</code></td><td><code>docker.io/library/nginx:alpine</code></td></tr>
+<tr><td><code>ana/meuapp:1.0</code></td><td><code>docker.io/ana/meuapp:1.0</code></td></tr>
+<tr><td><code>ghcr.io/empresa/app:2.3</code></td><td><code>ghcr.io/empresa/app:2.3</code> (outro registry)</td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>Veja na prática: as imagens da máquina da Ana</h2>
+<p>A máquina fictícia <code>ana@notebook</code> do simulador já veio com seis imagens, como se tivessem sido baixadas do Hub:</p>
+
+<div class="try" data-goal="REPOSITORY" data-solucao="docker images"><p class="try-task"><strong>Missão:</strong> rode <code>docker images</code> e veja as imagens que vieram "do Hub".</p></div>
+
+<pre class="term">$ docker images
+REPOSITORY   TAG          IMAGE ID       CREATED         SIZE
+nginx        alpine       b2c3d4e5f6a1   5 days ago      48.2MB
+node         22-alpine    c3d4e5f6a1b2   1 week ago      189MB
+postgres     16-alpine    d4e5f6a1b2c3   3 days ago      245MB
+redis        7-alpine     e5f6a1b2c3d4   1 week ago      42.8MB
+python       3.12-slim    f6a1b2c3d4e5   4 days ago      132MB
+hello-world  latest       a1b2c3d4e5f6   2 weeks ago     18.2kB</pre>
+
+<p>Repare: cada linha é um <code>REPOSITORY:TAG</code> — ou seja, uma receita com sua versão. O <code>nginx:alpine</code>, por exemplo, é a receita oficial do Nginx na variante Alpine (leve). A aula <a href="docker-images.html">docker images</a> explica cada coluna, e <a href="imagens-oficiais.html">Imagens oficiais e verificadas</a> ensina a escolher quais receitas confiar.</p>
+
+<div class="try" data-goal="Storage Driver" data-solucao="docker info">
+<p class="try-task"><strong>Missão:</strong> rode <code>docker info</code> e procure a linha <code>Storage Driver</code> — é assim que você confirma que está falando com o Engine (o daemon) de verdade.</p>
+</div>
+
+<pre class="term">$ docker info
+Client: Docker Engine - Community
+  Version:    27.3.1
+
+Server:
+  Containers: 0
+  Images:     6
+  Server Version: 27.3.1
+  Storage Driver: overlay2
+  Operating System: Ubuntu 24.04 LTS</pre>
+
+<hr>
+
+<h2>Quando usar cada um (resumo visual)</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Pergunta</th><th>Resposta</th><th>Comando</th></tr>
+<tr><td>Quais receitas eu tenho aqui?</td><td>Imagens locais</td><td><code>docker images</code></td></tr>
+<tr><td>Quais bolos estão assando agora?</td><td>Containers rodando</td><td><code>docker ps</code></td></tr>
+<tr><td>E os bolos que já saíram do forno?</td><td>Todos os containers</td><td><code>docker ps -a</code></td></tr>
+<tr><td>Preciso de uma receita nova?</td><td>Baixar do registry</td><td><code>docker pull nome</code></td></tr>
+<tr><td>Quero mandar minha receita para o depósito?</td><td>Enviar para o registry</td><td><code>docker push nome</code></td></tr>
+<tr><td>Quero assar um bolo novo?</td><td>Criar + iniciar container</td><td><code>docker run nome</code></td></tr>
+</table>
+</div>
+
+<div class="mc" data-answer="3">
+<p class="mc-q">O que é uma <strong>imagem</strong> no Docker?</p>
+<label><input type="radio" name="q1"> Um programa rodando em segundo plano</label>
+<label><input type="radio" name="q1"> Um depósito de arquivos no servidor</label>
+<label><input type="radio" name="q1"> Um modelo somente leitura, em camadas, a partir do qual containers são criados</label>
+<label><input type="radio" name="q1"> Um tipo de máquina virtual</label>
+</div>
+
+<div class="mc" data-answer="2">
+<p class="mc-q"><code>docker pull nginx</code> baixa de onde, exatamente?</p>
+<label><input type="radio" name="q2"> De um CD de instalação</label>
+<label><input type="radio" name="q2"> Do registry padrão, o Docker Hub (<code>docker.io/library/nginx:latest</code>)</label>
+<label><input type="radio" name="q2"> Do site do Nginx</label>
+<label><input type="radio" name="q2"> Do GitHub</label>
+</div>
+
+<div class="mc" data-answer="1">
+<p class="mc-q">A Ana apagou o container <code>bolo1</code>. O que aconteceu com a imagem <code>nginx:alpine</code>?</p>
+<label><input type="radio" name="q3"> Nada — a imagem continua na máquina</label>
+<label><input type="radio" name="q3"> Foi apagada junto</label>
+<label><input type="radio" name="q3"> Virou <code>&lt;none&gt;</code></label>
+<label><input type="radio" name="q3"> Foi enviada de volta para o Hub</label>
+</div>
+
+<hr>
+
+<h2>Confusões comuns (e como não cair nelas)</h2>
+
+<div class="warning">
+<strong>"Apaguei o container, então perdi o programa"</strong>
+<p>Não. O programa está na <strong>imagem</strong>, que continua na máquina (<code>docker images</code>). O que se perde com <code>docker rm</code> são os <strong>arquivos gravados pelo programa</strong> durante a execução (a camada gravável) — para esses, use <a href="volumes-intro.html">volumes</a>. Pense de novo na padaria: jogar o bolo fora não rasga a receita.</p>
+</div>
+
+<div class="warning">
+<strong>"Baixar a imagem é a mesma coisa que rodar o programa"</strong>
+<p>Não. <code>docker pull nginx</code> só <strong>baixa a receita</strong> para o seu computador (fica visível no <code>docker images</code>, mas nada está rodando). Quem <strong>assa o bolo</strong> é o <code>docker run</code> — aí sim nasce um container, que aparece no <code>docker ps</code>. A aula <a href="docker-pull.html">docker pull</a> e a <a href="docker-run.html">docker run</a> mostram a diferença na tela.</p>
+</div>
+
+<div class="warning">
+<strong>"Meu amigo mandou a imagem dele por email"</strong>
+<p>Imagens não são arquivos soltos para mandar por email — elas moram em um <strong>registry</strong>. O fluxo certo é: seu amigo dá <code>docker push</code> para o Hub (ou um registry privado) e você dá <code>docker pull</code> do mesmo endereço. Se a imagem for só local, dá para exportar com <code>docker save</code> (gera um arquivo .tar) e importar com <code>docker load</code> na outra máquina.</p>
+</div>
+
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Você quer…</th><th>Comando certo</th><th>Comando errado</th></tr>
+<tr><td>Ver as receitas locais</td><td><code>docker images</code></td><td><code>docker ps</code> (mostra containers)</td></tr>
+<tr><td>Ver o que está rodando</td><td><code>docker ps</code></td><td><code>docker images</code> (mostra imagens)</td></tr>
+<tr><td>Baixar uma receita</td><td><code>docker pull nginx</code></td><td><code>docker run nginx</code> (baixa <em>e</em> roda)</td></tr>
+<tr><td>Assar um bolo novo</td><td><code>docker run nginx</code></td><td><code>docker pull nginx</code> (só baixa)</td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>Resumo</h2>
+<ul>
+  <li><strong>Imagem</strong> = a receita (somente leitura, em camadas, com ID único). <strong>Container</strong> = o bolo pronto (instância viva + camada gravável).</li>
+  <li><strong>Registry</strong> = o depósito de imagens; <strong>Docker Hub</strong> (<code>docker.io</code>) = o registro público padrão.</li>
+  <li>Nome completo: <code>registry/namespace/repositório:tag</code> — ex.: <code>docker.io/library/nginx:alpine</code>. Omitir o registry = usar o Hub; omitir a tag = <code>:latest</code>.</li>
+  <li>Apagar um container <strong>não apaga a imagem</strong>; vários containers podem vir da mesma imagem.</li>
+  <li>O que um container grava na camada própria <strong>some com <code>docker rm</code></strong> — dados que devem durar precisam de <a href="volumes-intro.html">volumes</a>.</li>
+  <li><code>docker images</code> lista as receitas; <code>docker ps</code> lista os bolos rodando; <code>docker pull</code> traz receita nova do depósito.</li>
+</ul>
+
+<div class="tip"><strong>Próxima aula:</strong> <a href="instalar.html">Instalar o Docker (Linux, macOS, Windows)</a> — para sair do simulador e colocar o Docker de verdade na sua máquina, com o passo a passo de cada sistema e os erros de permissão mais comuns.</div>
+
+</div>
+</main>
+</div>
+<script src="assets/site.js?v=4"></script>
+</body>
+</html>

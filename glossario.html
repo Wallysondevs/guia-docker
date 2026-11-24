@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Glossário de Docker — todos os termos em ordem alfabética | Guia Docker</title>
+<meta name="description" content="Glossário do Guia Docker em ordem alfabética com definições longas e exemplos: imagem, container, registry, Docker Hub, daemon, CLI, Dockerfile, build, camada, volume, bind mount, tmpfs, rede bridge/host/none, Compose, Swarm, Kubernetes, orquestração, multi-stage, distroless, Alpine, OCI, runtime, cgroups, namespaces, BuildKit, buildx, healthcheck, EXPOSE, tag, digest, contexto de build, .dockerignore, exec, entrypoint. Inclui a seção dos pares que mais confundem.">
+<link rel="stylesheet" href="assets/style.css?v=4">
+<script>try{var t=localStorage.getItem("tema");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<meta http-equiv="Cache-Control" content="no-store, must-revalidate">
+<script>try{history.scrollRestoration="manual"}catch(e){}(function(){var n=0;function t(){window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;if(++n<60)setTimeout(t,50)}t();window.addEventListener("pagehide",function(){window.scrollTo(0,0);document.documentElement.scrollTop=0;});window.addEventListener("pageshow",function(){window.scrollTo(0,0)});window.addEventListener("load",function(){window.scrollTo(0,0)});})();document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(a){var h=a.getAttribute("href")||"";if(/[.]html($|[?#])/.test(h)&&a.host===location.host){window.scrollTo(0,0);document.documentElement.scrollTop=0;}}});</script>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" id="sidebar" aria-label="Tópicos"></nav>
+<main class="main">
+<div class="content">
+
+<div class="pager"></div>
+
+<h1><span class="hl">Glossário</span> de Docker</h1>
+
+<p class="intro">Todo curso de Docker usa os mesmos termos o tempo inteiro — e eles voltam em todo canto: nos comandos, nos erros, nas conversas de trabalho. Este glossário reúne os <strong>termos essenciais em ordem alfabética</strong>, com definição em português claro e, quando faz sentido, um exemplo na máquina da Ana (<code>ana@notebook</code>). Consulte sempre que um termo aparecer pela primeira vez.</p>
+
+<div class="note">
+<strong>Você vai aprender</strong>
+<ul>
+  <li>Os termos fundamentais: <strong>imagem</strong>, <strong>container</strong>, <strong>registry</strong>, <strong>Docker Hub</strong>, <strong>daemon</strong>, <strong>CLI</strong>, <strong>Dockerfile</strong>, <strong>build</strong>.</li>
+  <li>Estrutura interna: <strong>camada</strong>, <strong>volume</strong>, <strong>bind mount</strong>, <strong>tmpfs</strong>, <strong>rede bridge</strong>, <strong>contexto de build</strong>, <strong>.dockerignore</strong>.</li>
+  <li>Orquestração e afins: <strong>Compose</strong>, <strong>Swarm</strong>, <strong>Kubernetes</strong>, <strong>orquestração</strong>.</li>
+  <li>Técnicas avançadas: <strong>multi-stage</strong>, <strong>distroless</strong>, <strong>Alpine</strong>, <strong>OCI</strong>, <strong>runtime</strong>, <strong>BuildKit/buildx</strong>, <strong>cgroups</strong>, <strong>namespaces</strong>, <strong>healthcheck</strong>, <strong>tag</strong>/<strong>digest</strong>, <strong>exec</strong>, <strong>entrypoint</strong>.</li>
+</ul>
+</div>
+
+<hr>
+
+<h2>Os termos, de A a Z</h2>
+<dl class="glossario">
+
+  <dt><strong>Alpine</strong></dt>
+  <dd>Uma distribuição Linux mínima ( ~5MB ) usada como base de imagens leves como <code>nginx:alpine</code> e <code>node:22-alpine</code>. Vem só com o essencial — shell <code>sh</code>, apk (gerenciador de pacotes) — e por isso as imagens ficam pequenas e com menos superfície de ataque. <em>Cuidado:</em> não tem <code>bash</code>; dentro dela use <code>docker exec … sh</code>, não <code>bash</code>.</dd>
+
+  <dt><strong>Bind mount</strong></dt>
+  <dd>Montar uma <strong>pasta do seu computador</strong> dentro do container: <code>docker run -v /home/ana/site:/usr/share/nginx/html:ro nginx:alpine</code>. O caminho do host aparece direto no container — ótimo para desenvolvimento, porque editar o arquivo no host vale na hora (é o truque do <a href="projeto-web-nginx.html">projeto 1</a>). Com <code>:ro</code> no final, o container só lê.</dd>
+
+  <dt><strong>Build</strong></dt>
+  <dd>O processo de <strong>criar uma imagem</strong> a partir de um Dockerfile, disparado por <code>docker build -t nome:tag .</code>. Cada instrução do Dockerfile vira uma camada; o build reaproveita camadas em cache (<code>CACHED</code>) quando nada mudou (aula <a href="camadas-cache.html">Camadas e cache</a>).</dd>
+
+  <dt><strong>BuildKit / buildx</strong></dt>
+  <dd><strong>BuildKit</strong> é o motor moderno de build (o que imprime <code>#1 [internal] load…</code> e faz o cache avançado). <strong>buildx</strong> é a interface CLI dele (<code>docker buildx …</code>), que permite builds multi-plataforma (amd64 + arm64) e builders isolados. No CI, o <code>docker/setup-buildx-action</code> configura isso para você.</dd>
+
+  <dt><strong>Camada (layer)</strong></dt>
+  <dd>Cada instrução do Dockerfile que altera arquivos gera uma camada <strong>somente leitura</strong>, empilhada sobre a anterior. Camadas são imutáveis e <strong>compartilhadas entre imagens</strong> (duas imagens baseadas em <code>node:22-alpine</code> dividem as camadas da base) — é por isso que o cache existe e o disco não enche de cópias.</dd>
+
+  <dt><strong>cgroups</strong></dt>
+  <dd><em>Control groups</em> — recurso do kernel Linux que <strong>limita e mede os recursos</strong> (CPU, memória, disco, rede) que cada container pode usar. É o que faz valer na prática o <code>--memory 512m</code> e o <code>--cpus 1.5</code> (aula <a href="limites-recursos.html">Limites de recursos</a>).</dd>
+
+  <dt><strong>CLI</strong></dt>
+  <dd><em>Command Line Interface</em> — o <strong>programa de linha de comando</strong> <code>docker</code> que você digita no terminal. Ele não faz o trabalho sozinho: manda pedidos para o daemon (via socket) e mostra a resposta.</dd>
+
+  <dt><strong>Compose (Docker Compose)</strong></dt>
+  <dd>Ferramenta para definir e subir <strong>vários containers de uma vez</strong> a partir de um arquivo <code>docker-compose.yml</code>. Com <code>docker compose up</code> você cria rede, volumes e todos os serviços juntos; os serviços se encuentran pelo nome na rede interna (projetos <a href="projeto-fullstack.html">3</a>, <a href="projeto-wordpress.html">4</a> e <a href="projeto-python-flask.html">5</a>).</dd>
+
+  <dt><strong>Container</strong></dt>
+  <dd>Uma <strong>instância criada a partir de uma imagem</strong> — rodando ou parada. Tem sistema de arquivos próprio (camadas da imagem + uma camada de escrita em cima), rede própria e processos próprios, <strong>isolados</strong> do host e dos outros containers, mas compartilhando o mesmo kernel do sistema (diferente de uma máquina virtual, que tem kernel próprio).</dd>
+
+  <dt><strong>Contexto de build</strong></dt>
+  <dd>A pasta que o <code>docker build</code> envia para o daemon antes de montar a imagem — no comando <code>docker build -t app .</code>, o contexto é o <code>.</code> (pasta atual). Tudo que o <code>COPY</code>/<code>ADD</code> pode usar precisa estar dentro do contexto; o <code>.dockerignore</code> tira itens dele.</dd>
+
+  <dt><strong>.dockerignore</strong></dt>
+  <dd>Arquivo na raiz do contexto de build com o que <strong>não</strong> deve ir para o build (ex.: <code>node_modules</code>, <code>.git</code>, <code>.env</code>). Deixa o envio do contexto rápido e a imagem limpa (aula <a href="dockerignore.html">.dockerignore</a>).</dd>
+
+  <dt><strong>Daemon</strong></dt>
+  <dd>O <strong>servidor do Docker</strong> — o processo <code>dockerd</code> que roda em segundo plano na máquina e faz o trabalho pesado: criar containers, baixar imagens, montar volumes, publicar portas. A CLI só manda pedidos para ele pelo socket <code>/var/run/docker.sock</code>. Se o daemon está parado, todo comando dá "Cannot connect to the Docker daemon" (veja <a href="problemas.html">Erros comuns</a>).</dd>
+
+  <dt><strong>Digest</strong></dt>
+  <dd>O identificador <strong>imutável</strong> de uma imagem: <code>sha256:9f8e7d…</code>. Enquanto a tag <code>latest</code> pode apontar para imagens diferentes com o tempo, o digest sempre aponta para a mesma imagem byte a byte — por isso produção séria usa digest (<code>docker pull ana/app@sha256:…</code>).</dd>
+
+  <dt><strong>Distroless</strong></dt>
+  <dd>Imagens <strong>mínimas do Google</strong> (gcr.io/distroless) que contêm só o aplicativo e suas dependências de runtime — sem shell, sem gerenciador de pacotes, sem nada. Resultam em imagens de poucos MB e quase sem vulnerabilidades (aula <a href="distroless.html">Distroless e Alpine</a>).</dd>
+
+  <dt><strong>Docker Hub</strong></dt>
+  <dd>O <strong>registry público oficial</strong> (hub.docker.com): um catálogo gigante de imagens prontas (<code>nginx</code>, <code>postgres</code>, <code>node</code>, <code>wordpress</code>…). O <code>docker pull</code> baixa de lá por padrão, e o <code>docker push</code> publica lá (com seu usuário, ex.: <code>ana/minhaapp</code>).</dd>
+
+  <dt><strong>Dockerfile</strong></dt>
+  <dd>O <strong>arquivo de texto com a receita da imagem</strong>: uma instrução por linha (<code>FROM</code>, <code>RUN</code>, <code>COPY</code>, <code>CMD</code>…). O <code>docker build</code> transforma esse arquivo numa imagem. A cola completa está em <a href="ref-dockerfile.html">ref-dockerfile</a>.</dd>
+
+  <dt><strong>ENTRYPOINT</strong></dt>
+  <dd>Instrução do Dockerfile (e flag <code>--entrypoint</code> no run) que define o <strong>programa fixo</strong> do container. Diferente do <code>CMD</code>, os argumentos passados no <code>docker run</code> viram parâmetros do entrypoint em vez de trocar o comando inteiro.</dd>
+
+  <dt><strong>exec</strong></dt>
+  <dd><code>docker exec</code> roda um comando <strong>dentro de um container que já está rodando</strong> — diferente do <code>run</code>, que cria um novo. Ex.: <code>docker exec -it web sh</code> abre um shell dentro do container <code>web</code> (aula <a href="docker-exec.html">docker exec</a>).</dd>
+
+  <dt><strong>EXPOSE</strong></dt>
+  <dd>Instrução do Dockerfile que <strong>documenta</strong> a porta que o app usa dentro do container. <em>Não publica nada para fora</em> — para acessar de fora é preciso o <code>-p</code> no <code>docker run</code> (a pegadinha clássica).</dd>
+
+  <dt><strong>Healthcheck</strong></dt>
+  <dd>Teste periódico que o Docker roda <strong>dentro do container</strong> para saber se o app está saudável (<code>HEALTHCHECK</code> no Dockerfile ou <code>--health-cmd</code> no run). O status aparece como <code>(healthy)</code> no <code>docker ps</code> e pode comandar o <code>depends_on: condition: service_healthy</code> no Compose (aula <a href="healthcheck.html">HEALTHCHECK</a>).</dd>
+
+  <dt><strong>Imagem</strong></dt>
+  <dd>Um <strong>modelo somente leitura</strong>, formado por camadas empilhadas, que serve de base para criar containers. Pense nela como a "classe" e no container como o "objeto" instanciado. Fica guardada localmente (<code>docker images</code>) ou num registry, e tem nome no formato <code>repositório:tag</code> (ex.: <code>nginx:alpine</code>).</dd>
+
+  <dt><strong>Kubernetes (k8s)</strong></dt>
+  <dd>O orquestrador de containers <strong>mais popular do mundo</strong>, criado pelo Google — para rodar milhares de containers em dezenas de máquinas com auto-cura, escalonamento automático e rolling updates. O Docker Swarm é a alternativa mais simples e nativa do Docker; para aprender k8s depois deste guia, veja <a href="kubernetes-intro.html">E Kubernetes? Quando usar</a>.</dd>
+
+  <dt><strong>Multi-stage</strong></dt>
+  <dd>Um Dockerfile com <strong>vários blocos <code>FROM</code></strong> (estágios): o primeiro compila o app com todas as ferramentas de build; o último copia só o resultado para uma imagem limpa e pequena. É a técnica para imagens enxutas (aula <a href="multi-stage.html">Multi-stage builds</a>).</dd>
+
+  <dt><strong>Namespaces</strong></dt>
+  <dd>Recurso do kernel Linux que <strong>isola a visão que o container tem do sistema</strong>: processos, rede, usuários, pontos de montagem, hostname. É o que faz o container achar que está sozinho na máquina — mesmo dividindo o kernel com o host e os outros containers.</dd>
+
+  <dt><strong>OCI</strong></dt>
+  <dd><em>Open Container Initiative</em> — o <strong>padrão aberto</strong> que define o formato das imagens e dos runtimes de container (image spec + runtime spec). Graças a ele, uma imagem criada com Docker roda em qualquer runtime compatível (containerd, CRI-O, Podman) e vice-versa.</dd>
+
+  <dt><strong>Orquestração</strong></dt>
+  <dd>Gerenciar <strong>muitos containers em várias máquinas</strong> ao mesmo tempo: criar, distribuir, escalar, monitorar, substituir quando caem. Exemplos: Docker Swarm (nativo, mais simples — aula <a href="swarm-intro.html">Swarm</a>) e Kubernetes (mais completo, padrão da indústria).</dd>
+
+  <dt><strong>Rede bridge</strong></dt>
+  <dd>A <strong>rede padrão</strong> que o Docker cria em toda instalação (<code>bridge</code>): cada container ganha um IP interno (172.17.x.x), pode falar com os outros pelo <strong>nome</strong> (DNS interno) e publica portas no host com <code>-p</code>. Outras opções: <code>host</code> (sem isolamento de rede) e <code>none</code> (sem rede nenhuma) — aula <a href="redes-intro.html">Redes no Docker</a>.</dd>
+
+  <dt><strong>Registry</strong></dt>
+  <dd>Um <strong>servidor que guarda e distribui imagens</strong>. O Docker Hub é o registry público mais famoso; dá para ter um registry privado na empresa (aula <a href="registry-privado.html">Registry privado</a>). O fluxo é: <code>docker login</code> → <code>docker tag</code> → <code>docker push</code> para enviar; <code>docker pull</code> para baixar.</dd>
+
+  <dt><strong>Runtime</strong></dt>
+  <dd>O programa que <strong>realmente cria e roda o container</strong> a partir de uma imagem OCI — hoje o padrão é o <strong>runc</strong> (usado pelo Docker/containerd), mas existem outros (crun, Kata). O daemon conversa com o runtime por baixo dos panos; você quase nunca mexe nele direto.</dd>
+
+  <dt><strong>Swarm</strong></dt>
+  <dd>O <strong>orquestrador nativo do Docker</strong>: você transforma várias máquinas com Docker instalado num cluster (<code>docker swarm init</code>) e declara serviços com réplicas (<code>docker service create --replicas 3 nginx</code>) — o Swarm distribui, recria se cair e balanceia carga (aula <a href="swarm-intro.html">Introdução ao Swarm</a>).</dd>
+
+  <dt><strong>Tag</strong></dt>
+  <dd>O "sobrenome" da imagem em <code>repositório:tag</code> — ex.: <code>nginx:alpine</code> (tag <code>alpine</code>), <code>node:22</code> (tag <code>22</code>), <code>meuapp:latest</code> (tag <code>latest</code>, usada por padrão quando você não escreve nada). Tags são mutáveis (podem apontar para imagens diferentes ao longo do tempo); o <strong>digest</strong> é o que não muda.</dd>
+
+  <dt><strong>tmpfs</strong></dt>
+  <dd>Um tipo de montaje que guarda os arquivos na <strong>memória RAM</strong> do host, descartável: <code>--tmpfs /tmp</code> ou <code>-v type=tmpfs,destination=/tmp</code>. Ideal para dados temporários de um container <code>--read-only</code>.</dd>
+
+  <dt><strong>Volume</strong></dt>
+  <dd>Um <strong>espaço de armazenamento gerenciado pelo Docker</strong> (fica em <code>/var/lib/docker/volumes/…</code> no host) que <strong>sobrevive ao container</strong>. Criado com <code>docker volume create dados</code> e usado com <code>-v dados:/caminho</code> — ideal para bancos de dados (aula <a href="volumes-tipos.html">Tipos de volumes</a>). Diferente do bind mount, o caminho do host é opaco (o Docker que gerencia).</dd>
+
+</dl>
+
+<hr>
+
+<h2>Os pares que mais confundem</h2>
+<p>Estes pares soam parecidos mas não são a mesma coisa — é onde 90% das dúvidas mora:</p>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Par</th><th>A diferença em uma frase</th></tr>
+<tr><td><strong>Imagem × Container</strong></td><td>Imagem é o modelo parado (somente leitura); container é a instância criada a partir dela, com uma camada de escrita em cima.</td></tr>
+<tr><td><strong>Volume nomeado × Bind mount</strong></td><td>Volume nomeado (<code>-v dados:/…</code>) é gerenciado pelo Docker e sobrevive ao container; bind mount (<code>-v /home/ana/site:/…</code>) é uma pasta sua do host montada direto — boa para desenvolver.</td></tr>
+<tr><td><strong>EXPOSE × -p</strong></td><td><code>EXPOSE 3000</code> no Dockerfile só documenta; <code>-p 8080:3000</code> no run é que publica a porta para fora.</td></tr>
+<tr><td><strong>CMD × ENTRYPOINT</strong></td><td><code>CMD</code> é o comando padrão, sobrescrevível no run; <code>ENTRYPOINT</code> é o programa fixo, e o que vem no run vira argumento dele.</td></tr>
+<tr><td><strong>bridge × host × none</strong></td><td><code>bridge</code> dá IP próprio e portas publicadas; <code>host</code> usa a rede do host direto (sem isolamento); <code>none</code> deixa o container sem rede.</td></tr>
+<tr><td><strong>build × run</strong></td><td><code>docker build</code> cria a imagem a partir do Dockerfile; <code>docker run</code> cria o container a partir da imagem.</td></tr>
+<tr><td><strong>Tag × Digest</strong></td><td>Tag (<code>:latest</code>) é um apelido mutável; digest (<code>@sha256:…</code>) é o identificador imutável da imagem exata.</td></tr>
+<tr><td><strong>ENV × ARG</strong></td><td><code>ARG</code> vale só durante o build (<code>--build-arg</code>); <code>ENV</code> fica na imagem e vale em runtime (sobrescrevível com <code>-e</code>).</td></tr>
+<tr><td><strong>docker exec × docker run</strong></td><td><code>exec</code> roda um comando num container <em>já existente</em>; <code>run</code> cria um container novo.</td></tr>
+<tr><td><strong>CLI × Daemon</strong></td><td>A CLI (<code>docker</code>) é o programa que você digita; o daemon (<code>dockerd</code>) é o servidor em segundo plano que executa de verdade.</td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>Memorize esta frase</h2>
+<div class="note">
+<strong>Resumo em uma linha:</strong> o <strong>Dockerfile</strong> gera a <strong>imagem</strong> (modelo), a imagem gera o <strong>container</strong> (instância rodando), e as imagens ficam guardadas num <strong>registry</strong> como o Docker Hub — o daemon faz tudo isso acontecer por baixo dos panos.
+</div>
+
+<div class="try" data-goal="Docker version" data-solucao="docker --version">
+<p class="try-task"><strong>Missão:</strong> rode <code>docker --version</code> no terminal simulado e confira a versão do CLI e do Engine da máquina fictícia.</p>
+</div>
+
+<hr>
+
+<h2>Resumo</h2>
+<ul>
+  <li>Fluxo central: <strong>Dockerfile → build → imagem → run → container → registry</strong>.</li>
+  <li>Isolamento vem de <strong>namespaces</strong> (visão) + <strong>cgroups</strong> (recursos); o daemon orquestra tudo e o runtime (runc) executa.</li>
+  <li>Dados persistem em <strong>volumes</strong>; código em desenvolvimento entra por <strong>bind mount</strong>; temporários vão para <strong>tmpfs</strong>.</li>
+  <li>Vários containers = <strong>Compose</strong> (uma máquina) ou <strong>Swarm/Kubernetes</strong> (várias máquinas, orquestração).</li>
+  <li>Imagens têm <strong>tags</strong> (apelidos) e <strong>digests</strong> (imutáveis); o padrão aberto por trás de tudo é o <strong>OCI</strong>.</li>
+</ul>
+
+<div class="tip"><strong>Próxima aula:</strong> <a href="problemas.html">Erros comuns e soluções</a></div>
+
+</div>
+</main>
+</div>
+<script src="assets/site.js?v=4"></script>
+</body>
+</html>

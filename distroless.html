@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Imagens distroless e Alpine | Guia Docker</title>
+<meta name="description" content="Imagens mínimas para produção: Alpine (~8MB, com shell ash e apk) e distroless do Google (só o binário + as bibliotecas que ele precisa, sem shell, sem gerenciador de pacotes, ~2MB). Todas as variantes distroless (static, base, cc, nodejs, java, python3), as tags :nonroot e :debug, o erro real de 'sh: not found' no exec, Dockerfile multi-stage de Go terminando em distroless, tabela comparativa Alpine vs distroless vs Debian e quando usar cada uma.">
+<link rel="stylesheet" href="assets/style.css?v=4">
+<script>try{var t=localStorage.getItem("tema");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<meta http-equiv="Cache-Control" content="no-store, must-revalidate">
+<script>try{history.scrollRestoration="manual"}catch(e){}(function(){var n=0;function t(){window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;if(++n<60)setTimeout(t,50)}t();window.addEventListener("pagehide",function(){window.scrollTo(0,0);document.documentElement.scrollTop=0;});window.addEventListener("pageshow",function(){window.scrollTo(0,0)});window.addEventListener("load",function(){window.scrollTo(0,0)});})();document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(a){var h=a.getAttribute("href")||"";if(/[.]html($|[?#])/.test(h)&&a.host===location.host){window.scrollTo(0,0);document.documentElement.scrollTop=0;}}});</script>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" id="sidebar" aria-label="Tópicos"></nav>
+<main class="main">
+<div class="content">
+
+<div class="pager"></div>
+
+<h1><span class="hl">Distroless</span> e Alpine — imagens mínimas</h1>
+
+<p class="intro">Depois da aula de <a href="image-dive.html">camadas</a>, a Ana entendeu a matemática: imagem grande = pull lento, start lento e <strong>superfície de ataque maior</strong> (mais pacotes = mais CVEs possíveis = mais portas para um atacante). Duas famílias resolvem isso: o <strong>Alpine Linux</strong> (um sistema operacional mínimo de ~8MB, <em>com</em> shell e gerenciador de pacotes) e as imagens <strong>distroless</strong> do Google (só o seu binário + as bibliotecas que ele precisa — <em>sem</em> shell, sem nada, ~2MB). Nesta aula você vê as duas, as variantes distroless e quando usar cada uma.</p>
+
+<div class="note">
+<strong>Você vai aprender</strong>
+<ul>
+  <li>Por que imagens menores são melhores em produção (pull, start, segurança).</li>
+  <li>Alpine: o que dá para fazer com o shell <code>ash</code> e o <code>apk</code>.</li>
+  <li>Distroless: todas as variantes (<code>static</code>, <code>base</code>, <code>cc</code>, <code>nodejs</code>, <code>java</code>, <code>python3</code>) e as tags <code>:nonroot</code> e <code>:debug</code>.</li>
+  <li>O trade-off de debug: o erro real de <code>exec: "sh": executable file not found</code> numa imagem distroless.</li>
+  <li>Um Dockerfile multi-stage de Go que termina numa imagem distroless.</li>
+  <li>Tabela comparativa: Alpine × distroless × Debian/Ubuntu comum.</li>
+</ul>
+</div>
+
+<hr>
+
+<h2>Alpine: um Linux inteiro em ~8MB</h2>
+<p>O <a href="https://alpinelinux.org">Alpine Linux</a> é uma distribuição feita para ser mínima: usa o <code>musl</code> no lugar da glibc e o <code>busybox</code> no lugar de dezenas de utilitários. Resultado: ~8MB. No notebook da Ana:</p>
+<pre class="term">$ docker pull alpine
+latest: Pulling from library/alpine
+8e402f132d08: Pull complete
+Status: Downloaded newer image for alpine:latest
+
+$ docker images
+REPOSITORY   TAG      IMAGE ID       CREATED       SIZE
+alpine       latest   a1b2c3d4e5f6   2 weeks ago   8.3MB</pre>
+<p>O Alpine tem <strong>shell</strong> (<code>ash</code>) e gerenciador de pacotes (<code>apk</code>), então dá para entrar e investigar na mão:</p>
+<pre class="term">$ docker run -it --rm alpine sh
+/ # apk add curl
+fetch https://dl-cdn.alpinelinux.org/alpine/v3.20/main/x86_64/APKINDEX.tar.gz
+(1/1) Installing curl (8.9.1-r0)
+/ # exit</pre>
+<p>Por isso o <code>nginx:alpine</code>, <code>node:22-alpine</code> e <code>postgres:16-alpine</code> que usamos até agora são tão leves — são imagens sobre a base Alpine. O preço: às vezes um pacote compilado para glibc (Debian) não roda no Alpine (musl) — é o caso de alguns binários proprietary; a solução é usar a variante <code>-slim</code> (Debian) nesse caso.</p>
+
+<div class="warning"><strong>Cuidado com o <code>apk add</code> em produção:</strong> se você instala pacotes no <code>RUN</code> do Dockerfile, junte com a limpeza no mesmo comando (<code>apk add --no-cache curl</code> já não deixa cache) — lembra da aula <a href="image-dive.html">docker history</a>: camadas separadas não emagrecem.</div>
+
+<hr>
+
+<h2>Distroless: só o binário e as bibliotecas</h2>
+<p>As imagens <a href="https://github.com/GoogleContainerTools/distroless">distroless</a> (<code>gcr.io/distroless/…</code>) não têm sistema operacional, nem shell, nem <code>apt</code>/<code>apk</code>. Elas contêm <strong>somente o executável compilado e as bibliotecas que ele precisa</strong>, além de certificados CA e um usuário sem privilégios:</p>
+<pre class="term">$ docker pull gcr.io/distroless/static-debian12
+latest: Pulling from distroless/static-debian12
+c3d4e5f6a1b2: Pull complete
+Status: Downloaded newer image for gcr.io/distroless/static-debian12:latest
+
+$ docker images
+REPOSITORY                        TAG       IMAGE ID       CREATED       SIZE
+gcr.io/distroless/static-debian12  latest   d4e5f6a1b2c3   3 weeks ago   2.1MB</pre>
+
+<h3>Todas as variantes</h3>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Imagem</th><th>O que tem dentro</th><th>Tamanho típico</th><th>Use para</th></tr>
+<tr><td><code>static-debian12</code></td><td>Só binários estáticos + CA</td><td>~2MB</td><td>Go, Rust, C/C++ com <code>CGO_ENABLED=0</code></td></tr>
+<tr><td><code>base-debian12</code></td><td>static + glibc + openssl</td><td>~20MB</td><td>Binários dynamiques que precisam da glibc</td></tr>
+<tr><td><code>cc-debian12</code></td><td>base + libstdc++</td><td>~25MB</td><td>Binários C++</td></tr>
+<tr><td><code>nodejs22-debian12</code></td><td>Node 22 + npm mínimo</td><td>~80MB</td><td>Apps Node sem instalar nada em runtime</td></tr>
+<tr><td><code>python3-debian12</code></td><td>Python 3 + pip mínimo</td><td>~50MB</td><td>Apps Python puros (sem precisar de apt)</td></tr>
+<tr><td><code>java21-debian12</code></td><td>JRE 21</td><td>~200MB</td><td>Apps Java (JAR)</td></tr>
+<tr><td><code>base-debian12:nonroot</code></td><td>base + usuário UID 65532 como padrão</td><td>~20MB</td><td>Produção: já vem não-root (aula <a href="usuario-nao-root.html">USER</a>)</td></tr>
+<tr><td><code>static-debian12:debug</code></td><td>static + shell busybox</td><td>~5MB</td><td>Debug (tem shell!), nunca em produção final</td></tr>
+</table>
+</div>
+<p>As tags importantes: <code>:nonroot</code> (roda como usuário 65532, sem root — combine com a aula <a href="usuario-nao-root.html">USER</a>) e <code>:debug</code> (igual à normal, mas com um shell busybox dentro para depurar).</p>
+
+<div class="warning"><strong>Sem shell, o exec de debug falha com erro real:</strong> <code>docker exec -it meu-app sh</code> numa imagem distroless devolve <code>OCI runtime exec failed: exec failed: unable to start container process: exec: "sh": executable file not found in $PATH: unknown</code>. Para depurar, use a tag <code>:debug</code>, o comando <code>docker debug</code> (Docker 27, que injeta ferramentas no container rodando) ou olhe os logs (<code>docker logs</code> continua funcionando sempre).</div>
+
+<hr>
+
+<h2>Dockerfile de Go terminando em distroless</h2>
+<p>A combinação clássica é o <a href="multi-stage.html">multi-stage build</a>: compila num estágio grande (com o Go instalado) e copia só o binário para o estágio final, mínimo:</p>
+<pre class="file" data-file="Dockerfile"># ---- estágio 1: build (imagem grande, descartada depois) ----
+FROM golang:1.23-alpine AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 go build -o /out/server .
+
+# ---- estágio 2: imagem final mínima ----
+FROM gcr.io/distroless/static-debian12:nonroot
+COPY --from=build /out/server /server
+EXPOSE 8080
+ENTRYPOINT ["/server"]</pre>
+<p>O resultado: uma imagem de poucos MB, sem shell, rodando como usuário sem privilégios (<code>:nonroot</code>) — ideal para produção. Para outras linguagens, o truque é o mesmo: copie só o artefato final (JAR para <code>java21</code>, pasta <code>dist/</code> + <code>node_modules</code> para <code>nodejs22</code>, o venv para <code>python3</code>).</p>
+
+<hr>
+
+<h2>Alpine vs distroless vs imagem "normal"</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th></th><th>Alpine</th><th>Distroless</th><th>Debian/Ubuntu comum</th></tr>
+<tr><td>Tamanho típico</td><td>~8MB (base) a ~200MB (app)</td><td>~2MB a ~80MB (só o app)</td><td>~100MB+ só de base</td></tr>
+<tr><td>Tem shell?</td><td>Sim (<code>ash</code>)</td><td><strong>Não</strong> (só na tag <code>:debug</code>)</td><td>Sim (<code>bash</code>)</td></tr>
+<tr><td>Gerenciador de pacotes?</td><td>Sim (<code>apk</code>)</td><td>Não</td><td>Sim (<code>apt</code>)</td></tr>
+<tr><td>Debug fácil (<code>docker exec</code>)?</td><td>Sim</td><td>Só com tag <code>:debug</code> ou <code>docker debug</code></td><td>Sim</td></tr>
+<tr><td>Compatibilidade de binários</td><td>musl — às vezes quebra binário glibc</td><td>static não precisa de lib; base usa glibc</td><td>glibc — máxima compatibilidade</td></tr>
+<tr><td>Superfície de ataque</td><td>Pequena</td><td><strong>Mínima</strong> (sem shell = sem shell para o atacante)</td><td>Maior</td></tr>
+<tr><td>Quando usar</td><td>Quando você precisa entrar no container ou instalar algo em runtime</td><td>Produção de apps compilados (Go, Rust, C) e serviços herméticos</td><td>Quando a conveniência pesa mais que o tamanho</td></tr>
+</table>
+</div>
+<p>Regra prática da Ana: <strong>em produção, prefira distroless (ou alpine no mínimo)</strong>; em desenvolvimento, pode usar a imagem completa (node:22, python:3.12) para ter shell e ferramentas à mão. E lembre: dá para ter os dois com multi-stage — build na imagem completa, runtime na mínima.</p>
+
+<hr>
+
+<h2>Cenário de produção: o ataque que não teve shell para usar</h2>
+<p>Numa auditoria, a empresa hipotética da Ana comparou duas imagens da mesma API: uma em <code>debian</code> (com bash, curl, apt) e outra em distroless. Depois de explorarem uma falha de RCE (execução remota) nas duas, no container Debian o atacante tinha shell, curl e apt à vontade — usou para baixar ferramentas e pivotar na rede. No container distroless, o comando injetado caía na hora com <code>executable file not found</code>: sem shell, sem curl, sem nada, a superfície de execução do atacante encolheu drasticamente. Não é bala de prata (se a própria app for maliciosa, ela roda do mesmo jeito), mas tira do atacante todo o "kit de ferramentas" que normalmente vem de brinde numa imagem completa.</p>
+
+<div class="try" data-goal="Downloaded newer image" data-solucao="docker pull gcr.io/distroless/static-debian12">
+<p class="try-task"><strong>Missão:</strong> baixe uma imagem distroless com <code>docker pull gcr.io/distroless/static-debian12</code> e depois compare o tamanho dela com <code>docker images</code>.</p>
+</div>
+
+<div class="try" data-goal="REPOSITORY" data-solucao="docker images">
+<p class="try-task"><strong>Missão extra:</strong> rode <code>docker images</code> e ordene mentalmente da mais pesada para a mais leve — dá para ver na coluna SIZE quem é alpine e quem é distroless.</p>
+</div>
+
+<hr>
+
+<h2>Como escolher a base certa: árvore de decisão</h2>
+<p>Na hora de escrever o <code>FROM</code>, a Ana segue este roteiro:</p>
+<ol class="passo">
+  <li><strong>A app é um binário estático</strong> (Go com <code>CGO_ENABLED=0</code>, Rust, C)? → estágio final em <code>FROM scratch</code> ou <code>distroless/static:nonroot</code>.</li>
+  <li><strong>A app precisa da glibc</strong> (binário dinâmico, lib C++)? → <code>distroless/base</code> ou <code>distroless/cc</code>.</li>
+  <li><strong>É Node/Python/Java</strong> e você não quer instalar nada em runtime? → <code>distroless/nodejs22</code>, <code>distroless/python3</code>, <code>distroless/java21</code>.</li>
+  <li><strong>Você precisa de shell/pacotes dentro do container</strong> (debug, instalar algo em runtime, scripts de entrypoint)? → base <code>-alpine</code> (ex.: <code>node:22-alpine</code>).</li>
+  <li><strong>Conveniência total em dev</strong> (bash, apt, ferramentas)? → imagem completa (<code>node:22</code>, <code>python:3.12</code>). Só em dev — em produção, troque pela versão slim/alpine.</li>
+</ol>
+<p>E não esqueça: depois de escolher a base enxuta, aplique as proteções da aula <a href="usuario-nao-root.html">USER</a> (nas distroless, use <code>:nonroot</code>) e da <a href="multi-stage.html">multi-stage</a> para o build não sujar a imagem final.</p>
+
+<hr>
+
+<h2>Quiz rápido</h2>
+<div class="mc" data-answer="3">
+<p class="mc-q">1. O que existe dentro de uma imagem distroless <code>static</code>?</p>
+<label><input type="radio" name="q1"> Um Ubuntu inteiro enxuto</label>
+<label><input type="radio" name="q1"> Shell + apt + ferramentas básicas</label>
+<label><input type="radio" name="q1"> Só o binário estático da app + certificados CA (sem shell, sem gerenciador de pacotes)</label>
+<label><input type="radio" name="q1"> Só o kernel do Linux</label>
+</div>
+
+<div class="mc" data-answer="2">
+<p class="mc-q">2. Por que a tag <code>:nonroot</code> do distroless é importante?</p>
+<label><input type="radio" name="q2"> Porque deixa a imagem mais colorida</label>
+<label><input type="radio" name="q2"> Porque faz o container rodar como usuário sem privilégios (UID 65532), sem root</label>
+<label><input type="radio" name="q2"> Porque muda a porta padrão</label>
+<label><input type="radio" name="q2"> Porque apaga os logs</label>
+</div>
+
+<div class="mc" data-answer="4">
+<p class="mc-q">3. Você deu <code>docker exec -it meu-app sh</code> numa imagem distroless e recebeu um erro. Qual?</p>
+<label><input type="radio" name="q3"> <code>permission denied</code></label>
+<label><input type="radio" name="q3"> <code>container is not running</code></label>
+<label><input type="radio" name="q3"> <code>image not found</code></label>
+<label><input type="radio" name="q4"> <code>exec: "sh": executable file not found in $PATH</code> — não tem shell; use a tag :debug ou docker debug</label>
+</div>
+
+<div class="mc" data-answer="1">
+<p class="mc-q">4. Qual base usar num multi-stage de Go com binário estático?</p>
+<label><input type="radio" name="q5"> <code>FROM scratch</code> ou <code>gcr.io/distroless/static-debian12</code> — a imagem final fica só com o binário</label>
+<label><input type="radio" name="q5"> <code>FROM ubuntu:24.04</code></label>
+<label><input type="radio" name="q5"> <code>FROM golang:1.23</code> (sem segundo estágio)</label>
+<label><input type="radio" name="q5"> <code>FROM node:22</code></label>
+</div>
+
+<hr>
+
+<h2>Resumo</h2>
+<ul>
+  <li>Imagem mínima = pull/start rápidos + menos CVEs + menos ferramentas para um atacante usar.</li>
+  <li><strong>Alpine</strong> (~8MB): Linux mínimo com shell (<code>ash</code>) e <code>apk</code> — bom quando você precisa entrar no container.</li>
+  <li><strong>Distroless</strong> (~2–80MB): só o binário + bibliotecas + CA; sem shell nem gerenciador de pacotes — variants <code>static</code>, <code>base</code>, <code>cc</code>, <code>nodejs</code>, <code>python3</code>, <code>java</code>.</li>
+  <li>Tags distroless: <code>:nonroot</code> (roda como UID 65532) e <code>:debug</code> (com shell busybox, só para depurar).</li>
+  <li>Erro real de debug em distroless: <code>exec: "sh": executable file not found in $PATH</code> — use <code>:debug</code> ou <code>docker debug</code>.</li>
+  <li>Combine com multi-stage: build na imagem completa, runtime na mínima (Alpine ou distroless).</li>
+</ul>
+
+<div class="tip"><strong>Próxima aula:</strong> <a href="healthcheck.html">HEALTHCHECK e restart policies</a>.</div>
+
+<div class="pager"></div>
+
+</div>
+</main>
+</div>
+<script src="assets/site.js?v=4"></script>
+</body>
+</html>

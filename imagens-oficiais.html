@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Imagens oficiais e verificadas no Docker Hub | Guia Docker</title>
+<meta name="description" content="Como escolher imagens confiáveis no Docker Hub: o selo 'Official Image' (oficial), 'Verified Publisher' (editor verificado), 'Docker Sponsored OSS', o que olhar antes de usar (stars, pulls, última atualização, descrição, Dockerfile público), a anatomia do nome docker.io/namespace/repo, os riscos de imagens aleatórias (malware, root, segredos) e como escanear vulnerabilidades. Missão no simulador.">
+<link rel="stylesheet" href="assets/style.css?v=4">
+<script>try{var t=localStorage.getItem("tema");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<meta http-equiv="Cache-Control" content="no-store, must-revalidate">
+<script>try{history.scrollRestoration="manual"}catch(e){}(function(){var n=0;function t(){window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;if(++n<60)setTimeout(t,50)}t();window.addEventListener("pagehide",function(){window.scrollTo(0,0);document.documentElement.scrollTop=0;});window.addEventListener("pageshow",function(){window.scrollTo(0,0)});window.addEventListener("load",function(){window.scrollTo(0,0)});})();document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(a){var h=a.getAttribute("href")||"";if(/[.]html($|[?#])/.test(h)&&a.host===location.host){window.scrollTo(0,0);document.documentElement.scrollTop=0;}}});</script>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" id="sidebar" aria-label="Tópicos"></nav>
+<main class="main">
+<div class="content">
+
+<div class="pager"></div>
+
+<h1>Imagens <span class="hl">oficiais</span> e verificadas</h1>
+
+<p class="intro">No Docker Hub qualquer um pode publicar uma imagem. Saber escolher a certa evita dor de cabeça — e brecha de segurança. Nesta aula a Ana aprende a ler os selos e os sinais de confiança antes de dar <code>docker pull</code> numa imagem desconhecida.</p>
+
+<div class="note">
+<strong>Você vai aprender</strong>
+<ul>
+  <li>Os três selos do Hub: <strong>Official Image</strong>, <strong>Verified Publisher</strong>, <strong>Docker Sponsored OSS</strong>.</li>
+  <li>O que olhar numa página de imagem: pulls, atualização, descrição, Dockerfile público, tags.</li>
+  <li>A anatomia do endereço: <code>docker.io/namespace/repo:tag</code> — e o que é o <code>library</code>.</li>
+  <li>Os riscos de imagem aleatória: código malicioso, root por padrão, segredos embutidos.</li>
+  <li>Como escanear vulnerabilidades (<code>docker scout</code>) e inspecionar camadas.</li>
+</ul>
+</div>
+
+<hr>
+
+<h2>Os selos</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Selo</th><th>Significado</th><th>Exemplo</th></tr>
+<tr><td>🐳 <strong>Official Image</strong></td><td>Mantida pela equipe do próprio software (ou pela Docker Inc.). É a escolha padrão — auditada, atualizada, com Dockerfile público.</td><td><code>nginx</code>, <code>postgres</code>, <code>node</code>, <code>python</code>, <code>redis</code>, <code>mysql</code></td></tr>
+<tr><td>✔ <strong>Verified Publisher</strong></td><td>Empresa verificada pela Docker Inc. — o nome da empresa foi confirmado.</td><td><code>bitnami/*</code>, <code>grafana/*</code>, <code>mongo</code> (MongoDB Inc.)</td></tr>
+<tr><td>💙 <strong>Docker Sponsored OSS</strong></td><td>Projeto open source patrocinado pela Docker — comunidade, não a empresa do software.</td><td>várias imagens de projetos open source</td></tr>
+<tr><td>(sem selo)</td><td>Publicado por um usuário comum. Pode ser ótimo ou perigoso — olhe os sinais abaixo.</td><td><code>usuarioaleatorio/app</code></td></tr>
+</table>
+</div>
+
+<p>Regra prática: na dúvida, prefira <strong>oficial &gt; verified &gt;社区 com muitos pulls e atualização recente &gt; aleatória</strong>.</p>
+
+<hr>
+
+<h2>A anatomia do endereço no Hub</h2>
+<pre class="term">hub.docker.com / _ / nginx        → oficial (o "_" é o apelido de "library")
+hub.docker.com / bitnami / nginx  → editor verificado (Bitnami)
+hub.docker.com / ana / meuapp     → usuário comum "ana"</pre>
+<p>No terminal, o mesmo endereço aparece completo: <code>docker.io/library/nginx</code>, <code>docker.io/bitnami/nginx</code>, <code>docker.io/ana/meuapp</code>. O <code>library</code> (mostrado como <code>_</code> no site) é o namespace das oficiais.</p>
+
+<hr>
+
+<h2>O que olhar antes de usar</h2>
+<ol class="passo">
+  <li><strong>O selo</strong> (tabela acima).</li>
+  <li><strong>Pulls e stars</strong>: quanto mais, mais popular (e mais testada pela comunidade). <code>postgres</code> tem bilhões de pulls; uma imagem com 12 pulls precisa de mais escrutínio.</li>
+  <li><strong>Última atualização</strong>: imagem parada há anos pode ter vulnerabilidades connues. Prefira "Updated X days ago".</li>
+  <li><strong>A descrição</strong>: boa imagem explica como usar, quais variáveis de ambiente aceita (<code>POSTGRES_PASSWORD</code>…), quais portas expõe e dá exemplo de <code>docker run</code>.</li>
+  <li><strong>O Dockerfile público</strong>: nas oficiais, o link leva ao repositório do Dockerfile — dá para auditar exatamente o que foi instalado.</li>
+  <li><strong>A aba Tags</strong>: escolha a tag certa (aula <a href="tags.html">tags</a>) — evite <code>:latest</code> em produção.</li>
+</ol>
+
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Sinal verde ✅</th><th>Sinal vermelho 🚩</th></tr>
+<tr><td>Selo oficial/verificado</td><td>Sem selo e poucos pulls</td></tr>
+<tr><td>Atualizada há dias/semanas</td><td>Parada há anos</td></tr>
+<tr><td>Descrição completa, com exemplos</td><td>Descrição vazia ou só "my image"</td></tr>
+<tr><td>Dockerfile público</td><td>Sem Dockerfile visível</td></tr>
+<tr><td>Tags de versão claras</td><td>Só <code>latest</code>, sem nada específico</td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>Os riscos de uma imagem aleatória</h2>
+<p>Uma imagem é um sistema de arquivos inteiro rodando na sua máquina (e, se publishar portas, na rede). Uma imagem maliciosa pode:</p>
+<ul>
+  <li>roubar variáveis de ambiente (senhas que você passou com <code>-e</code> ficam legíveis dentro do container — e no <code>docker inspect</code>);</li>
+  <li>minerar criptomoeda às suas custas (CPU em 100% — dá para ver no <code>docker stats</code>);</li>
+  <li>abrir uma porta escondida e servir de ponte para a sua rede;</li>
+  <li>modificar os arquivos que você monta com <code>-v</code> (se não usar <code>:ro</code>).</li>
+</ul>
+
+<div class="warning"><strong>Segurança:</strong> nunca rode uma imagem aleatória em produção sem inspecionar. Prefira oficiais ou verificadas, faça scan de vulnerabilidades e, quando montar pastas do host, use <code>:ro</code> (somente leitura). A aula <a href="image-dive.html">Analisando camadas (dive)</a> mostra como ver o que tem dentro de uma imagem, e <a href="usuario-nao-root.html">usuário não-root</a> endurece a execução.</div>
+
+<h3>Escaneando vulnerabilidades</h3>
+<p>O próprio Docker tem um scanner integrado (Docker Scout), grátis para uso pessoal no Hub:</p>
+<pre class="term">$ docker scout quickview nginx:alpine
+$ docker scout cves nginx:alpine        « lista as CVEs conhecidas dessa imagem
+$ docker scout recommendations nginx:alpine   « sugere uma imagem base mais atualizada</pre>
+<p>Também dá para ativar o scan automático no Docker Desktop: toda imagem que você baixa aparece com o resumo de vulnerabilidades na aba Images.</p>
+
+<hr>
+
+<h2>Pratique no simulador</h2>
+<div class="try" data-goal="Downloaded" data-solucao="docker pull bitnami/mongodb">
+<p class="try-task"><strong>Missão:</strong> baixe uma imagem de editor verificado (Bitnami): <code>docker pull bitnami/mongodb</code>. No Hub real, a página <code>bitnami/mongodb</code> tem o selo ✔ Verified Publisher.</p>
+</div>
+
+<pre class="term">$ docker pull bitnami/mongodb
+Trying to pull bitnami/mongodb:latest...
+latest: Pulling from bitnami/mongodb
+Status: Downloaded newer image for bitnami/mongodb:latest
+docker.io/bitnami/mongodb:latest
+$ docker images
+REPOSITORY       TAG       IMAGE ID       SIZE
+bitnami/mongodb  latest    …              ~450MB</pre>
+
+<div class="mc" data-answer="1">
+<p class="mc-q">Qual destas imagens é a mais segura para usar sem pensar duas vezes?</p>
+<label><input type="radio" name="q1"> <code>postgres</code> (selo 🐳 Official Image, namespace library)</label>
+<label><input type="radio" name="q1"> <code>usuarioaleatorio123/postgres</code></label>
+<label><input type="radio" name="q1"> <code>banco-docker</code> (sem namespace)</label>
+<label><input type="radio" name="q1"> qualquer uma com <code>:latest</code></label>
+</div>
+
+<div class="mc" data-answer="3">
+<p class="mc-q">Numa página do Docker Hub, o que o selo ✔ <strong>Verified Publisher</strong> garante?</p>
+<label><input type="radio" name="q2"> Que a imagem não tem vírus</label>
+<label><input type="radio" name="q2"> Que é grátis para sempre</label>
+<label><input type="radio" name="q2"> Que a empresa dona do nome foi verificada pela Docker Inc. (não é um impostor)</label>
+<label><input type="radio" name="q2"> Que a imagem pesa menos de 100MB</label>
+</div>
+
+<div class="mc" data-answer="2">
+<p class="mc-q">Antes de dar <code>docker pull</code> numa imagem desconhecida, o que você deve conferir?</p>
+<label><input type="radio" name="q3"> Só se o nome está bonito</label>
+<label><input type="radio" name="q3"> Selo (oficial/verificado), quantidade de pulls, data da última atualização, descrição com exemplos e Dockerfile público</label>
+<label><input type="radio" name="q3"> Nada — se está no Hub, está certo</label>
+<label><input type="radio" name="q3"> Só o tamanho</label>
+</div>
+
+<hr>
+
+<h2>As oficiais mais usadas (e suas variáveis)</h2>
+<p>Estas são as imagens oficiais que aparecem neste guia. Na página de cada uma no Hub está a lista de variáveis de ambiente que ela aceita — é lá que você descobre, por exemplo, a senha do banco:</p>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Imagem</th><th>Para que serve</th><th>Variáveis importantes (exemplo)</th><th>Porta interna</th></tr>
+<tr><td><code>nginx</code></td><td>Servidor web / proxy reverso</td><td>— (config via volume)</td><td>80</td></tr>
+<tr><td><code>postgres</code></td><td>Banco relacional</td><td><code>POSTGRES_PASSWORD</code> (obrigatória), <code>POSTGRES_USER</code>, <code>POSTGRES_DB</code></td><td>5432</td></tr>
+<tr><td><code>mysql</code></td><td>Banco relacional</td><td><code>MYSQL_ROOT_PASSWORD</code>, <code>MYSQL_DATABASE</code>, <code>MYSQL_USER</code></td><td>3306</td></tr>
+<tr><td><code>redis</code></td><td>Cache / filas em memória</td><td>— (senha via arquivo de config)</td><td>6379</td></tr>
+<tr><td><code>node</code></td><td>Rodar apps JavaScript</td><td><code>NODE_ENV</code></td><td>definida pelo app</td></tr>
+<tr><td><code>python</code></td><td>Rodar scripts / APIs</td><td><code>PYTHONUNBUFFERED=1</code></td><td>definida pelo app</td></tr>
+</table>
+</div>
+<p>Essas variáveis você passa com <code>-e</code> (aula <a href="variaveis-ambiente.html">variáveis de ambiente</a>).</p>
+
+<h3>De oficial a sua própria imagem: o caminho</h3>
+<ol class="passo">
+  <li>Você cria a imagem com <code>docker build</code> (nível 2, aula <a href="dockerfile-intro.html">Dockerfile</a>).</li>
+  <li>Dá um nome no formato do Hub: <code>docker tag meuapp:latest ana/meuapp:1.0</code> (seu usuário do Hub + nome + tag).</li>
+  <li>Faz login: <code>docker login</code>.</li>
+  <li>Publica: <code>docker push ana/meuapp:1.0</code> — aula <a href="docker-tag-push.html">docker tag e push</a>.</li>
+</ol>
+
+<div class="warning">
+<strong>Nunca publique segredos dentro de uma imagem</strong>
+<p>Uma imagem publicada no Hub é <strong>pública</strong> (a menos que você pague por repositório privado). Se você pôs uma senha no Dockerfile (<code>ENV API_KEY=…</code>) ou copiou um arquivo <code>.env</code> com <code>COPY</code>, qualquer um que baixar a imagem vê. Regra: segredos vão por variável de ambiente na hora do <code>run</code> (<code>-e</code>) ou por volume — nunca na imagem. E use <code>.dockerignore</code> (aula <a href="dockerignore.html">.dockerignore</a>) para não mandar <code>.env</code> no build.</p>
+</div>
+
+<hr>
+
+<h2>Alternativas modernas e endurecidas</h2>
+<p>Além das oficiais, existem opções focadas em segurança e tamanho (nível 3 aprofunda):</p>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Tipo</th><th>Exemplo</th><th>Quando usar</th></tr>
+<tr><td>Distroless (Google)</td><td><code>gcr.io/distroless/nodejs22</code></td><td>Produção enxuta e segura: só o runtime, sem shell, sem gerenciador de pacotes — superfície de ataque mínima</td></tr>
+<tr><td>Chainguard Images</td><td><code>cgr.dev/chainguard/nginx</code></td><td>Imagens sem vulnerabilidades conhecidas (zero CVE), assinadas</td></tr>
+<tr><td>Bitnami (Verified Publisher)</td><td><code>bitnami/postgresql</code></td><td>Banco pronto para produção, com helm charts e configs padrão</td></tr>
+</table>
+</div>
+<p>As imagens distroless não têm shell — ou seja, <code>docker exec -it … sh</code> não funciona dentro delas (debug fica mais difícil). É o trade-off: segurança × conveniência. A aula <a href="distroless.html">Imagens distroless e Alpine</a> compara.</p>
+
+<h3>Conferindo a assinatura/integridade</h3>
+<p>Além do digest (hash do conteúdo), dá para exigir assinaturas criptográficas com <code>DOCKER_CONTENT_TRUST=1</code> — o Docker só baixa/ roda imagens assinadas:</p>
+<pre class="term">$ export DOCKER_CONTENT_TRUST=1
+$ docker pull ana/meuapp:1.0     « se a imagem não for assinada por ana, o pull recusa</pre>
+
+<hr>
+
+<h2>Procurando imagem pelo terminal: docker search</h2>
+<p>Além do site, dá para procurar no próprio terminal (comando real do Docker CLI):</p>
+<pre class="term">$ docker search postgres --filter "is-official=true"
+NAME      DESCRIPTION                    STARS   OFFICIAL
+postgres  The PostgreSQL object-relational…  15000   [OK]
+$ docker search nginx --filter "is-automated=true"   « builds automáticos (CI)
+$ docker search redis --limit 10                     « só os 10 primeiros</pre>
+<p>Os filtros <code>is-official=true</code>, <code>is-verified=true</code> e <code>stars=100</code> (mínimo de estrelas) ajudam a achar coisa confiável rápido.</p>
+
+<div class="warning">
+<strong>Cuidado com "automated builds" antigos</strong>
+<p>Builds automáticos de usuários aleatórios podem estar desatualizados há anos e cheios de vulnerabilidades. Se for usar um sem selo, cheque a data do último push e o Dockerfile. Para produção, oficial/verificado ou a sua própria imagem.</p>
+</div>
+
+<hr>
+
+<h2>Resumo</h2>
+<ul>
+  <li>No Docker Hub qualquer um publica. Ordem de confiança: <strong>🐳 Official Image</strong> (namespace <code>library</code>) &gt; <strong>✔ Verified Publisher</strong> &gt; comunidade com muitos pulls e atualização recente &gt; aleatória.</li>
+  <li>Conferir antes: selo, pulls/stars, última atualização, descrição com exemplos de uso, Dockerfile público, aba Tags.</li>
+  <li>Riscos de imagem aleatória: roubo de variáveis (<code>-e</code>), minerador, porta escondida, acesso a pastas montadas com <code>-v</code> (use <code>:ro</code>).</li>
+  <li>Scan de vulnerabilidades: <code>docker scout cves IMAGEM</code> (ou o scan automático do Desktop).</li>
+  <li>Endereço completo: <code>docker.io/namespace/repo:tag</code>; no site, oficiais aparecem como <code>_/repo</code>.</li>
+</ul>
+
+<div class="tip"><strong>Próxima aula:</strong> <a href="docker-stop-start.html">docker stop, start e restart</a> — agora que as imagens estão baixadas e confiáveis, vamos controlar the containers: parar, religar e reiniciar sem recriar.</div>
+
+</div>
+</main>
+</div>
+<script src="assets/site.js?v=4"></script>
+</body>
+</html>

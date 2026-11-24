@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Drivers de log e rotação (json-file, max-size) | Guia Docker</title>
+<meta name="description" content="Como funcionam os logs dos containers: o driver padrão json-file grava em /var/lib/docker/containers/&lt;id&gt;/-json.log sem limite de tamanho; docker logs com --tail, --since, --until, -f e --timestamps; os drivers de log (syslog, journald, none, fluentd, gelf, awslogs, gcplogs, azurelogs) e quando usar cada um; rotação com --log-opt max-size=10m max-file=3; configuração global no /etc/docker/daemon.json; como conferir com docker inspect; e o cenário real do disco cheio que derrubou o servidor.">
+<link rel="stylesheet" href="assets/style.css?v=4">
+<script>try{var t=localStorage.getItem("tema");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<meta http-equiv="Cache-Control" content="no-store, must-revalidate">
+<script>try{history.scrollRestoration="manual"}catch(e){}(function(){var n=0;function t(){window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;if(++n<60)setTimeout(t,50)}t();window.addEventListener("pagehide",function(){window.scrollTo(0,0);document.documentElement.scrollTop=0;});window.addEventListener("pageshow",function(){window.scrollTo(0,0)});window.addEventListener("load",function(){window.scrollTo(0,0)});})();document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(a){var h=a.getAttribute("href")||"";if(/[.]html($|[?#])/.test(h)&&a.host===location.host){window.scrollTo(0,0);document.documentElement.scrollTop=0;}}});</script>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" id="sidebar" aria-label="Tópicos"></nav>
+<main class="main">
+<div class="content">
+
+<div class="pager"></div>
+
+<h1><span class="hl">Logs</span> — drivers e rotação</h1>
+
+<p class="intro">Tudo que a sua aplicação imprime em <code>stdout</code>/<code>stderr</code> (o <code>console.log</code>, o <code>print</code>, o log do Nginx) vira log do container — o Docker captura e guarda isso para você, sem você configurar nada. Só que tem uma pegadinha que já derrubou servidor mundo afora: por padrão, o driver <code>json-file</code> grava em arquivo local <strong>sem limite de tamanho</strong>. Uma aplicação verbosa (ou um loop de erro) pode encher o disco inteiro — e disco cheio derruba <em>todos</em> os containers e serviços da máquina. Nesta aula: como ler os logs com <code>docker logs</code>, como trocar o driver e como configurar a rotação.</p>
+
+<div class="note">
+<strong>Você vai aprender</strong>
+<ul>
+  <li>Ler logs com <code>docker logs</code>: <code>--tail</code>, <code>--since</code>, <code>--until</code>, <code>-f</code>, <code>--timestamps</code>.</li>
+  <li>Onde o log fica no disco e por que o padrão não tem limite.</li>
+  <li>Os drivers de log: <code>json-file</code> (padrão), <code>syslog</code>, <code>journald</code>, <code>none</code> e os externos (<code>fluentd</code>, <code>gelf</code>, <code>awslogs</code>…).</li>
+  <li>Rotação com <code>--log-opt max-size=10m --log-opt max-file=3</code> e no <code>/etc/docker/daemon.json</code> (global).</li>
+  <li>Ver a configuração de log de um container com <code>docker inspect</code>.</li>
+</ul>
+</div>
+
+<hr>
+
+<h2>A ideia: o Docker é o porteiro que anota tudo</h2>
+<p>Toda linha que o processo do container escreve na saída padrão vai para o log dele. O Docker não julga: log de acesso, erro, debug — tudo entra no mesmo arquivo. A sua aplicação só precisa imprimir no stdout/stderr (não gravar em arquivo próprio dentro do container, que é descartado). A boa notícia: <code>docker logs</code> lê esse arquivo para você, sem entrar no container.</p>
+
+<hr>
+
+<h2>docker logs: lendo o que o container imprimiu</h2>
+<pre class="term">$ docker run -d --name web -p 8080:80 nginx:alpine
+a1b2c3d4e5f6…
+
+$ docker logs web
+/docker-entrypoint.sh: /docker-entrypoint.d/ is not empty, will attempt to perform configuration
+/docker-entrypoint.sh: Configuration complete; ready for start up
+172.17.0.1 - - [15/Jan/2025:10:00:01 +0000] "GET / HTTP/1.1" 200 615
+172.17.0.1 - - [15/Jan/2025:10:00:07 +0000] "GET /logo.png HTTP/1.1" 200 4120
+
+$ docker logs --tail 2 web        « só as 2 últimas linhas
+$ docker logs --since 10m web      « só as últimas 10 minutos
+$ docker logs --until 1h web       « só até 1 hora atrás
+$ docker logs -f web               « segue em tempo real (Ctrl+C sai, o container continua)
+$ docker logs -t web               « com data/hora no início de cada linha</pre>
+
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Flag</th><th>O que faz</th><th>Exemplo</th></tr>
+<tr><td><code>-f</code> / <code>--follow</code></td><td>Acompanha o log em tempo real (como <code>tail -f</code>). Ctrl+C sai do acompanhamento, <strong>não</strong> para o container.</td><td><code>docker logs -f web</code></td></tr>
+<tr><td><code>--tail N</code> (ou <code>-n N</code>)</td><td>Mostra só as últimas N linhas (padrão: tudo).</td><td><code>docker logs --tail 50 web</code></td></tr>
+<tr><td><code>--since 10m</code></td><td>Mostra só a partir de 10 minutos atrás (aceita <code>1h</code>, <code>2025-01-15</code>, <code>2025-01-15T10:00:00</code>…).</td><td><code>docker logs --since 2025-01-15T10:00:00 web</code></td></tr>
+<tr><td><code>--until 10m</code></td><td>Mostra só até 10 minutos atrás.</td><td><code>docker logs --until 10m web</code></td></tr>
+<tr><td><code>-t</code> / <code>--timestamps</code></td><td>Coloca a data/hora no início de cada linha — essencial em produção.</td><td><code>docker logs -t web</code></td></tr>
+</table>
+</div>
+
+<div class="try" data-goal="Configuration complete" data-solucao="docker run -d --name web nginx:alpine">
+<p class="try-task"><strong>Missão:</strong> suba um Nginx com <code>docker run -d --name web nginx:alpine</code> e depois leia a inicialização dele com <code>docker logs web</code>.</p>
+</div>
+
+<hr>
+
+<h2>Onde o log fica no disco</h2>
+<p>Com o driver padrão <code>json-file</code>, cada container grava em:</p>
+<pre class="term">$ ls /var/lib/docker/containers/
+a1b2c3d4e5f6a1b2c3d4e5f6…/
+
+$ ls -lh /var/lib/docker/containers/a1b2c3d4e5f6…/a1b2c3d4e5f6…-json.log
+-rw-r--r-- 1 root root 148K jan 15 10:32 a1b2c3d4e5f6…-json.log   « cresce para sempre, sem limite</pre>
+<p>Cada linha do arquivo é um JSON (daí o nome): <code>{"log":"…","stream":"stdout","time":"…"}</code>. É por isso que <code>docker logs</code> consegue filtrar por tempo. Esse arquivo <strong>cresce sem limite</strong> — é a bomba-relógio da próxima seção.</p>
+
+<hr>
+
+<h2>Drivers de log: para onde vai o log</h2>
+<p>O driver decide <strong>quem recebe</strong> o que o container imprime. Você escolhe por container (<code>--log-driver</code>) ou para o host inteiro (<code>daemon.json</code>):</p>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Driver</th><th>Para onde vai o log</th><th>Quando usar</th></tr>
+<tr><td><code>json-file</code></td><td>Arquivos JSON locais em <code>/var/lib/docker/containers/…</code> (padrão; <code>docker logs</code> funciona)</td><td>Máquina única, quase tudo. <strong>Com max-size!</strong></td></tr>
+<tr><td><code>local</code></td><td>Arquivos locais otimizados (com rotação embutida via <code>max-size</code>)</td><td>Alternativa moderna ao json-file em alguns casos</td></tr>
+<tr><td><code>syslog</code></td><td>Servidor syslog da rede (<code>--log-opt syslog-address=…</code>)</td><td>Centralizar logs de vários hosts num servidor só</td></tr>
+<tr><td><code>journald</code></td><td>O journal do systemd do host</td><td>Sistemas com systemd; depois lê com <code>journalctl CONTAINER_NAME=web</code></td></tr>
+<tr><td><code>fluentd</code> / <code>gelf</code></td><td>Coletores de log (Fluentd, Graylog, ELK/Loki)</td><td>Pipeline de observabilidade (ELK, Loki, Datadog…)</td></tr>
+<tr><td><code>awslogs</code> / <code>gcplogs</code> / <code>azurelogs</code></td><td>CloudWatch / Cloud Logging / Monitor</td><td>Quando o container roda na nuvem (precisa de credenciais)</td></tr>
+<tr><td><code>none</code></td><td>Em lugar nenhum — o log é descartado</td><td>Apps que já logam em volume próprio (evita duplicar); cuidado: <code>docker logs</code> fica vazio</td></tr>
+</table>
+</div>
+<pre class="term">$ docker run -d --name api --log-driver syslog \
+>     --log-opt syslog-address=tcp://192.168.1.50:514 \
+>     --log-opt tag="loja-api" \
+>     ana/minha-api:1.0</pre>
+
+<hr>
+
+<h2>Rotação: --log-opt max-size e max-file</h2>
+<p>Com o <code>json-file</code>, sem limite o arquivo cresce para sempre. A rotação resolve: quando o log chega no tamanho máximo, ele é renomeado (<code>.1</code>) e um novo é criado; passando do número máximo de arquivos, o mais antigo é apagado:</p>
+<pre class="term">$ docker run -d --name site -p 8080:80 \
+>     --log-driver json-file \
+>     --log-opt max-size=10m \
+>     --log-opt max-file=3 \
+>     nginx:alpine
+f3a1b2c3d4e5f6…</pre>
+<dl class="anatomy">
+  <dt>--log-driver json-file</dt><dd>Escolhe o driver de log do container (padrão já é esse; posto aqui para deixar explícito).</dd>
+  <dt>--log-opt max-size=10m</dt><dd>Quando o arquivo de log chega a 10MB, ele é rotacionado. Sem isso, <strong>sem limite</strong>.</dd>
+  <dt>--log-opt max-file=3</dt><dd>Guarda no máximo 3 arquivos rotacionados — no máximo ~30MB de log por container (10MB × 3).</dd>
+</dl>
+<p>Também dá para configurar o padrão <strong>global</strong> no <code>/etc/docker/daemon.json</code> (vale para todos os containers do host que não tiverem configuração própria):</p>
+<pre class="file" data-file="/etc/docker/daemon.json">{
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-size": "10m",
+    "max-file": "3"
+  }
+}</pre>
+<p>Depois de mudar o <code>daemon.json</code>, reinicie o serviço: <code>sudo systemctl restart docker</code>. <strong>Atenção:</strong> a mudança vale para containers <em>novos</em> — containers já criados mantêm a configuração antiga (para trocar, recrie o container: <code>docker compose up -d --force-recreate</code>).</p>
+
+<hr>
+
+<h2>Conferindo a configuração de log de um container</h2>
+<pre class="term">$ docker inspect site --format '{{.HostConfig.LogConfig.Type}}'
+json-file
+
+$ docker inspect site --format '{{.HostConfig.LogConfig.Config}}'
+map[max-size:10m max-file:3]</pre>
+<p>Esse inspect é a auditoria rápida: se <code>max-size</code> não aparecer, o log daquele container está sem limite.</p>
+
+<hr>
+
+<h2>Cenários e erros reais</h2>
+<div class="cenario">
+<strong>O disco que encheu e derrubou tudo</strong>
+<p>Numa madrugada, a API da Loja Aurora entrou num loop de erro (um <code>while</code> logando exceção a cada requisição) e o arquivo de log cresceu 40GB em 3 horas — enchendo o disco do servidor. Resultado: o banco de dados não conseguia gravar, o Docker não conseguia criar camadas novas, <code>docker ps</code> começou a falhar. Tudo caiu. Depois disso, a equipe ligou <code>max-size=10m, max-file=5</code> no <code>daemon.json</code> global e passou a monitorar <code>docker system df</code> (<a href="docker-system-df.html">aula</a>) — que mostra exatamente quanto cada imagem/container/log está ocupando.</p>
+</div>
+<div class="warning"><strong>Perigo real:</strong> <code>json-file</code> sem <code>max-size</code> + aplicação que loga demais = disco cheio no servidor, que derruba <em>todos</em> os containers e serviços da máquina (não só o culpado). Em produção, sempre configure rotação — por container ou no daemon.json global.</div>
+<div class="warning"><strong>Cuidado com <code>--log-driver none</code>:</strong> nesse caso o <code>docker logs</code> não mostra nada. Só use se a app tiver log próprio (em volume/arquivo) — senão você fica cego em produção.</div>
+<div class="warning"><strong>Driver errado para o ambiente:</strong> <code>awslogs</code> numa máquina local (sem credenciais AWS) faz o container não subir: <code>Error response from daemon: failed to initialize logging driver: …</code>. Cada driver de nuvem precisa das credenciais certas no ambiente (<code>AWS_ACCESS_KEY_ID</code> etc.) ou de um <code>--log-opt</code> apontando a região.</div>
+
+<hr>
+
+<h2>Log no docker-compose.yml</h2>
+<p>No Compose, o driver e a rotação vão na chave <code>logging</code> de cada serviço — é assim que a Ana configurou a loja inteira de uma vez:</p>
+<pre class="file" data-file="docker-compose.yml">services:
+  web:
+    image: nginx:alpine
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+  api:
+    image: ana/minha-api:1.0
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+        labels: "servico=api"
+  worker:
+    image: ana/minha-api:1.0
+    command: node worker.js
+    logging:
+      driver: none        « o worker já grava log próprio em volume
+    volumes:
+      - worker-logs:/app/logs</pre>
+<p>E para ler os logs de todos os serviços do projeto de uma vez: <code>docker compose logs -f --tail 100</code> (aula <a href="compose-up-down.html">compose up/down</a>).</p>
+
+<hr>
+
+<h2>Quiz rápido</h2>
+<div class="mc" data-answer="3">
+<p class="mc-q">1. Onde o driver padrão <code>json-file</code> grava os logs?</p>
+<label><input type="radio" name="q1"> Na memória RAM</label>
+<label><input type="radio" name="q1"> No banco de dados</label>
+<label><input type="radio" name="q1"> Em arquivos JSON em <code>/var/lib/docker/containers/&lt;id&gt;/-json.log</code>, sem limite de tamanho por padrão</label>
+<label><input type="radio" name="q1"> No Docker Hub</label>
+</div>
+
+<div class="mc" data-answer="2">
+<p class="mc-q">2. O que fazem <code>--log-opt max-size=10m --log-opt max-file=3</code>?</p>
+<label><input type="radio" name="q2"> Apagam o log inteiro a cada 10 minutos</label>
+<label><input type="radio" name="q2"> Rotacionam o log: a cada 10MB um novo arquivo é criado e só 3 arquivos são mantidos (máx. ~30MB)</label>
+<label><input type="radio" name="q2"> Limitam o número de linhas do log a 3</label>
+<label><input type="radio" name="q2"> Enviam o log por email</label>
+</div>
+
+<div class="mc" data-answer="4">
+<p class="mc-q">3. O que o <code>docker logs -f web</code> faz?</p>
+<label><input type="radio" name="q3"> Apaga o log do container web</label>
+<label><input type="radio" name="q3"> Lista os arquivos de log no disco</label>
+<label><input type="radio" name="q3"> Para o container web</label>
+<label><input type="radio" name="q4"> Acompanha o log em tempo real (como tail -f); Ctrl+C sai sem parar o container</label>
+</div>
+
+<div class="mc" data-answer="1">
+<p class="mc-q">4. Onde se configura a rotação de log para <strong>todos</strong> os containers do host?</p>
+<label><input type="radio" name="q5"> No <code>/etc/docker/daemon.json</code> (<code>log-driver</code> + <code>log-opts</code>), com <code>systemctl restart docker</code> depois</label>
+<label><input type="radio" name="q5"> No <code>docker-compose.yml</code> de cada projeto</label>
+<label><input type="radio" name="q5"> No arquivo <code>/etc/hosts</code></label>
+<label><input type="radio" name="q5"> Não dá para configurar globalmente</label>
+</div>
+
+<hr>
+
+<h2>Resumo</h2>
+<ul>
+  <li>Tudo que o container imprime em stdout/stderr vira log; o driver padrão <code>json-file</code> grava em <code>/var/lib/docker/containers/&lt;id&gt;/-json.log</code> <strong>sem limite</strong>.</li>
+  <li><code>docker logs</code>: <code>-f</code> (segue), <code>--tail N</code>, <code>--since</code>/<code>--until</code>, <code>-t</code> (timestamps).</li>
+  <li>Drivers: <code>json-file</code>, <code>local</code>, <code>syslog</code>, <code>journald</code>, <code>fluentd</code>/<code>gelf</code>, <code>awslogs</code>/<code>gcplogs</code>/<code>azurelogs</code>, <code>none</code>.</li>
+  <li>Rotação: <code>--log-opt max-size=10m --log-opt max-file=3</code> por container, ou global em <code>/etc/docker/daemon.json</code> + restart do serviço.</li>
+  <li>Conferindo: <code>docker inspect … --format '{{.HostConfig.LogConfig}}'</code>.</li>
+  <li>Perigo real: log sem limite + app verbosa = disco cheio = máquina inteira caída. Em produção, rotação sempre ligada.</li>
+</ul>
+
+<div class="tip"><strong>Próxima aula:</strong> <a href="swarm-intro.html">Introdução ao Docker Swarm</a>.</div>
+
+<div class="pager"></div>
+
+</div>
+</main>
+</div>
+<script src="assets/site.js?v=4"></script>
+</body>
+</html>

@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Introdução ao Docker Swarm | Guia Docker</title>
+<meta name="description" content="Orquestração nativa do Docker: o que é o Swarm (managers e workers, service, réplica, task, stack), docker swarm init e join com token, services no lugar de containers soltos (docker service create --replicas, ls/ps/scale/update/rm), routing mesh publicando portas no cluster inteiro, stacks com docker stack deploy usando o docker-compose.yml com a seção deploy (réplicas, limites, restart_policy), por que 3 managers em produção e a tabela Swarm vs Kubernetes.">
+<link rel="stylesheet" href="assets/style.css?v=4">
+<script>try{var t=localStorage.getItem("tema");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<meta http-equiv="Cache-Control" content="no-store, must-revalidate">
+<script>try{history.scrollRestoration="manual"}catch(e){}(function(){var n=0;function t(){window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;if(++n<60)setTimeout(t,50)}t();window.addEventListener("pagehide",function(){window.scrollTo(0,0);document.documentElement.scrollTop=0;});window.addEventListener("pageshow",function(){window.scrollTo(0,0)});window.addEventListener("load",function(){window.scrollTo(0,0)});})();document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(a){var h=a.getAttribute("href")||"";if(/[.]html($|[?#])/.test(h)&&a.host===location.host){window.scrollTo(0,0);document.documentElement.scrollTop=0;}}});</script>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" id="sidebar" aria-label="Tópicos"></nav>
+<main class="main">
+<div class="content">
+
+<div class="pager"></div>
+
+<h1><span class="hl">Docker Swarm</span> — orquestração nativa</h1>
+
+<p class="intro">Até aqui a Ana rodou containers numa máquina só — o notebook dela. Em produção, uma máquina única é um <strong>ponto único de falha</strong>: se ela cair (ou o cabo de rede cair, ou acabar a luz), o site da Loja Aurora cai junto. O <strong>Swarm</strong> é o orquestrador que já vem embutido no Docker: junta várias máquinas (nós) num cluster e cuida de subir, distribuir e <strong>repor</strong> os containers para você. Nesta aula você cria o primeiro cluster, sobe o primeiro service com réplicas e entende quando o Swarm basta.</p>
+
+<div class="note">
+<strong>Você vai aprender</strong>
+<ul>
+  <li>Os conceitos: nó, manager, worker, service, réplica, task e stack.</li>
+  <li><code>docker swarm init</code> e <code>docker swarm join</code> (com token).</li>
+  <li>Services no lugar de containers soltos: <code>docker service create --replicas 3</code>, <code>service ls/ps/scale/update/rm</code>.</li>
+  <li>Routing mesh: a porta publicada abre no cluster inteiro.</li>
+  <li>Stacks: subir um <code>docker-compose.yml</code> inteiro no cluster com <code>docker stack deploy</code>.</li>
+  <li>Quando o Swarm basta e quando partir para Kubernetes.</li>
+</ul>
+</div>
+
+<hr>
+
+<h2>A ideia: de "um container no meu notebook" para "um serviço no cluster"</h2>
+<p>Até agora, se o container morria, você tinha que notar e recriar na mão (ou confiar no <code>--restart</code>, que só funciona naquela máquina). O Swarm muda a unidade de trabalho: em vez de pensar em <em>container</em>, você pensa em <strong>service</strong> — "quero 3 réplicas do meu site no ar, em qualquer nó". Você declara o <em>estado desejado</em>, e o Swarm trabalha para mantê-lo: se um container morre ou um nó inteiro cai, ele recria a réplica em outro lugar, sozinho.</p>
+
+<hr>
+
+<h2>Os conceitos em 1 minuto</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Termo</th><th>Significado</th><th>Analogia</th></tr>
+<tr><td><strong>Nó (node)</strong></td><td>Uma máquina (física ou VM) que participa do cluster.</td><td>Um funcionário da loja.</td></tr>
+<tr><td><strong>Manager</strong></td><td>Nó que toma as decisões do cluster (onde rodar cada container).</td><td>O gerente que decide quem faz o quê.</td></tr>
+<tr><td><strong>Worker</strong></td><td>Nó que só roda containers, obedecendo aos managers.</td><td>O funcionário que executa.</td></tr>
+<tr><td><strong>Service</strong></td><td>A definição desejada: imagem + réplicas + portas + limites.</td><td>A ficha de tarefa: "3 pessoas fazendo isso".</td></tr>
+<tr><td><strong>Task</strong></td><td>Um container concreto rodando num nó (cada réplica é uma task).</td><td>O funcionário alocado agora.</td></tr>
+<tr><td><strong>Stack</strong></td><td>Um grupo de services descrita num arquivo compose, subida de uma vez.</td><td>O projeto inteiro da loja.</td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>docker swarm init: criar o cluster</h2>
+<p>Numa máquina (que será a manager), inicie o Swarm informando o IP que os outros nós vão usar para chegar nela. No exemplo, o servidor da Loja Aurora tem IP <code>192.168.1.10</code>:</p>
+<pre class="term">$ docker swarm init --advertise-addr 192.168.1.10
+Swarm initialized: current node (k3x1y2z3a4b5c6d7e8f9g0h1) is now a manager.
+
+To add a worker to this swarm, run the following command:
+
+    docker swarm join --token SWMTKN-1-4abc…xyz 192.168.1.10:2377
+
+To add a manager to this swarm, run 'docker swarm join-token manager' and follow the instructions.</pre>
+<p>Nas outras máquinas, rode o comando <code>docker swarm join</code> com o token — elas entram como workers:</p>
+<pre class="term">$ docker node ls
+ID                            HOSTNAME   STATUS    AVAILABILITY   MANAGER STATUS   ENGINE VERSION
+k3x1y2z3a4b5c6… *             servidor   Ready     Active         Leader           27.3.1
+p9q8r7s6t5u4…                 notebook   Ready     Active                              27.3.1
+q1w2e3r4t5y6…                 backup     Ready     Active                              27.3.1</pre>
+<p>O <code>*</code> marca o nó onde o comando rodou; <code>Leader</code> é o manager que está no comando agora. Para ver os tokens de novo depois: <code>docker swarm join-token worker</code> e <code>docker swarm join-token manager</code>. Para tirar um nó do cluster: <code>docker swarm leave</code> (no próprio nó) e <code>docker node rm &lt;id&gt;</code> (num manager).</p>
+
+<hr>
+
+<h2>Services: containers com réplicas</h2>
+<p>No Swarm você não roda <code>docker run</code> solto — você cria um <strong>service</strong>. O Swarm garante que o número pedido de réplicas esteja sempre no ar:</p>
+<pre class="term">$ docker service create --name web --replicas 3 -p 80:80 nginx:alpine
+q1w2e3r4t5y6u7i8o9p0a1s2d3f4g5h6j7k8l9
+
+$ docker service ls
+ID             NAME      MODE         REPLICAS   IMAGE          PORTS
+q1w2e3r4t5y6   web       replicated   3/3        nginx:alpine   *:80-&gt;80/tcp
+
+$ docker service ps web
+ID             NAME     IMAGE          NODE      DESIRED STATE   CURRENT STATE             ERROR
+x1…            web.1    nginx:alpine   servidor  Running         Running 2 minutes ago
+y2…            web.2    nginx:alpine   notebook  Running         Running 2 minutes ago
+z3…            web.3    nginx:alpine   servidor  Running         Running 2 minutes ago</pre>
+<p>Repare no <code>3/3</code>: 3 réplicas desejadas, 3 rodando. Se um nó cair, as tasks que estavam nele são recriadas nos nós sadios — é essa a mágica da orquestração. Escalando e atualizando:</p>
+<pre class="term">$ docker service scale web=5        « agora são 5 réplicas
+web scaled to 5
+
+$ docker service update --image ana/minha-api:1.1 web   « atualiza aos poucos (rolling update), sem derrubar tudo
+
+$ docker service update --publish-add 443:443 web        « abre mais uma porta sem recriar
+
+$ docker service logs web -f                            « log de todas as réplicas
+
+$ docker service rm web                                  « remove o service (e as tasks)</pre>
+
+<h3>Routing mesh: a porta abre no cluster inteiro</h3>
+<p>Com <code>-p 80:80</code> num service, a porta 80 abre em <strong>todos os nós</strong> do cluster (não só no que está rodando a réplica) — o Swarm faz o roteamento interno (o "routing mesh"). Então basta apontar o DNS para qualquer nó e a requisição cai numa réplica sadia. Para desativar e usar só o nó local, use <code>--publish mode=host,target=80,published=80</code>.</p>
+
+<hr>
+
+<h2>Stacks: o compose inteiro no cluster</h2>
+<p>Um <strong>stack</strong> sobe vários services de uma vez a partir de um arquivo compose, adicionando a seção <code>deploy</code> (réplicas, limites e restart por serviço — lembra da <a href="limites-recursos.html">aula de limites</a> e da <a href="healthcheck.html">de healthcheck</a>?):</p>
+<pre class="file" data-file="docker-compose.yml">services:
+  web:
+    image: ana/minha-api:1.0
+    ports:
+      - "80:8080"
+    deploy:
+      replicas: 3
+      update_config:
+        parallelism: 1        # troca 1 réplica por vez
+        order: start-first    # sobe a nova antes de derrubar a velha
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+      restart_policy:
+        condition: any        # reinicia se cair (o "unless-stopped" do Swarm)
+      placement:
+        constraints:
+          - node.role == worker
+  redis:
+    image: redis:7-alpine
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.hostname == servidor   # esse aqui só no servidor principal</pre>
+<pre class="term">$ docker stack deploy -c docker-compose.yml loja
+Creating network loja_default
+Creating service loja_web
+Creating service loja_redis
+
+$ docker stack ls
+NAME   SERVICES
+loja   2
+
+$ docker stack services loja
+ID   NAME         MODE         REPLICAS   IMAGE             PORTS
+…    loja_web     replicated   3/3        ana/minha-api:1.0 *:80-&gt;8080/tcp
+…    loja_redis   replicated   1/1        redis:7-alpine
+
+$ docker stack ps loja
+ID   NAME         IMAGE             NODE      DESIRED STATE   CURRENT STATE
+…    loja_web.1   ana/minha-api:1.0 servidor  Running         Running
+
+$ docker stack rm loja      « derruba tudo do stack (services + rede)</pre>
+<p>O fluxo é o mesmo do Compose local (aulas <a href="compose-intro.html">compose-intro</a> a <a href="compose-build.html">compose-build</a>): o arquivo descreve tudo, e o <code>deploy</code> é a parte que só vale no Swarm.</p>
+
+<hr>
+
+<h2>Swarm vs Kubernetes (resumo — a aula completa vem já já)</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th></th><th>Swarm</th><th>Kubernetes</th></tr>
+<tr><td>Instalação</td><td><code>docker swarm init</code> — já vem no Docker</td><td>Cluster próprio ou gerenciado (EKS/GKE/AKS)</td></tr>
+<tr><td>Arquivo</td><td><code>docker-compose.yml</code> + seção <code>deploy</code></td><td>Manifestos YAML próprios (Deployment, Service, Ingress…)</td></tr>
+<tr><td>Escala automática</td><td>Não tem (só manual: <code>service scale</code>)</td><td>Sim (HPA por CPU/memória/métricas custom)</td></tr>
+<tr><td>Ecossistema</td><td>Pequeno (é só o Docker)</td><td>Enorme (Helm, Istio, ArgoCD, Prometheus…)</td></tr>
+<tr><td>Tamanho ideal</td><td>Até dezenas de serviços, times pequenos</td><td>Dezenas a milhares de microsserviços</td></tr>
+</table>
+</div>
+<p>O Swarm é simples, já vem no Docker e cobre bem projetos pequenos e médios. O <a href="kubernetes-intro.html">Kubernetes (K8s)</a> é o padrão da indústria para clusters grandes — mais conceitos, mais poder. Regra prática: se o seu <code>docker-compose.yml</code> está começando a doer, o Swarm é o próximo passo natural; se você precisa de dezenas de microsserviços com escala automática, vá de K8s.</p>
+
+<div class="warning"><strong>Swarm numa máquina só não é alta disponibilidade:</strong> com um único manager, se ele cair, o cluster para de tomar decisões (os workers continuam rodando o que já está no ar, mas nada novo é alocado). Em produção, use <strong>3 managers</strong> (sempre número ímpar, por causa do quórum do Raft) e workers de sobra. Para promover um worker a manager: <code>docker node promote &lt;id&gt;</code>.</div>
+
+<div class="try" data-goal="NETWORK ID" data-solucao="docker network ls">
+<p class="try-task"><strong>Missão:</strong> antes de criar o cluster, rode <code>docker network ls</code> no simulador e veja as redes padrão (<code>bridge</code>, <code>host</code>, <code>none</code>) — no Swarm, networks do tipo <code>overlay</code> são criadas sozinhas para os services se comunicarem entre nós.</p>
+</div>
+
+<div class="try" data-goal="REPOSITORY" data-solucao="docker images">
+<p class="try-task"><strong>Missão extra:</strong> rode <code>docker images</code> e escolha quais imagens você publicaria como services do stack da loja (ex.: <code>nginx:alpine</code> para o web, <code>redis:7-alpine</code> para o cache). No simulador não dá para rodar <code>docker swarm</code> — mas dá para treinar o resto.</p>
+</div>
+
+<hr>
+
+<h2>Quiz rápido</h2>
+<div class="mc" data-answer="2">
+<p class="mc-q">1. Qual é a unidade de trabalho no Swarm (no lugar do docker run solto)?</p>
+<label><input type="radio" name="q1"> A imagem</label>
+<label><input type="radio" name="q1"> O <strong>service</strong> — a definição desejada (imagem + réplicas + portas), que o cluster mantém no ar</label>
+<label><input type="radio" name="q1"> O volume</label>
+<label><input type="radio" name="q1"> O Dockerfile</label>
+</div>
+
+<div class="mc" data-answer="3">
+<p class="mc-q">2. O que acontece se um nó worker do Swarm cair com 3 réplicas de um service rodando nele?</p>
+<label><input type="radio" name="q2"> O service morre junto</label>
+<label><input type="radio" name="q2"> Nada acontece</label>
+<label><input type="radio" name="q2"> O Swarm recria as tasks em outros nós sadios — o estado desejado (3 réplicas) é restabelecido</label>
+<label><input type="radio" name="q2"> O cluster inteiro para</label>
+</div>
+
+<div class="mc" data-answer="4">
+<p class="mc-q">3. Quantos managers convém ter em um cluster Swarm de produção e por quê?</p>
+<label><input type="radio" name="q3"> 1, para ser simples</label>
+<label><input type="radio" name="q3"> 2, um ativo e um reserva</label>
+<label><input type="radio" name="q3"> 10, quanto mais melhor</label>
+<label><input type="radio" name="q3"> 3 (número ímpar), por causa do quórum do Raft — com 1 manager, se ele cair o cluster para de decidir</label>
+</div>
+
+<div class="mc" data-answer="1">
+<p class="mc-q">4. O que é o routing mesh?</p>
+<label><input type="radio" name="q4"> Uma rede privada entre os nós</label>
+<label><input type="radio" name="q4"> Um tipo de volume distribuído</label>
+<label><input type="radio" name="q4"> A rede overlay do Swarm</label>
+<label><input type="radio" name="q4"> Quando você publica uma porta num service (<code>-p 80:80</code>), ela abre em <strong>todos os nós</strong> do cluster e o Swarm roteia a requisição até uma réplica</label>
+</div>
+
+<hr>
+
+<h2>Resumo</h2>
+<ul>
+  <li>Swarm = orquestrador nativo do Docker: junta nós (máquinas) num cluster; managers decidem, workers rodam.</li>
+  <li><code>docker swarm init --advertise-addr IP</code> cria o cluster e imprime o token; <code>docker swarm join --token … IP:2377</code> entra como worker.</li>
+  <li>Service = estado desejado (imagem + réplicas + portas); task = réplica concreta num nó. Se nó/container cai, o Swarm repõe.</li>
+  <li><code>docker service create/ls/ps/scale/update/rm/logs</code>; porta publicada abre no cluster inteiro (routing mesh).</li>
+  <li>Stack = compose inteiro no cluster: <code>docker stack deploy -c docker-compose.yml nome</code>, com a seção <code>deploy</code> (replicas, resources.limits, restart_policy).</li>
+  <li>Produção: 3 managers (quórum ímpar). Swarm basta para dezenas de serviços; para milhares e autoscaling, vá de <a href="kubernetes-intro.html">Kubernetes</a>.</li>
+</ul>
+
+<div class="tip"><strong>Próxima aula:</strong> <a href="kubernetes-intro.html">E Kubernetes? Quando usar</a>.</div>
+
+<div class="pager"></div>
+
+</div>
+</main>
+</div>
+<script src="assets/site.js?v=4"></script>
+</body>
+</html>

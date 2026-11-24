@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>docker volume inspect: Mountpoint, Driver e Labels de um volume | Guia Docker</title>
+<meta name="description" content="O que o docker volume inspect mostra no JSON de um volume: Mountpoint (a pasta real no host, /var/lib/docker/volumes/NOME/_data), Driver, Scope, Labels, Options e CreatedAt. Como dar labels com --label no create e filtrar com --filter label=, como extrair só um campo com --format, a ligação direta entre -v nome:/caminho e o Mountpoint (demonstrada escrevendo dentro do container e lendo no host), o docker inspect genérico (vale para qualquer objeto), o cuidado de não editar arquivos direto no Mountpoint, erros reais e quiz. Docker Engine 27.x.">
+<link rel="stylesheet" href="assets/style.css?v=4">
+<script>try{var t=localStorage.getItem("tema");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<meta http-equiv="Cache-Control" content="no-store, must-revalidate">
+<script>try{history.scrollRestoration="manual"}catch(e){}(function(){var n=0;function t(){window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;if(++n<60)setTimeout(t,50)}t();window.addEventListener("pagehide",function(){window.scrollTo(0,0);document.documentElement.scrollTop=0;});window.addEventListener("pageshow",function(){window.scrollTo(0,0)});window.addEventListener("load",function(){window.scrollTo(0,0)});})();document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(a){var h=a.getAttribute("href")||"";if(/[.]html($|[?#])/.test(h)&&a.host===location.host){window.scrollTo(0,0);document.documentElement.scrollTop=0;}}});</script>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" id="sidebar" aria-label="Tópicos"></nav>
+<main class="main">
+<div class="content">
+
+<div class="pager"></div>
+
+<h1><span class="hl">docker volume inspect</span> — onde o volume mora no host</h1>
+
+<p class="intro">Todo volume nomeado tem uma <strong>pasta real no sistema de arquivos do host</strong>. O <code>docker volume inspect</code> mostra o JSON completo do volume, incluindo esse caminho — o <code>Mountpoint</code>. É o comando para responder a pergunta que todo mundo faz uma hora: "<strong>onde diabos está esse dado?</strong>". A Ana vai usar isso para achar os dados do Postgres dela no notebook.</p>
+
+<div class="note">
+<strong>Você vai aprender</strong>
+<ul>
+  <li>Ler o JSON do <code>docker volume inspect</code>: Mountpoint, Driver, Scope, Labels, Options, CreatedAt.</li>
+  <li>Extrair só um campo com <code>--format</code> (ex.: só o Mountpoint) — ouro em scripts.</li>
+  <li>Marcar volumes com <code>--label</code> no <code>create</code> e filtrar com <code>--filter label=…</code>.</li>
+  <li>A ligação direta entre <code>-v nome:/caminho</code> e o Mountpoint no host (prova com <code>docker exec</code> + <code>cat</code>).</li>
+  <li>O <code>docker inspect</code> genérico: funciona com qualquer objeto (container, imagem, rede, volume).</li>
+  <li>O cuidado de não editar os arquivos do volume direto no host.</li>
+</ul>
+</div>
+
+<hr>
+
+<h2>A cena: "onde está o banco da Ana?"</h2>
+<p>A Ana criou o volume <code>dados-postgres</code> na aula passada e agora quer saber onde os arquivos foram parar no disco do notebook dela. Ela pergunta ao Docker:</p>
+<pre class="term" data-cwd="~">$ docker volume create dados
+dados
+$ docker volume inspect dados
+[
+    {
+        "CreatedAt": "2025-06-10T14:02:11+02:00",
+        "Driver": "local",
+        "Labels": null,
+        "Mountpoint": "/var/lib/docker/volumes/dados/_data",
+        "Name": "dados",
+        "Options": null,
+        "Scope": "local"
+    }
+]</pre>
+<p>O comando aceita vários volumes de uma vez: <code>docker volume inspect dados dados-postgres</code> devolve um array JSON com os dois.</p>
+
+<hr>
+
+<h2>Anatomia do JSON</h2>
+<dl class="anatomy">
+  <dt>Mountpoint</dt><dd>o caminho real da pasta no host (no Linux, <code>/var/lib/docker/volumes/&lt;nome&gt;/_data</code>). É para lá que o <code>-v dados:/algum/lugar</code> aponta. No Windows/Mac (Docker Desktop), fica dentro da VM do Docker, não acessível direto.</dd>
+  <dt>Driver</dt><dd>quem guarda os dados. O padrão é <code>local</code> (disco da máquina); dá para plugar outros (NFS, volumes de nuvem, plugins) com <code>--driver</code> no create.</dd>
+  <dt>Scope</dt><dd><code>local</code> = o volume vive nessa máquina. Existe <code>global</code> para drivers de cluster (Swarm).</dd>
+  <dt>Labels</dt><dd>etiquetas chave=valor que você prende no volume com <code>--label</code> (veja abaixo).</dd>
+  <dt>Options</dt><dd>opções específicas do driver (ex.: em NFS, o servidor e o caminho). Vem <code>null</code> no driver local.</dd>
+  <dt>CreatedAt</dt><dd>quando o volume foi criado.</dd>
+</dl>
+
+<div class="tip"><strong>Só um campo, por favor:</strong> o <code>--format</code> extrai só o que você quer do JSON — perfeito para scripts:
+<pre class="term" data-cwd="~">$ docker volume inspect dados --format '{{.Mountpoint}}'
+/var/lib/docker/volumes/dados/_data
+$ docker volume inspect dados --format '{{.Name}} criado em {{.CreatedAt}}'
+dados criado em 2025-06-10T14:02:11+02:00</pre>
+O <code>--format</code> usa templates Go (entre <code>{{ }}</code>). Esse mesmo truque funciona no <code>docker inspect</code> de containers e imagens — a aula <a href="docker-inspect.html">docker inspect a fundo</a> mostra mais.</div>
+
+<hr>
+
+<h2>Labels: etiquetando volumes</h2>
+<p>Volumes órfãos são o terror de toda máquina com Docker. Para saber <em>para que serve</em> cada volume, prenda etiquetas na criação e filtre depois:</p>
+<pre class="term" data-cwd="~">$ docker volume create --label projeto=guia --label ambiente=dev dados-app
+dados-app
+$ docker volume inspect dados-app
+[
+    {
+        "CreatedAt": "2025-06-10T14:05:47+02:00",
+        "Driver": "local",
+        "Labels": {
+            "ambiente": "dev",
+            "projeto": "guia"
+        },
+        "Mountpoint": "/var/lib/docker/volumes/dados-app/_data",
+        "Name": "dados-app",
+        "Options": null,
+        "Scope": "local"
+    }
+]
+$ docker volume ls -q --filter label=projeto=guia
+dados-app</pre>
+
+<hr>
+
+<h2>A ligação com o -v: o DESTINO do volume é o Mountpoint</h2>
+<p>Quando você monta <code>-v dados:/app/dados</code>, o <code>/app/dados</code> <strong>dentro do container é exatamente a pasta do Mountpoint</strong> no host — o mesmo arquivo, visto dos dois lados. A Ana prova isso escrevendo dentro do container e lendo no host:</p>
+<pre class="term" data-cwd="~">$ docker run -d --name web -v dados:/app/dados nginx:alpine
+e5f6a1b2c3d4a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4
+$ docker exec web sh -c "echo teste > /app/dados/arquivo.txt"
+$ sudo cat /var/lib/docker/volumes/dados/_data/arquivo.txt
+teste   « mesmo arquivo, visto do host pelo Mountpoint</pre>
+<p>É por isso que o volume persiste: o que o container escribe em <code>/app/dados</code> cai direto na pasta do host. E é por isso que dá para fazer backup só empacotando essa pasta (com o banco parado, como vimos na aula anterior).</p>
+
+<div class="warn"><strong>Não edite os arquivos direto no Mountpoint.</strong> O Docker não sabe que você mexeu ali por fora — e bancos de dados (Postgres principalmente) podem corromper os dados se os arquivos forem alterados sem eles saberem. Para copiar arquivos para dentro ou fora de um volume, prefira <code>docker cp</code> ou um container auxiliar (aula <a href="docker-volume.html">docker volume</a> mostrou as duas formas).</div>
+
+<hr>
+
+<h2>E o docker inspect genérico?</h2>
+<p>O <code>docker inspect</code> funciona com <strong>qualquer objeto</strong> do Docker — container, imagem, rede, volume. Para volumes, a forma longa é a mesma coisa que o <code>docker volume inspect</code>:</p>
+<pre class="term" data-cwd="~">$ docker inspect dados
+[
+    {
+        "CreatedAt": "2025-06-10T14:02:11+02:00",
+        "Driver": "local",
+        ...
+        "Mountpoint": "/var/lib/docker/volumes/dados/_data",
+        ...
+    }
+]</pre>
+<p>Em vez de decorar, use <code>docker volume inspect</code> para volumes e <code>docker inspect</code> para containers, imagens e redes — mas saiba que os dois chegam no mesmo lugar. O <code>docker inspect</code> aceita vários objetos de tipos diferentes de uma vez: <code>docker inspect web dados app-net</code> devolve os três JSONs.</p>
+
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Quero inspecionar…</th><th>Comando</th></tr>
+<tr><td>Um volume</td><td><code>docker volume inspect dados</code> (ou <code>docker inspect dados</code>)</td></tr>
+<tr><td>Um container</td><td><code>docker inspect web</code></td></tr>
+<tr><td>Uma imagem</td><td><code>docker inspect nginx:alpine</code></td></tr>
+<tr><td>Uma rede</td><td><code>docker network inspect app-net</code> (ou <code>docker inspect app-net</code>)</td></tr>
+<tr><td>Um campo específico de qualquer um</td><td><code>… --format '{{.CAMPO}}'</code></td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>Script: listar volumes com Mountpoint numa linha</h2>
+<p>Juntando <code>ls -q</code> com <code>inspect --format</code>, a Ana fez um script que imprime cada volume e onde ele mora no host — útil num servidor que não é o seu notebook:</p>
+<pre class="file">#!/bin/bash
+# arquivo: volumes-resumo.sh — para cada volume, imprime "nome -> mountpoint (driver)"
+for v in $(docker volume ls -q); do
+    mp=$(docker volume inspect "$v" --format '{{.Mountpoint}}')
+    drv=$(docker volume inspect "$v" --format '{{.Driver}}')
+    echo "$v -> $mp ($drv)"
+done</pre>
+<p>Saída típica no notebook dela:</p>
+<pre class="term" data-cwd="~">$ ./volumes-resumo.sh
+dados -> /var/lib/docker/volumes/dados/_data (local)
+dados-postgres -> /var/lib/docker/volumes/dados-postgres/_data (local)
+dados-app -> /var/lib/docker/volumes/dados-app/_data (local)</pre>
+
+<hr>
+
+<h2>Ver os volumes montados pelo lado do container</h2>
+<p>O caminho inverso também existe: o <code>docker inspect</code> de um <strong>container</strong> lista todos os volumes que ele montou, no bloco <code>Mounts</code> — com <code>Source</code> (o Mountpoint no host, para volumes nomeados) e <code>Destination</code> (o caminho dentro do container):</p>
+<pre class="term" data-cwd="~">$ docker inspect web --format '{{json .Mounts}}' | python3 -m json.tool
+[
+    {
+        "Type": "volume",
+        "Name": "dados",
+        "Source": "/var/lib/docker/volumes/dados/_data",
+        "Destination": "/app/dados",
+        "Driver": "local",
+        "Mode": "rw",
+        "RW": true
+    }
+]
+$ docker inspect web --format '{{range .Mounts}}{{.Destination}} ← {{.Source}} ({{.Type}}){{"\n"}}{{end}}'
+/app/dados ← /var/lib/docker/volumes/dados/_data (volume)</pre>
+<p>É a prova de que o <code>Destination</code> do container é o <code>Source</code> (Mountpoint) no host. Esse mesmo bloco mostra bind mounts (<code>Type: "bind"</code>) e tmpfs (<code>Type: "tmpfs"</code>). A aula <a href="docker-inspect.html">docker inspect a fundo</a> explora o resto do JSON do container.</p>
+
+<hr>
+
+<h2>Erros comuns</h2>
+
+<div class="warn"><strong>Inspecionar volume que não existe:</strong> <code>docker volume inspect dados-postgre</code> (nome errado) devolve <code>[]</code> — um array vazio, <strong>sem erro</strong>. Repare: o comando não falha, ele só não acha nada. Se o seu script usa o retorno, cheque se não veio vazio antes de usar.</div>
+
+<div class="warn"><strong>Procurar o Mountpoint no Mac/Windows e não achar:</strong> no Docker Desktop (Mac/Windows), o Docker roda dentro de uma VM Linux; o caminho <code>/var/lib/docker/volumes/…</code> existe <strong>dentro da VM</strong>, não no seu Mac/Windows. Para ver os arquivos, use <code>docker run --rm -v dados:/dados alpine ls /dados</code> (um container auxiliar) ou <code>docker cp</code>.</div>
+
+<div class="warn"><strong>Editar direto no Mountpoint corrompe banco:</strong> se a Ana abrir <code>/var/lib/docker/volumes/dados-postgres/_data</code> e apagar um arquivo "para limpar espaço" enquanto o Postgres roda, o banco quebra de formas estranhas. Regra: no Mountpoint, só o Docker mexe; você usa <code>docker cp</code> ou container auxiliar.</div>
+
+<hr>
+
+<h2>Referência rápida</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Comando</th><th>Saída típica</th></tr>
+<tr><td><code>docker volume inspect dados</code></td><td>JSON com Mountpoint, Driver, Labels, Scope, CreatedAt</td></tr>
+<tr><td><code>docker volume inspect dados --format '{{.Mountpoint}}'</code></td><td>Só o caminho real no host: <code>/var/lib/docker/volumes/dados/_data</code></td></tr>
+<tr><td><code>docker volume create --label projeto=guia dados</code></td><td>Cria com etiqueta (aparece no inspect e filtra no ls)</td></tr>
+<tr><td><code>docker volume ls -q --filter label=projeto=guia</code></td><td>Só os nomes dos volumes com aquela etiqueta</td></tr>
+<tr><td><code>docker inspect web</code></td><td>JSON do container (IP, portas, volumes montados em <code>Mounts</code>…)</td></tr>
+</table>
+</div>
+
+<div class="try" data-goal="Created" data-solucao="docker inspect hello-world">
+<p class="try-task"><strong>Missão:</strong> inspecione um objeto com o <code>docker inspect</code>: rode <code>docker inspect hello-world</code> (a imagem já existe na máquina) e encontre o campo <code>Created</code> no JSON. Depois rode <code>docker volume inspect dados</code> — no Docker real ele mostra o <code>Mountpoint</code> do volume.</p>
+</div>
+
+<div class="try" data-goal="VOLUME NAME" data-solucao="docker volume ls">
+<p class="try-task"><strong>Missão extra:</strong> crie um volume e liste: rode <code>docker volume create dados</code> e depois <code>docker volume ls</code> — o nome <code>dados</code> deve aparecer depois do cabeçalho <code>DRIVER    VOLUME NAME</code>.</p>
+</div>
+
+<hr>
+
+<h2>Quiz rápido</h2>
+
+<div class="mc" data-answer="2">
+<p class="mc-q">1. O que é o <code>Mountpoint</code> no JSON do <code>docker volume inspect</code>?</p>
+<label><input type="radio" name="q1"> A porta em que o volume escuta</label>
+<label><input type="radio" name="q1"> O caminho real da pasta do volume no host (<code>/var/lib/docker/volumes/NOME/_data</code>)</label>
+<label><input type="radio" name="q1"> O nome do driver de rede</label>
+<label><input type="radio" name="q1"> O tamanho do volume em bytes</label>
+</div>
+
+<div class="mc" data-answer="3">
+<p class="mc-q">2. Como a Ana imprime <strong>só o Mountpoint</strong> do volume <code>dados</code>, sem o resto do JSON?</p>
+<label><input type="radio" name="q2"> <code>docker volume inspect dados | grep Mount</code> (quebraria no script)</label>
+<label><input type="radio" name="q2"> <code>docker volume ls --mountpoint dados</code></label>
+<label><input type="radio" name="q2"> <code>docker volume inspect dados --format '{{.Mountpoint}}'</code></label>
+<label><input type="radio" name="q2"> <code>docker mount dados</code></label>
+</div>
+
+<div class="mc" data-answer="4">
+<p class="mc-q">3. Por que não se deve editar os arquivos de um volume direto no Mountpoint do host?</p>
+<label><input type="radio" name="q3"> Porque o Mountpoint é somente leitura</label>
+<label><input type="radio" name="q3"> Porque apaga o volume inteiro</label>
+<label><input type="radio" name="q3"> Porque o espaço acaba</label>
+<label><input type="radio" name="q3"> Porque o Docker não sabe da mudança e bancos (Postgres) podem corromper os dados — use <code>docker cp</code> ou container auxiliar</label>
+</div>
+
+<div class="mc" data-answer="1">
+<p class="mc-q">4. <code>docker volume inspect volume-que-nao-existe</code> devolveu <code>[]</code> e código de saída 0. O que isso significa?</p>
+<label><input type="radio" name="q4"> O volume não existe — o inspect devolve array vazio sem erro; cheque o retorno antes de usar</label>
+<label><input type="radio" name="q4"> O volume está vazio</label>
+<label><input type="radio" name="q4"> Deu erro de disco</label>
+<label><input type="radio" name="q4"> O Docker reiniciou</label>
+</div>
+
+<hr>
+
+<h2>Resumo</h2>
+<ul>
+  <li>Todo volume nomeado tem uma pasta real no host: o <strong>Mountpoint</strong> (<code>/var/lib/docker/volumes/&lt;nome&gt;/_data</code> no Linux), revelado pelo <code>docker volume inspect</code>.</li>
+  <li>O JSON traz <code>Driver</code> (<code>local</code> por padrão), <code>Scope</code>, <code>Labels</code>, <code>Options</code> e <code>CreatedAt</code>. Com <code>--format '{{.Campo}}'</code> você extrai só um campo — ouro em scripts.</li>
+  <li><code>-v dados:/app/dados</code> faz o <code>/app/dados</code> do container ser exatamente o Mountpoint — por isso os dados persistem e dá para backupear a pasta.</li>
+  <li>Etiquete volumes com <code>--label</code> na criação e filtre com <code>docker volume ls --filter label=…</code>.</li>
+  <li><code>docker inspect</code> serve para qualquer objeto (container, imagem, rede, volume).</li>
+  <li>Nunca edite o Mountpoint direto no host com o banco rodando — use <code>docker cp</code> ou container auxiliar. E no Mac/Windows o Mountpoint fica dentro da VM do Docker Desktop.</li>
+</ul>
+
+<div class="tip"><strong>Próxima aula:</strong> <a href="redes-intro.html">Redes no Docker: bridge, host e none</a> — agora vamos ver como os containers se enxergam na rede.</div>
+
+<div class="pager"></div>
+
+</div>
+</main>
+</div>
+<script src="assets/site.js?v=4"></script>
+</body>
+</html>

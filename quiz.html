@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Quiz de Docker — 10 perguntas de múltipla escolha com placar | Guia Docker</title>
+<meta name="description" content="Quiz do Guia Docker com 10 perguntas de múltipla escolha sobre imagem vs container, -d vs -it, -p 8080:80, volume vs camada, build vs run, compose up, --rm, multi-stage, --read-only e HEALTHCHECK. Acerte e veja o placar subir — com textos explicativos entre as perguntas e dicas de quais aulas revisar.">
+<link rel="stylesheet" href="assets/style.css?v=4">
+<script>try{var t=localStorage.getItem("tema");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<meta http-equiv="Cache-Control" content="no-store, must-revalidate">
+<script>try{history.scrollRestoration="manual"}catch(e){}(function(){var n=0;function t(){window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;if(++n<60)setTimeout(t,50)}t();window.addEventListener("pagehide",function(){window.scrollTo(0,0);document.documentElement.scrollTop=0;});window.addEventListener("pageshow",function(){window.scrollTo(0,0)});window.addEventListener("load",function(){window.scrollTo(0,0)});})();document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(a){var h=a.getAttribute("href")||"";if(/[.]html($|[?#])/.test(h)&&a.host===location.host){window.scrollTo(0,0);document.documentElement.scrollTop=0;}}});</script>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" id="sidebar" aria-label="Tópicos"></nav>
+<main class="main">
+<div class="content">
+
+<div class="pager"></div>
+
+<h1><span class="hl">Quiz</span> de Docker</h1>
+
+<p class="intro">Terminou a seção de Referência? Hora de <strong>testar o que ficou na cabeça</strong>. São 10 perguntas de múltipla escolha — clique em uma opção em cada pergunta e o gabarito aparece na hora (verde = certa, vermelho = errada). Seu placar está logo abaixo e atualiza sozinho a cada acerto.</p>
+
+<div class="note">
+<strong>Você vai aprender</strong>
+<ul>
+  <li>Imagem vs container, e o papel do Dockerfile no meio.</li>
+  <li>Flags do <code>docker run</code>: <code>-d</code>, <code>-it</code>, <code>-p</code>, <code>-v</code>, <code>--rm</code>, <code>--read-only</code>.</li>
+  <li>Volumes vs camadas, <code>docker build</code> vs <code>docker run</code>, <code>docker compose up</code>.</li>
+  <li>Multi-stage builds e <code>HEALTHCHECK</code>.</li>
+</ul>
+</div>
+
+<p id="placar">0 de 10</p>
+
+<div class="warn"><strong>Como funciona:</strong> cada pergunta vale 1 ponto e você pode trocar de resposta quantas vezes quiser — só a última marcada conta para o placar (mas tente acertar de primeira!). Se errar alguma, anote o número: os textos entre as perguntas linkam a aula certa para revisar.</div>
+
+<hr>
+
+<h2>Antes de começar</h2>
+<p>Este quiz percorre o guia inteiro em 10 perguntas: os conceitos básicos (imagem vs container), as flags do dia a dia (<code>-d</code>, <code>-it</code>, <code>-p</code>, <code>-v</code>, <code>--rm</code>), a persistência de dados, o fluxo build/run/compose e as técnicas do nível avançado (multi-stage, <code>--read-only</code>, <code>HEALTHCHECK</code>). Não precisa decorar nada para passar — o objetivo é <strong>descobrir o que você já sabe de verdade e o que ainda precisa releer</strong>. As quatro partes abaixo agrupam as perguntas por tema, e cada parte tem um texto com os links das aulas relacionadas.</p>
+
+<hr>
+
+<h2>Parte 1 — imagem, container e o comando run</h2>
+<p>As duas primeiras perguntas são o alicerce de tudo: a diferença entre <strong>imagem</strong> (o modelo, somente leitura, formado por camadas) e <strong>container</strong> (a instância criada a partir dessa imagem, com uma camada de escrita em cima), e o que as flags <code>-d</code> e <code>-it</code> fazem de verdade no <code>docker run</code>. Se você decorou só uma coisa deste guia, que seja a primeira pergunta. A aula <a href="conceitos.html">Imagens, Containers, Registry e Docker Hub</a> revê os dois conceitos com a analogia da receita de bolo, e <a href="docker-run.html">docker run: anatomia do comando</a> detalha as flags uma a uma.</p>
+
+<div class="mc" data-answer="2">
+<p class="mc-q">1. Qual é a relação entre imagem e container?</p>
+<label><input type="radio" name="q1"> Sim, imagem e container são sinônimos.</label>
+<label><input type="radio" name="q1"> Não: a imagem é o modelo (somente leitura) e o container é uma instância criada a partir dessa imagem.</label>
+<label><input type="radio" name="q1"> A imagem é um container que está parado.</label>
+<label><input type="radio" name="q1"> O container é um arquivo .tar exportado da imagem.</label>
+</div>
+
+<div class="mc" data-answer="4">
+<p class="mc-q">2. Qual é a diferença entre <code>-d</code> e <code>-it</code> no <code>docker run</code>?</p>
+<label><input type="radio" name="q2"> <code>-d</code> dá um nome ao container e <code>-it</code> apaga o container ao sair.</label>
+<label><input type="radio" name="q2"> <code>-d</code> limita a memória e <code>-it</code> define a porta publicada.</label>
+<label><input type="radio" name="q2"> <code>-d</code> e <code>-it</code> são apelidos: fazem exatamente a mesma coisa.</label>
+<label><input type="radio" name="q2"> <code>-d</code> roda o container em segundo plano e devolve o terminal; <code>-it</code> abre um terminal interativo dentro do container.</label>
+</div>
+
+<p>Lembrou a regra? <code>-d</code> = <em>detach</em> (segundo plano, terminal livre); <code>-it</code> = <em>interactive + tty</em> (você entra dentro do container). E para sair do modo interativo <strong>sem matar</strong> o container: <code>Ctrl-P Ctrl-Q</code> (aula <a href="modo-interativo.html">Modo interativo</a>).</p>
+
+<hr>
+
+<h2>Parte 2 — portas e persistência</h2>
+<p>Agora as duas pegadinhas que mais pegam quem está começando: o formato <code>-p 8080:80</code> (quem é host, quem é container? dica: sempre <code>HOST:CONTAINER</code>, e a prova aparece na coluna PORTS do <code>docker ps</code> como <code>0.0.0.0:8080->80/tcp</code>) e o que acontece com os arquivos gravados num container <strong>sem volume</strong> quando ele é apagado. Releia <a href="portas.html">Publicando portas</a> e <a href="volumes-intro.html">Volumes</a> se travar — e o <a href="projeto-web-nginx.html">projeto 1</a> mostra a porta publicada na prática.</p>
+
+<div class="mc" data-answer="3">
+<p class="mc-q">3. O que significa <code>-p 8080:80</code>?</p>
+<label><input type="radio" name="q3"> A porta 8080 do container é publicada na porta 80 da sua máquina.</label>
+<label><input type="radio" name="q3"> As portas 8080 e 80 ficam bloqueadas no firewall.</label>
+<label><input type="radio" name="q3"> A porta 8080 da sua máquina publica a porta 80 do container (formato HOST:CONTAINER).</label>
+<label><input type="radio" name="q3"> 8080 requisições são redirecionadas para a porta 80.</label>
+</div>
+
+<div class="mc" data-answer="1">
+<p class="mc-q">4. Você gravou arquivos dentro de um container <strong>sem volume</strong> e depois apagou o container. O que acontece com esses arquivos?</p>
+<label><input type="radio" name="q4"> Somem: sem volume, a escrita do container vai para a camada temporária, que é apagada junto com o container.</label>
+<label><input type="radio" name="q4"> Ficam salvos para sempre na imagem original.</label>
+<label><input type="radio" name="q4"> Vão para uma "lixeira" do Docker, de onde dá para restaurar.</label>
+<label><input type="radio" name="q4"> Ficam no disco do host, em /var/lib/docker.</label>
+</div>
+
+<p>Exato: a escrita de um container vai para a <strong>camada de escrita</strong> dele, que morre com o <code>docker rm</code>. Para dados que precisam sobreviver (banco de dados, uploads), use <code>-v</code> com volume nomeado ou bind mount — é o papel dos <a href="projeto-wordpress.html">volumes no projeto do WordPress</a>.</p>
+
+<hr>
+
+<h2>Parte 3 — build, run e Compose</h2>
+<p>Chegamos ao fluxo do dia a dia: quem cria a imagem (<code>docker build</code>, a partir do Dockerfile) e quem cria o container (<code>docker run</code>, a partir da imagem) — e o que o <code>docker compose up</code> faz quando o projeto tem vários serviços de uma vez (cria rede, volumes e todos os containers). Aulas de revisão: <a href="docker-build.html">docker build</a>, <a href="compose-up-down.html">compose up e down</a> e os projetos <a href="projeto-api-node.html">2</a> e <a href="projeto-fullstack.html">3</a>, que usam exatamente esse fluxo.</p>
+
+<div class="mc" data-answer="2">
+<p class="mc-q">5. Qual é a ordem correta para criar sua própria imagem e rodar um container dela?</p>
+<label><input type="radio" name="q5"> <code>docker run</code> cria a imagem e o container; <code>docker build</code> só serve para dar push.</label>
+<label><input type="radio" name="q5"> <code>docker build</code> cria a imagem a partir do Dockerfile; <code>docker run</code> cria o container a partir dessa imagem.</label>
+<label><input type="radio" name="q5"> <code>docker build</code> roda o container; <code>docker run</code> é quem escreve o Dockerfile.</label>
+<label><input type="radio" name="q5"> Primeiro <code>docker push</code>, depois <code>docker pull</code>, e só então o run.</label>
+</div>
+
+<div class="mc" data-answer="4">
+<p class="mc-q">6. O que o comando <code>docker compose up</code> faz?</p>
+<label><input type="radio" name="q6"> Faz o upload das imagens do projeto para o Docker Hub.</label>
+<label><input type="radio" name="q6"> Derruba todos os containers da máquina.</label>
+<label><input type="radio" name="q6"> Mostra os logs de todos os serviços.</label>
+<label><input type="radio" name="q6"> Cria e inicia todos os serviços (containers, redes e volumes) declarados no docker-compose.yml.</label>
+</div>
+
+<div class="mc" data-answer="1">
+<p class="mc-q">7. Para que serve a flag <code>--rm</code> no <code>docker run</code>?</p>
+<label><input type="radio" name="q7"> Apaga o container automaticamente quando ele termina.</label>
+<label><input type="radio" name="q7"> Remove a imagem usada pelo container depois do uso.</label>
+<label><input type="radio" name="q7"> Limpa o cache de build.</label>
+<label><input type="radio" name="q7"> Reinicia o container automaticamente se ele cair.</label>
+</div>
+
+<p>O trio build → run → compose é o esqueleto de todo o guia: <code>build</code> empacota, <code>run</code> executa um container, <code>compose up</code> executa vários. E o <code>--rm</code> é perfeito para testes e tarefas one-shot — o container some sozinho ao terminar, sem deixar lixo no <code>docker ps -a</code>.</p>
+
+<hr>
+
+<h2>Parte 4 — técnicas avançadas</h2>
+<p>Por fim, o nível 3: por que o build multi-stage deixa a imagem final enxuta (o estágio de build com todas as ferramentas é descartado; só o resultado é copiado para a imagem final), o que o <code>--read-only</code> faz no sistema de arquivos do container (nada pode ser gravado — combine com <code>--tmpfs</code> para exceções) e para que serve o <code>HEALTHCHECK</code> (o Docker testa o app de tempos em tempos e marca o container como <code>healthy</code>/<code>unhealthy</code>). Se errar aqui, releia <a href="multi-stage.html">Multi-stage builds</a>, <a href="read-only.html">--read-only</a> e <a href="healthcheck.html">HEALTHCHECK</a>.</p>
+
+<div class="mc" data-answer="3">
+<p class="mc-q">8. Por que usar um build <strong>multi-stage</strong> (vários <code>FROM</code> no mesmo Dockerfile)?</p>
+<label><input type="radio" name="q8"> Para rodar vários containers ao mesmo tempo a partir da mesma imagem.</label>
+<label><input type="radio" name="q8"> Para testar a imagem em vários sistemas operacionais durante o build.</label>
+<label><input type="radio" name="q8"> Para copiar só o necessário para a imagem final, deixando-a pequena e sem as ferramentas de build.</label>
+<label><input type="radio" name="q8"> Para usar várias imagens base diferentes dentro do mesmo container.</label>
+</div>
+
+<div class="mc" data-answer="3">
+<p class="mc-q">9. O que a flag <code>--read-only</code> faz no <code>docker run</code>?</p>
+<label><input type="radio" name="q9"> Bloqueia o acesso à internet do container.</label>
+<label><input type="radio" name="q9"> Impede o uso do usuário root dentro do container.</label>
+<label><input type="radio" name="q9"> Monta o sistema de arquivos do container como somente leitura.</label>
+<label><input type="radio" name="q9"> Criptografa os volumes montados no container.</label>
+</div>
+
+<div class="mc" data-answer="4">
+<p class="mc-q">10. Para que serve a instrução <code>HEALTHCHECK</code> (no Dockerfile ou <code>--health-cmd</code> no run)?</p>
+<label><input type="radio" name="q10"> Para verificar se o Docker Engine está no ar.</label>
+<label><input type="radio" name="q10"> Para escanear vulnerabilidades na imagem.</label>
+<label><input type="radio" name="q10"> Para medir o uso de CPU do container em tempo real.</label>
+<label><input type="radio" name="q10"> Para o Docker testar periodicamente se o app dentro do container está saudável e marcar o status como healthy/unhealthy.</label>
+</div>
+
+<hr>
+
+<h2>Como foi?</h2>
+<p>Olhe o placar lá no topo da página. Acertou tudo? Ótimo — volte para a <a href="ref-comandos.html">cola de comandos</a> sempre que precisar no dia a dia. Errou alguma? Cada parte acima tem os links das aulas correspondentes — revise só o que travou, sem culpa: errar no quiz é de graça.</p>
+<p>E se quiser continuar além da Referência, o caminho natural é voltar ao <a href="dockerfile-intro.html">Nível 2 (Dockerfile)</a> ou rever os <a href="projetos.html">projetos práticos</a> com tudo o que você acabou de testar aqui.</p>
+
+<div class="note">
+<strong>Quiz não é nota, é bússola:</strong> cada erro aqui é um conceito que ainda não assentou — e agora você sabe exatamente em qual página do guia ele mora.
+</div>
+
+<hr>
+
+<h2>Gabarito comentado</h2>
+<p>Depois de responder tudo, releia as respostas com calma — este é o resumo do guia em 10 linhas:</p>
+<ol class="passo">
+  <li><strong>Imagem × container:</strong> a imagem é o modelo somente leitura (camadas empilhadas); o container é a instância criada a partir dela, com uma camada de escrita em cima. <em>(aula: <a href="conceitos.html">Conceitos</a>)</em></li>
+  <li><strong>-d × -it:</strong> <code>-d</code> roda em segundo plano e libera o terminal; <code>-it</code> abre um terminal interativo dentro do container (saia com Ctrl-P Ctrl-Q sem matar). <em>(<a href="docker-run.html">docker run</a>, <a href="modo-interativo.html">modo interativo</a>)</em></li>
+  <li><strong>-p 8080:80:</strong> formato <code>HOST:CONTAINER</code> — a 8080 da sua máquina publica a 80 do container. <em>(<a href="portas.html">Portas</a>)</em></li>
+  <li><strong>Sem volume, os dados somem:</strong> a escrita do container vai para a camada temporária, apagada com o <code>docker rm</code>. Para persistir, use <code>-v</code>. <em>(<a href="volumes-intro.html">Volumes</a>)</em></li>
+  <li><strong>build → run:</strong> <code>docker build</code> cria a imagem a partir do Dockerfile; <code>docker run</code> cria o container a partir da imagem. <em>(<a href="docker-build.html">docker build</a>)</em></li>
+  <li><strong>compose up:</strong> cria e inicia todos os serviços do <code>docker-compose.yml</code> — containers, rede e volumes. <em>(<a href="compose-up-down.html">compose up/down</a>)</em></li>
+  <li><strong>--rm:</strong> apaga o container automaticamente ao terminar — ideal para testes e tarefas one-shot. <em>(<a href="ref-flags.html">flags do run</a>)</em></li>
+  <li><strong>multi-stage:</strong> vários <code>FROM</code> no mesmo Dockerfile; a imagem final recebe só o necessário, sem as ferramentas de build. <em>(<a href="multi-stage.html">Multi-stage</a>)</em></li>
+  <li><strong>--read-only:</strong> monta o sistema de arquivos do container como somente leitura (use <code>--tmpfs</code> para exceções). <em>(<a href="read-only.html">--read-only</a>)</em></li>
+  <li><strong>HEALTHCHECK:</strong> o Docker roda um comando de tempos em tempos dentro do container e marca o status como healthy/unhealthy. <em>(<a href="healthcheck.html">HEALTHCHECK</a>)</em></li>
+</ol>
+
+<div class="tip"><strong>Próxima aula:</strong> terminou a seção Referência! Volte ao <a href="index.html">início do guia</a> e escolha o seu nível.</div>
+
+</div>
+</main>
+</div>
+<script src="assets/site.js?v=4"></script>
+</body>
+</html>

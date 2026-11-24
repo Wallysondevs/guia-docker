@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Volumes nomeados, bind mounts e tmpfs — os 3 tipos de -v | Guia Docker</title>
+<meta name="description" content="Os três tipos de volume no Docker: volumes nomeados (dados de banco, gerenciados pelo Docker em /var/lib/docker/volumes), bind mounts (uma pasta sua do host montada no container — ideal para código em desenvolvimento) e tmpfs (dados só em memória RAM, para segredos). A sintaxe -v ORIGEM:DESTINO:opções vs --mount type=…, a tabela comparativa de quando usar cada um, a armadilha do -v que cria pasta vazia quando o caminho do host não existe, :ro para somente leitura, exemplos reais da Ana no notebook com Postgres, Nginx e API, erros e quiz. Docker Engine 27.x.">
+<link rel="stylesheet" href="assets/style.css?v=4">
+<script>try{var t=localStorage.getItem("tema");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<meta http-equiv="Cache-Control" content="no-store, must-revalidate">
+<script>try{history.scrollRestoration="manual"}catch(e){}(function(){var n=0;function t(){window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;if(++n<60)setTimeout(t,50)}t();window.addEventListener("pagehide",function(){window.scrollTo(0,0);document.documentElement.scrollTop=0;});window.addEventListener("pageshow",function(){window.scrollTo(0,0)});window.addEventListener("load",function(){window.scrollTo(0,0)});})();document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(a){var h=a.getAttribute("href")||"";if(/[.]html($|[?#])/.test(h)&&a.host===location.host){window.scrollTo(0,0);document.documentElement.scrollTop=0;}}});</script>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" id="sidebar" aria-label="Tópicos"></nav>
+<main class="main">
+<div class="content">
+
+<div class="pager"></div>
+
+<h1><span class="hl">Os 3 tipos de volume</span> — nomeado, bind e tmpfs</h1>
+
+<p class="intro">Tudo que um container grava na camada dele <strong>some quando o container é apagado</strong> — lembra da camada gravável do topo? O <code>-v</code> resolve isso apontando um lugar <strong>fora</strong> do container para dentro dele. E esse lugar pode ser de três tipos: um <strong>volume nomeado</strong> (uma caixinha gerenciada pelo Docker), uma <strong>pasta sua</strong> do computador (bind mount) ou a <strong>memória RAM</strong> (tmpfs). Nesta aula a Ana vai ver os dados do banco dela sobreviverem à troca de container.</p>
+
+<div class="note">
+<strong>Você vai aprender</strong>
+<ul>
+  <li>Por que os dados somem sem volume (a camada gravável do container).</li>
+  <li>A sintaxe <code>-v ORIGEM:DESTINO:OPÇÕES</code> e a forma longa <code>--mount type=…</code>.</li>
+  <li>Volume nomeado: para dados de aplicação e banco (o Docker cria sozinho se não existir).</li>
+  <li>Bind mount: para código em desenvolvimento e arquivos de config versionados.</li>
+  <li>tmpfs: para segredos que não podem tocar o disco.</li>
+  <li>Quando usar cada um (tabela de decisão) e a armadilha do <code>-v</code> com caminho inexistente no host.</li>
+</ul>
+</div>
+
+<hr>
+
+<h2>O problema: a gaveta que some</h2>
+<p>Analogia: o container é um quarto alugado. Tudo que você guarda lá dentro (a camada gravável) vai junto quando o quarto é desalugado (<code>docker rm</code>). Se a Ana guarda o banco de dados dentro do container do Postgres e apaga o container, os dados vão embora — todos. O volume é como um <strong>móvel seu</strong> que fica no depósito e entra no quarto: apaga o quarto, o móvel continua.</p>
+<pre class="term" data-cwd="~">$ docker run --rm postgres:16-alpine sh -c "echo dado > /var/lib/postgresql/data/teste.txt"
+$ docker run --rm postgres:16-alpine sh -c "cat /var/lib/postgresql/data/teste.txt"
+cat: can't open '/var/lib/postgresql/data/teste.txt': No such file or directory   « sumiu com o container</pre>
+
+<hr>
+
+<h2>A sintaxe do -v</h2>
+<p>O formato geral é <code>-v ORIGEM:DESTINO:OPÇÕES</code>:</p>
+<dl class="anatomy">
+  <dt>-v</dt><dd>a flag de volume do <code>docker run</code>.</dd>
+  <dt>ORIGEM</dt><dd>o que vai ser montado: o nome de um volume (<code>dados</code>) ou um caminho do host (<code>/home/ana/site</code>).</dd>
+  <dt>DESTINO</dt><dd>o caminho dentro do container (<code>/var/lib/postgresql/data</code>).</dd>
+  <dt>:ro</dt><dd>opcional: monta como somente leitura (read-only).</dd>
+</dl>
+<pre class="file">-v dados-postgres:/var/lib/postgresql/data        « volume nomeado
+-v /home/ana/meusite:/usr/share/nginx/html:ro    « bind mount (pasta do host), somente leitura
+--mount type=tmpfs,target=/segredos              « tmpfs (só memória)</pre>
+
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Elemento</th><th>Exemplo</th><th>Significado</th></tr>
+<tr><td><code>-v</code></td><td><code>-v dados:/app/dados</code></td><td>flag de volume</td></tr>
+<tr><td>ORIGEM</td><td><code>dados</code> ou <code>/home/ana/site</code></td><td>nome de volume (sem barra) ou caminho absoluto do host (com barra)</td></tr>
+<tr><td>DESTINO</td><td><code>/app/dados</code></td><td>sempre caminho absoluto dentro do container</td></tr>
+<tr><td>OPÇÕES</td><td><code>:ro</code>, <code>:rw</code>, <code>:z</code></td><td><code>ro</code> = somente leitura; <code>z</code>/<code>Z</code> = SELinux (volumes compartilhados)</td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>Volume nomeado: banco de dados</h2>
+<p>É o caso clássico: o Postgres grava tudo em <code>/var/lib/postgresql/data</code>. Sem volume, cada container novo começa com o banco vazio. Com volume nomeado, os dados sobrevivem. A Ana sobe o banco dela no notebook:</p>
+<pre class="term" data-cwd="~">$ docker run -d --name meu-banco \
+>     -e POSTGRES_PASSWORD=segredo \
+>     -v dados-postgres:/var/lib/postgresql/data \
+>     postgres:16-alpine
+f3a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4
+$ docker volume ls
+DRIVER    VOLUME NAME
+local     dados-postgres</pre>
+<p>Repare: ela não criou o volume antes — o Docker criou <code>dados-postgres</code> sozinho na primeira vez que viu esse nome. Agora o teste de fogo: apaga o container e sobe outro com o mesmo volume:</p>
+<pre class="term" data-cwd="~">$ docker rm -f meu-banco
+meu-banco
+$ docker run -d --name meu-banco \
+>     -e POSTGRES_PASSWORD=segredo \
+>     -v dados-postgres:/var/lib/postgresql/data \
+>     postgres:16-alpine
+e5f6a1b2c3d4…
+$ docker exec meu-banco psql -U postgres -c "\dt"   « as tabelas continuam lá!</pre>
+<p>Volume nomeado é a escolha certa para <strong>dados de aplicação</strong>, porque o Docker gerencia esses volumes com comandos próprios (<code>docker volume …</code>, próximas aulas): dá para listar, inspecionar, fazer backup e remover. Eles moram em <code>/var/lib/docker/volumes/&lt;nome&gt;/_data</code> no host (aula <a href="volumes-inspect.html">docker volume inspect</a> mostra exatamente isso).</p>
+
+<hr>
+
+<h2>Bind mount: seu código em desenvolvimento</h2>
+<p>Num projeto em desenvolvimento, você quer editar o código no seu editor e ver a mudança no container <strong>na hora</strong>, sem recriar nada. É só montar a pasta do projeto dentro do container. A Ana faz isso com o site dela:</p>
+<pre class="term" data-cwd="~">$ docker run -d -p 8080:80 \
+>     -v /home/ana/meusite:/usr/share/nginx/html:ro \
+>     --name meu-site \
+>     nginx:alpine
+a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5
+$ echo "&lt;h1&gt;Nova versão&lt;/h1&gt;" &gt; /home/ana/meusite/index.html
+$ curl http://localhost:8080
+&lt;h1&gt;Nova versão&lt;/h1&gt;   « a página já mudou, sem recriar o container</pre>
+<p>O <code>:ro</code> no final deixa o container <strong>somente leitura</strong> — ideal para servir arquivos estáticos com segurança (o container não consegue alterar seus arquivos, mesmo se for invadido).</p>
+<p>Outro uso comum de bind mount: um arquivo de configuração que você versiona no Git, montado no lugar certo dentro do container:</p>
+<pre class="term">$ docker run -d -p 8080:80 \
+>     -v /home/ana/nginx.conf:/etc/nginx/nginx.conf:ro \
+>     --name meu-site nginx:alpine</pre>
+
+<div class="warn"><strong>Bind mount é caminho absoluto do host:</strong> <code>-v meusite:/html</code> (sem barra no início) é interpretado como <strong>nome de volume</strong>, não como pasta! O Docker criaria um volume chamado <code>meusite</code> vazio e montaria ele — o código não apareceria. Regra: caminho do host começa com <code>/</code> (ou <code>~/</code> em alguns shells — no <code>docker run</code> o <code>~</code> <strong>não</strong> é expandido pelo Docker; deixe o shell expandir: <code>-v ~/meusite:/html</code> funciona porque o Bash expande antes de passar pro Docker).</div>
+
+<hr>
+
+<h2>tmpfs: segredos só em memória</h2>
+<p>Alguns dados não devem <strong>nunca</strong> tocar o disco — uma chave de API, um token temporário. O tmpfs monta uma pasta na memória RAM do host: é rápida, não deixa rastro no disco e some quando o container para:</p>
+<pre class="term" data-cwd="~">$ docker run -d --name minha-api \
+>     --tmpfs /segredos:rw,noexec,nosuid,size=16m \
+>     node:22-alpine node server.js
+b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5
+$ docker exec minha-api sh -c "ls /segredos; mount | grep segredos"
+tmpfs on /segredos type tmpfs (rw,noexec,nosuid,size=16m)   « está na RAM, não no disco</pre>
+<p>Também dá com a sintaxe longa: <code>--mount type=tmpfs,target=/segredos</code>. Repare que o tmpfs <strong>não existe na forma curta com -v</strong> — exige <code>--tmpfs</code> ou <code>--mount type=tmpfs</code>. As opções <code>noexec,nosuid</code> endurecem: o que estiver ali não pode ser executado nem trocar de usuário — bom para arquivos de senha.</p>
+
+<hr>
+
+<h2>Tabela comparativa</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Tipo</th><th>Sintaxe</th><th>Onde fica o dado</th><th>Quando usar</th></tr>
+<tr><td><strong>Volume nomeado</strong></td><td><code>-v dados:/app/dados</code></td><td>Em <code>/var/lib/docker/volumes/dados/_data</code>, gerenciado pelo Docker</td><td>Dados de banco de dados e de aplicação que devem durar; backups; quando o caminho exato no host não importa.</td></tr>
+<tr><td><strong>Bind mount</strong></td><td><code>-v /home/ana/site:/usr/share/nginx/html:ro</code></td><td>Numa pasta sua, no caminho que você escolher</td><td>Código em desenvolvimento (editar no host reflete na hora); arquivos de configuração que você versiona no Git.</td></tr>
+<tr><td><strong>tmpfs</strong></td><td><code>--mount type=tmpfs,target=/segredos</code> ou <code>--tmpfs /segredos</code></td><td>Só na memória RAM do host — nunca vai para o disco</td><td>Segredos, tokens e senhas em memória; dados temporários que não podem deixar rastro; I/O rápido.</td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>-v ou --mount?</h2>
+<p>As duas formas fazem a mesma coisa. O <code>--mount</code> é mais explícito e legível — e é o recomendado em produção e no Compose (onde a forma curta de tmpfs nem existe):</p>
+<pre class="file"># forma curta
+-v dados-postgres:/var/lib/postgresql/data
+-v /home/ana/meusite:/usr/share/nginx/html:ro
+
+# forma explícita (type=volume | type=bind | type=tmpfs)
+--mount type=volume,source=dados-postgres,target=/var/lib/postgresql/data
+--mount type=bind,source=/home/ana/meusite,target=/usr/share/nginx/html,readonly
+--mount type=tmpfs,target=/segredos</pre>
+
+<div class="table-wrap">
+<table class="ref">
+<tr><th></th><th><code>-v</code> (curta)</th><th><code>--mount</code> (longa)</th></tr>
+<tr><td>Sintaxe</td><td><code>-v origem:destino:opcoes</code></td><td><code>--mount type=…,source=…,target=…,readonly</code></td></tr>
+<tr><td>Legibilidade</td><td>Compacta, mas críptica</td><td>Autoexplicativa — mostra o tipo</td></tr>
+<tr><td>Cria origem se não existir?</td><td><strong>Sim</strong> (cria pasta/volume vazio — armadilha)</td><td>Volume nomeado: cria; bind: <strong>dá erro</strong> se a pasta não existe</td></tr>
+<tr><td>tmpfs</td><td>Não aceita</td><td><code>type=tmpfs</code> aceita</td></tr>
+<tr><td>Recomendação</td><td>OK em exemplos e dev rápido</td><td>Preferida em produção e no Compose</td></tr>
+</table>
+</div>
+
+<div class="warn"><strong>Armadilha do -v:</strong> se o caminho do host não existe, o Docker <strong>cria uma pasta vazia</strong> nesse caminho (com o dono root) em vez de avisar. A Ana digitou <code>-v /home/ana/meusit:/html</code> (erro de digitação) e o Docker criou a pasta <code>/home/ana/meusit</code> vazia — o site não carregou e não veio erro nenhum. Com <code>--mount type=bind,source=/home/ana/meusit,…</code>, o comando dá erro na hora se a origem não existir. Por isso, prefira <code>--mount</code> quando o caminho precisa existir de verdade.</div>
+
+<hr>
+
+<h2>Resumo: qual eu escolho?</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Situação</th><th>Tipo</th><th>Exemplo</th></tr>
+<tr><td>Banco de dados (Postgres, MySQL, Mongo)</td><td>Volume nomeado</td><td><code>-v dados-postgres:/var/lib/postgresql/data</code></td></tr>
+<tr><td>Código do projeto em desenvolvimento</td><td>Bind mount</td><td><code>-v /home/ana/api:/app</code></td></tr>
+<tr><td>Arquivo de config que você versiona (nginx.conf…)</td><td>Bind mount <code>:ro</code></td><td><code>-v /home/ana/nginx.conf:/etc/nginx/nginx.conf:ro</code></td></tr>
+<tr><td>Senha, token ou chave em memória</td><td>tmpfs</td><td><code>--tmpfs /segredos</code> ou <code>--mount type=tmpfs,target=/segredos</code></td></tr>
+<tr><td>Uploads de usuários que devem durar</td><td>Volume nomeado</td><td><code>-v uploads:/app/uploads</code></td></tr>
+<tr><td>Cache de build dentro do container (composer, pip)</td><td>Volume nomeado</td><td><code>-v composer-cache:/root/.composer</code></td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>Erros comuns na prática</h2>
+
+<div class="warn"><strong>Esquecer que o container vê o DESTINO, não a ORIGEM:</strong> dentro do container, o caminho é <code>/var/lib/postgresql/data</code> — a pasta <code>dados-postgres</code> (o nome do volume) não existe dentro do container. Se a app grava em <code>/dados</code> e você montou em <code>/app/dados</code>, os dados vão para a camada gravável e somem. Sempre monte no caminho que a aplicação usa de verdade (cada software tem o seu: Postgres = <code>/var/lib/postgresql/data</code>, Nginx = <code>/usr/share/nginx/html</code>, MySQL = <code>/var/lib/mysql</code>).</div>
+
+<div class="warn"><strong>Montar volume em cima de dados existentes da imagem:</strong> quando você monta um volume vazio em cima de uma pasta que já tem arquivos na imagem (ex.: montar volume vazio em <code>/var/lib/postgresql/data</code>), o Docker <strong>copia o conteúdo inicial</strong> da imagem para o volume na primeira vez — então os dados não somem. Mas se montar um bind de pasta vazia do host, a pasta do host (vazia) "tampa" a da imagem. Cuidado com bind mounts em pastas populadas da imagem.</div>
+
+<div class="warn"><strong>Permissões:</strong> arquivos escritos pelo container num bind mount ficam com o dono do processo dentro do container (muitas vezes root). Depois, apagar do host pode exigir <code>sudo</code>. Solução: rode o container com usuário não-root (<code>-u</code>) ou ajuste o <code>--chown</code> — nível 3.</div>
+
+<hr>
+
+<h2>Referência rápida</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Quero…</th><th>Comando</th></tr>
+<tr><td>Dados de banco persistentes</td><td><code>docker run -d -v dados-postgres:/var/lib/postgresql/data postgres:16-alpine</code></td></tr>
+<tr><td>Editar código no host e ver no container</td><td><code>docker run -d -v /home/ana/api:/app -p 3000:3000 node:22-alpine</code></td></tr>
+<tr><td>Servir arquivos estáticos com segurança</td><td><code>-v /home/ana/meusite:/usr/share/nginx/html:ro</code></td></tr>
+<tr><td>Segredo só em memória</td><td><code>--tmpfs /segredos:rw,noexec,nosuid,size=16m</code></td></tr>
+<tr><td>Forma explícita (recomendada em produção)</td><td><code>--mount type=volume,source=dados,target=/dados</code></td></tr>
+<tr><td>Listar os volumes da máquina</td><td><code>docker volume ls</code></td></tr>
+</table>
+</div>
+
+<div class="try" data-goal="VOLUME NAME" data-solucao="docker volume ls">
+<p class="try-task"><strong>Missão:</strong> antes de criar volumes você mesmo, veja o que já existe na máquina: rode <code>docker volume ls</code> e confira o cabeçalho <code>DRIVER    VOLUME NAME</code> na saída.</p>
+</div>
+
+<div class="try" data-goal="dados-postgres" data-solucao="docker run -d --name meu-banco -v dados-postgres:/var/lib/postgresql/data postgres:16-alpine">
+<p class="try-task"><strong>Missão extra:</strong> suba um Postgres com volume nomeado: rode <code>docker run -d --name meu-banco -v dados-postgres:/var/lib/postgresql/data postgres:16-alpine</code> e depois confirme com <code>docker volume ls</code> — o <code>dados-postgres</code> deve aparecer (o Docker cria o volume sozinho).</p>
+</div>
+
+<hr>
+
+<h2>Quiz rápido</h2>
+
+<div class="mc" data-answer="3">
+<p class="mc-q">1. A Ana quer que os dados do Postgres sobrevivam a <code>docker rm</code>. O que ela usa?</p>
+<label><input type="radio" name="q1"> Nada — os dados já persistem sozinhos</label>
+<label><input type="radio" name="q1"> <code>--persist</code> no docker run</label>
+<label><input type="radio" name="q1"> Um volume: <code>-v dados-postgres:/var/lib/postgresql/data</code></label>
+<label><input type="radio" name="q1"> Um <code>COPY</code> no Dockerfile</label>
+</div>
+
+<div class="mc" data-answer="2">
+<p class="mc-q">2. Qual a diferença de <code>-v dados:/app/dados</code> para <code>-v /home/ana/dados:/app/dados</code>?</p>
+<label><input type="radio" name="q2"> Nenhuma</label>
+<label><input type="radio" name="q2"> O primeiro é um <strong>volume nomeado</strong> (gerenciado pelo Docker); o segundo é um <strong>bind mount</strong> (pasta do host — o caminho começa com <code>/</code>)</label>
+<label><input type="radio" name="q2"> O primeiro apaga os dados, o segundo não</label>
+<label><input type="radio" name="q2"> O segundo só funciona no Windows</label>
+</div>
+
+<div class="mc" data-answer="4">
+<p class="mc-q">3. Para que serve o tmpfs (<code>--tmpfs /segredos</code>)?</p>
+<label><input type="radio" name="q3"> Para deixar o container mais lento</label>
+<label><input type="radio" name="q3"> Para montar uma pasta do host</label>
+<label><input type="radio" name="q3"> Para criar um volume nomeado</label>
+<label><input type="radio" name="q3"> Para montar uma pasta só na memória RAM — rápida, sem rastro no disco, ideal para senhas e tokens</label>
+</div>
+
+<div class="mc" data-answer="1">
+<p class="mc-q">4. A Ana rodou <code>-v /home/ana/meusit:/html</code> (erro de digitação) e o site não carregou, sem erro nenhum. O que aconteceu?</p>
+<label><input type="radio" name="q4"> O Docker criou a pasta <code>/home/ana/meusit</code> vazia no host e montou ela — a armadilha do <code>-v</code>; com <code>--mount type=bind</code> o comando daria erro na hora</label>
+<label><input type="radio" name="q4"> O Nginx quebrou</label>
+<label><input type="radio" name="q4"> A imagem foi corrompida</label>
+<label><input type="radio" name="q4"> Faltou o <code>:ro</code></label>
+</div>
+
+<hr>
+
+<h2>Resumo</h2>
+<ul>
+  <li>Sem volume, o que o container grava na camada gravável <strong>some com o <code>docker rm</code></strong>. O <code>-v</code> monta um lugar persistente dentro do container.</li>
+  <li>Três tipos: <strong>volume nomeado</strong> (<code>-v dados:/caminho</code>, gerenciado pelo Docker, ideal para banco de dados), <strong>bind mount</strong> (<code>-v /caminho/do/host:/caminho</code>, ideal para código em dev e configs), <strong>tmpfs</strong> (<code>--tmpfs /caminho</code>, só na RAM, ideal para segredos).</li>
+  <li>Forma curta <code>-v origem:destino:opções</code> vs. longa <code>--mount type=volume|bind|tmpfs,…</code> — em produção e no Compose, prefira <code>--mount</code>.</li>
+  <li>Armadilhas reais: <code>-v</code> com caminho do host inexistente cria pasta vazia (use <code>--mount</code> para falhar na hora); montar no caminho errado da app (dados vão para a camada gravável); bind em cima de pasta populada da imagem "tampa" o conteúdo.</li>
+  <li><code>:ro</code> monta somente leitura — ótimo para servir arquivos e configs com segurança.</li>
+</ul>
+
+<div class="tip"><strong>Próxima aula:</strong> <a href="docker-volume.html">docker volume: criar, listar e remover</a> — vamos gerenciar os volumes nomeados pela CLI.</div>
+
+<div class="pager"></div>
+
+</div>
+</main>
+</div>
+<script src="assets/site.js?v=4"></script>
+</body>
+</html>

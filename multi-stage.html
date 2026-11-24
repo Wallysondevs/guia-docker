@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Multi-stage builds: imagens enxutas | Guia Docker</title>
+<meta name="description" content="Multi-stage builds no Dockerfile: vários FROM no mesmo arquivo, o estágio de build (com compilador e dependências de dev) é descartado e o estágio final copia só o artefato com COPY --from. Exemplos completos em Node.js, Go (FROM scratch) e Python. Tamanhos antes/depois, saída real do BuildKit no Docker Engine 27, --target para buildar só um estágio, erros comuns (stage not found) e docker build --help no simulador. Imagem menor = pull mais rápido, start mais rápido e menos superfície de ataque.">
+<link rel="stylesheet" href="assets/style.css?v=4">
+<script>try{var t=localStorage.getItem("tema");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<meta http-equiv="Cache-Control" content="no-store, must-revalidate">
+<script>try{history.scrollRestoration="manual"}catch(e){}(function(){var n=0;function t(){window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;if(++n<60)setTimeout(t,50)}t();window.addEventListener("pagehide",function(){window.scrollTo(0,0);document.documentElement.scrollTop=0;});window.addEventListener("pageshow",function(){window.scrollTo(0,0)});window.addEventListener("load",function(){window.scrollTo(0,0)});})();document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(a){var h=a.getAttribute("href")||"";if(/[.]html($|[?#])/.test(h)&&a.host===location.host){window.scrollTo(0,0);document.documentElement.scrollTop=0;}}});</script>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" id="sidebar" aria-label="Tópicos"></nav>
+<main class="main">
+<div class="content">
+
+<div class="pager"></div>
+
+<h1><span class="hl">Multi-stage builds</span> — imagens enxutas</h1>
+
+<p class="intro">A Ana terminou o Dockerfile da API da Loja Aurora e, proud of herself, rodou <code>docker images</code>: a imagem tinha <strong>1,1GB</strong>. Ela olhou a lista e viu o problema — o compilador, o npm inteiro, as dependências de teste e o <code>node_modules</code> completo tinham ido parar dentro da imagem final, junto com o app. Num Dockerfile comum, tudo que você instala para <em>construir</em> fica também na imagem de <em>rodar</em>. O <strong>multi-stage build</strong> resolve isso com vários <code>FROM</code> no mesmo Dockerfile: o estágio de build é descartado e o estágio final copia <em>somente o artefato</em>.</p>
+
+<div class="note">
+<strong>Você vai aprender</strong>
+<ul>
+  <li>Por que ferramentas de build na imagem final são um problema (tamanho, start lento, superfície de ataque).</li>
+  <li>A sintaxe <code>FROM … AS nome</code> e <code>COPY --from=nome …</code>.</li>
+  <li>Exemplo completo em Node.js (build → runtime) e em Python.</li>
+  <li>Exemplo em Go terminando em <code>FROM scratch</code> (só o binário).</li>
+  <li>Ler a saída do BuildKit (Docker Engine 27) e usar <code>--target</code>.</li>
+  <li>Tamanhos antes e depois — e por que imagem menor é mais segura.</li>
+</ul>
+</div>
+
+<hr>
+
+<h2>O problema: ferramentas de build na imagem final</h2>
+<p>No notebook da Ana, a comparação do antes e depois ficou assim:</p>
+<pre class="term">$ docker images
+REPOSITORY   TAG           IMAGE ID       CREATED         SIZE
+node         22            a1b2c3d4e5f6   2 weeks ago     1.09GB
+node         22-alpine     c3d4e5f6a1b2   2 weeks ago     189MB
+minha-api    sem-otimizar  e5f6a1b2c3d4   5 minutes ago   1.1GB   « app + npm + ferramentas de build
+minha-api    multi-stage   f6a1b2c3d4e5   1 minute ago    195MB   « só o necessário</pre>
+<p>Imagem grande = <strong>pull lento no deploy</strong>, start lento, mais espaço em disco no servidor e <strong>superfície de ataque maior</strong>: cada ferramenta extra (compilador, npm, git) é uma porta de entrada a mais que pode ter um bug explorável. A ideia do multi-stage é simples: <em>compile numa imagem grande, rode numa pequena</em>.</p>
+
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Estágio</th><th>Para que serve</th><th>O que fica nele</th><th>Vai para a imagem final?</th></tr>
+<tr><td><code>AS build</code></td><td>Compilar/gerar o artefato</td><td>Compilador, npm/pip, dependências de dev, código-fonte</td><td><strong>Não</strong> — é descartado</td></tr>
+<tr><td>Estágio final (sem nome ou <code>AS runtime</code>)</td><td>Rodar a aplicação</td><td>Só o artefato + o runtime mínimo + usuário não-root</td><td><strong>Sim</strong></td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>A sintaxe: vários FROM no mesmo Dockerfile</h2>
+<p>Um Dockerfile multi-stage tem <strong>dois ou mais <code>FROM</code></strong>. Cada <code>FROM</code> começa um estágio novo, do zero — como se fosse um Dockerfile separado. O nome depois de <code>AS</code> serve para referenciar o estágio num <code>COPY --from</code>:</p>
+<dl class="anatomy">
+  <dt>FROM node:22-alpine AS build</dt><dd>Inicia o <strong>estágio 1</strong> e dá o nome <code>build</code> para ele (o <code>AS</code> é opcional, mas com nome dá para referenciar depois; sem nome, dá para referenciar por número: <code>--from=0</code>).</dd>
+  <dt>FROM node:22-alpine AS runtime</dt><dd>Inicia o <strong>estágio 2</strong> — é o último estágio que vira a imagem final.</dd>
+  <dt>COPY --from=build /app/dist ./dist</dt><dd>Copia um arquivo <em>de outro estágio</em> (não do contexto de build): só o artefato sai do estágio de build para o final.</dd>
+</dl>
+<p>Os estágios intermediários são descartados depois do build — nunca aparecem na imagem final nem no <code>docker images</code> (só como cache de build, que pode ser limpo com <a href="docker-system-prune.html">docker system prune</a>).</p>
+
+<hr>
+
+<h2>Exemplo completo: app Node.js</h2>
+<p>Este é o Dockerfile que a Ana usa na API da Loja Aurora (em <code>~/minha-api</code>):</p>
+<pre class="file" data-file="~/minha-api/Dockerfile"># ---- estágio 1: build (imagem grande, descartada depois) ----
+FROM node:22-alpine AS build
+WORKDIR /app
+COPY package*.json ./
+RUN npm install            # devDependencies entram aqui (precisam do compilador)
+COPY . .
+RUN npm run build          # gera a pasta dist/
+
+# ---- estágio 2: imagem final só com o necessário ----
+FROM node:22-alpine AS runtime
+WORKDIR /app
+ENV NODE_ENV=production
+COPY --from=build /app/dist ./dist
+COPY --from=build /app/node_modules ./node_modules
+COPY package*.json ./
+USER node                  # usuário não-root (aula de segurança)
+EXPOSE 3000
+CMD ["node", "dist/server.js"]</pre>
+<p>Repare na ordem: no estágio de build, o <code>npm install</code> (com devDependencies) acontece <em>antes</em> do <code>COPY . .</code> para aproveitar o cache de camadas (aula <a href="camadas-cache.html">Camadas e cache</a>) — como <code>package.json</code> muda pouco, essa camada fica em cache e o build voa. No estágio final, só <code>dist/</code> e <code>node_modules</code> de produção são copiados de lá.</p>
+
+<div class="warning"><strong>Detalhe que salva build: <code>npm ci --omit=dev</code> no lugar de <code>npm install --omit=dev</code>.</strong> Em vez de copiar tudo e instalar tudo no estágio final, dá para fazer o build completo no estágio 1 e no estágio 2 rodar só <code>npm ci --omit=dev</code> com o <code>package*.json</code> — assim o <code>node_modules</code> de produção é recriado limpo, sem ferramentas de build. As duas formas funcionam; a segunda deixa a imagem ainda mais enxuta.</div>
+
+<hr>
+
+<h2>Exemplo Python: build de wheels no estágio 1</h2>
+<p>Em Python, o truque clássico é compilar as dependências (wheels) num estágio e instalar no outro — porque algumas libs (ex.: <code>psycopg2</code>, <code>pillow</code>) precisam de compilador C, que não deve ir para a imagem final:</p>
+<pre class="file" data-file="Dockerfile"># ---- estágio 1: compila as wheels ----
+FROM python:3.12-slim AS build
+WORKDIR /wheels
+COPY requirements.txt .
+RUN pip wheel --no-cache-dir -r requirements.txt -w /wheels
+
+# ---- estágio 2: instala as wheels e copia o app ----
+FROM python:3.12-slim AS runtime
+WORKDIR /app
+RUN useradd -m appuser
+COPY --from=build /wheels /wheels
+COPY requirements.txt .
+RUN pip install --no-cache-dir --no-index --find-links=/wheels -r requirements.txt \
+ && rm -rf /wheels
+COPY . .
+USER appuser
+EXPOSE 8000
+CMD ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0"]</pre>
+<p>O <code>--no-index --find-links=/wheels</code> instala só das wheels compiladas no estágio anterior — sem rede e sem compilador na imagem final. E o <code>rm -rf /wheels</code> no mesmo <code>RUN</code> garante que a pasta não pese na camada (lembre da aula <a href="image-dive.html">docker history/dive</a>: limpar numa camada separada não adianta).</p>
+
+<hr>
+
+<h2>Exemplo Go: FROM scratch (só o binário)</h2>
+<p>Em Go dá para ir ao extremo: compilar um binário <strong>estático</strong> (<code>CGO_ENABLED=0</code>) e copiar só ele para a imagem <code>scratch</code> — uma base vazia de 0MB, sem shell, sem nada:</p>
+<pre class="file" data-file="Dockerfile"># ---- estágio 1: compila ----
+FROM golang:1.23-alpine AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 go build -o /out/server .
+
+# ---- estágio 2: imagem final mínima ----
+FROM scratch
+COPY --from=build /out/server /server
+USER 65532:65532
+EXPOSE 8080
+ENTRYPOINT ["/server"]</pre>
+<div class="warning"><strong>Atenção aos detalhes do <code>scratch</code>:</strong> a imagem não tem shell (debugue com <code>docker logs</code>, nunca com <code>docker exec … sh</code>), nem certificados CA (se o app faz HTTPS para fora, copie <code>/etc/ssl/certs/ca-certificates.crt</code> do estágio de build com <code>COPY --from=build</code>) e nem <code>/etc/passwd</code> — por isso o usuário precisa ser numérico: <code>USER 65532</code>. Se precisar de shell só para debug, use <code>FROM alpine</code> no lugar do scratch e aceite os ~8MB a mais.</div>
+
+<hr>
+
+<h2>Lendo a saída do build (BuildKit, Engine 27)</h2>
+<p>O builder padrão desde o Docker 23 é o BuildKit — a saída mostra cada estágio com o nome que você deu, e dá para ver exatamente o que foi descartado:</p>
+<pre class="term" data-cwd="~/minha-api">$ docker build -t minha-api:1.0 .
+[+] Building 21.7s (11/11) FINISHED
+ => [internal] load build definition from Dockerfile
+ => => transferring dockerfile: 512B
+ => [internal] load .dockerignore
+ => [build 1/4] FROM docker.io/library/node:22-alpine
+ => [runtime 1/3] FROM docker.io/library/node:22-alpine
+ => [build 2/4] COPY package*.json ./
+ => [build 3/4] RUN npm install
+ => [build 4/4] RUN npm run build
+ => [runtime 2/3] COPY --from=build /app/dist ./dist
+ => [runtime 3/3] COPY --from=build /app/node_modules ./node_modules
+ => exporting to image
+ => => naming to docker.io/library/minha-api:1.0
+ => => unpacking to docker.io/library/minha-api:1.0
+
+Successfully built f6a1b2c3d4e5
+Successfully tagged minha-api:1.0</pre>
+<p>Repare nos prefixos <code>[build …]</code> e <code>[runtime …]</code>: dá para ver o build rodando os dois estágios em paralelo quando dá. E o <code>Successfully built</code> no fim é a confirmação de que a imagem final foi gerada.</p>
+
+<hr>
+
+<h2>--target: buildar só até um estágio</h2>
+<p>Para debugar o estágio de build (entrar num container <em>com todas as ferramentas</em>, o código-fonte e o node_modules de dev), aponte o <code>--target</code> para ele:</p>
+<pre class="term" data-cwd="~/minha-api">$ docker build --target build -t minha-api:debug .
+…
+Successfully tagged minha-api:debug
+
+$ docker run -it --rm minha-api:debug sh   « shell completo, só para investigar
+/ # </pre>
+<div class="warning"><strong>Nunca publique a imagem <code>:debug</code></strong> — ela carrega o compilador e todas as dependências de build. Multi-stage existe justamente para isso não ir para a imagem final. Se precisar publicar, publique só a tag final (<code>minha-api:1.0</code>).</div>
+
+<hr>
+
+<h2>Tamanhos: antes e depois</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Cenário</th><th>Imagem final</th><th>Tamanho típico</th></tr>
+<tr><td>App Node em <code>node:22</code> (imagem completa), sem multi-stage</td><td>app + npm + node inteiro</td><td>~1.1GB</td></tr>
+<tr><td>App Node em <code>node:22-alpine</code>, sem separar o build</td><td>app + ferramentas de build</td><td>~250MB</td></tr>
+<tr><td>App Node multi-stage em Alpine</td><td>só <code>dist/</code> + <code>node_modules</code> de produção</td><td>~130–200MB</td></tr>
+<tr><td>App Python em <code>python:3.12</code>, sem multi-stage</td><td>app + compilador + fontes</td><td>~1GB</td></tr>
+<tr><td>App Python multi-stage em <code>python:3.12-slim</code></td><td>app + wheels instaladas</td><td>~120–180MB</td></tr>
+<tr><td>App Go em <code>golang:1.23-alpine</code>, sem multi-stage</td><td>app + toolchain Go</td><td>~800MB</td></tr>
+<tr><td>App Go multi-stage com <code>FROM scratch</code></td><td>só o binário estático</td><td>~10–20MB</td></tr>
+<tr><td>App Go multi-stage com <code>gcr.io/distroless/static</code></td><td>binário + CA + usuário nonroot</td><td>~12–25MB</td></tr>
+</table>
+</div>
+<p>Além de disco, imagem menor significa <strong>pull mais rápido no deploy</strong> (cada servidor baixa menos), start mais rápido, menos CVEs para se preocupar e — bônus — menos espaço para um atacante esconder ferramentas. Segurança e performance no mesmo truque. Quer saber exatamente quanto cada camada pesa? Aula <a href="image-dive.html">docker history e dive</a>.</p>
+
+<hr>
+
+<h2>Erros comuns</h2>
+<div class="warning"><strong>Nome de estágio errado quebra o build:</strong> se o <code>COPY --from=build</code> referencia um estágio que não existe (você esqueceu o <code>AS build</code>), o build falha na hora com <code>failed to solve: … stage "build" not found</code>. Dá para referenciar por número também: <code>COPY --from=0 …</code> (o primeiro estágio é o 0). E lembre: o contexto do build continua sendo a pasta inteira — use <a href="dockerignore.html">.dockerignore</a> para não enviar <code>node_modules</code> e <code>.git</code> para o daemon (elespesam no envio e podem vazar segredos).</div>
+<div class="warning"><strong>"COPY --from" copiando o contexto inteiro:</strong> um erro comum é fazer <code>COPY --from=build /app /app</code> no estágio final, o que traz <code>node_modules</code> de dev e código-fonte junto. Copie só o que o runtime precisa: <code>/app/dist</code>, não <code>/app</code>.</div>
+<div class="warning"><strong>Esquecer o estágio final:</strong> se o Dockerfile termina no estágio de build (sem o segundo <code>FROM</code>), a imagem final é o estágio de build inteiro — exatamente o problema que o multi-stage veio resolver. Sempre termine com o estágio enxuto.</div>
+
+<div class="try" data-goal="Successfully built" data-solucao="docker build --help">
+<p class="try-task"><strong>Missão:</strong> rode <code>docker build --help</code> no terminal abaixo e procure as flags <code>-t</code>, <code>--target</code> e <code>--build-arg</code>. No simulador o comando dispara um build de exemplo — repare no <code>Successfully built</code> no fim da saída.</p>
+</div>
+
+<div class="try" data-goal="REPOSITORY" data-solucao="docker images">
+<p class="try-task"><strong>Missão extra:</strong> depois do build, rode <code>docker images</code> e compare a coluna <code>SIZE</code>: a imagem que o simulador criou vs. as imagens oficiais. Qual é a mais pesada?</p>
+</div>
+
+<hr>
+
+<h2>Quiz rápido</h2>
+<div class="mc" data-answer="3">
+<p class="mc-q">1. Qual é a ideia central do multi-stage build?</p>
+<label><input type="radio" name="q1"> Rodar dois containers ao mesmo tempo</label>
+<label><input type="radio" name="q1"> Fazer build com uma imagem grande e rodar com uma pequena, copiando só o artefato</label>
+<label><input type="radio" name="q1"> Usar duas tags na mesma imagem</label>
+<label><input type="radio" name="q1"> Dividir o Dockerfile em dois arquivos</label>
+</div>
+
+<div class="mc" data-answer="2">
+<p class="mc-q">2. O que faz o <code>COPY --from=build /app/dist ./dist</code>?</p>
+<label><input type="radio" name="q2"> Copia do contexto de build (sua pasta local)</label>
+<label><input type="radio" name="q2"> Copia do estágio <code>build</code> para o estágio atual — só o artefato sai do estágio de build</label>
+<label><input type="radio" name="q2"> Copia de um registry remoto</label>
+<label><input type="radio" name="q2"> Copia a imagem inteira do estágio build</label>
+</div>
+
+<div class="mc" data-answer="4">
+<p class="mc-q">3. Qual destas imagens pode ser usada como estágio final mínimo para um binário Go estático?</p>
+<label><input type="radio" name="q3"> <code>ubuntu:24.04</code></label>
+<label><input type="radio" name="q3"> <code>node:22</code></label>
+<label><input type="radio" name="q3"> <code>golang:1.23</code></label>
+<label><input type="radio" name="q3"> <code>scratch</code> (base vazia de 0MB)</label>
+</div>
+
+<div class="mc" data-answer="1">
+<p class="mc-q">4. Para que serve o <code>--target build</code> no docker build?</p>
+<label><input type="radio" name="q4"> Para buildar só até o estágio "build" (útil para debugar com todas as ferramentas, sem publicar)</label>
+<label><input type="radio" name="q4"> Para escolher a tag final da imagem</label>
+<label><input type="radio" name="q4"> Para buildar em outra máquina</label>
+<label><input type="radio" name="q4"> Para apagar o cache de build</label>
+</div>
+
+<hr>
+
+<h2>Resumo</h2>
+<ul>
+  <li>Multi-stage = vários <code>FROM</code> no mesmo Dockerfile; só o <strong>último estágio</strong> vira a imagem final.</li>
+  <li><code>FROM imagem AS nome</code> nomeia o estágio; <code>COPY --from=nome caminho dest</code> copia só o artefato dele (ou <code>--from=0</code> pelo número).</li>
+  <li>Build em imagem grande (node:22, golang, python completo), runtime em imagem pequena (alpine, slim, scratch, distroless).</li>
+  <li>Imagem menor = pull/start mais rápidos, menos disco e <strong>menos superfície de ataque</strong> (menos ferramentas = menos CVEs).</li>
+  <li><code>--target build</code> gera a imagem do estágio intermediário para debug — nunca publique essa tag.</li>
+  <li>Erros reais: <code>stage "build" not found</code> (esqueceu o <code>AS</code>) e copiar <code>/app</code> inteiro em vez de só <code>/app/dist</code>.</li>
+</ul>
+
+<div class="tip"><strong>Próxima aula:</strong> <a href="docker-tag-push.html">docker tag e push para o registry</a> — enviar sua imagem enxuta para o Docker Hub ou um registry privado.</div>
+
+<div class="pager"></div>
+
+</div>
+</main>
+</div>
+<script src="assets/site.js?v=4"></script>
+</body>
+</html>

@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Projeto 1: site estático com Nginx | Guia Docker</title>
+<meta name="description" content="Projeto passo a passo completo: a Ana cria um site estático (index.html) no notebook dela e o Nginx — rodando dentro de um container — passa a servir esse arquivo na porta 8080. Bind mount com -v $(pwd):/usr/share/nginx/html:ro, publicação de porta -p 8080:80, verificação no navegador e com curl, logs, edição ao vivo e limpeza total no final. Com anatomia do comando, erros reais e missões no terminal simulado.">
+<link rel="stylesheet" href="assets/style.css?v=4">
+<script>try{var t=localStorage.getItem("tema");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<meta http-equiv="Cache-Control" content="no-store, must-revalidate">
+<script>try{history.scrollRestoration="manual"}catch(e){}(function(){var n=0;function t(){window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;if(++n<60)setTimeout(t,50)}t();window.addEventListener("pagehide",function(){window.scrollTo(0,0);document.documentElement.scrollTop=0;});window.addEventListener("pageshow",function(){window.scrollTo(0,0)});window.addEventListener("load",function(){window.scrollTo(0,0)});})();document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(a){var h=a.getAttribute("href")||"";if(/[.]html($|[?#])/.test(h)&&a.host===location.host){window.scrollTo(0,0);document.documentElement.scrollTop=0;}}});</script>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" id="sidebar" aria-label="Tópicos"></nav>
+<main class="main">
+<div class="content">
+
+<div class="pager"></div>
+
+<h1>Projeto 1: site estático com <span class="hl">Nginx</span></h1>
+
+<p class="intro">O projeto mais rápido do guia, e o favorito da Ana: ela precisa entregar um trabalho da faculdade — uma página HTML sobre Docker — e quer mostrar para a turma <strong>como se fosse um site de verdade</strong>, acessível pelo navegador. Em vez de instalar Apache ou Nginx no notebook (e sujar a máquina), ela vai servir o arquivo com um container. Em menos de um minuto, o site estará no ar em <code>http://localhost:8080</code>.</p>
+
+<div class="note">
+<strong>Você vai aprender</strong>
+<ul>
+  <li>Como a imagem <code>nginx:alpine</code> serve arquivos da pasta <code>/usr/share/nginx/html</code>.</li>
+  <li>O que é um <strong>bind mount</strong>: montar uma pasta da sua máquina dentro do container com <code>-v</code>.</li>
+  <li>Por que a flag <code>:ro</code> (somente leitura) protege seus arquivos.</li>
+  <li>Publicar a porta com <code>-p 8080:80</code> e ler a coluna PORTS do <code>docker ps</code>.</li>
+  <li>Verificar o site no navegador, com <code>curl</code> e nos logs do container.</li>
+  <li>Editar o arquivo e ver a mudança na hora — sem rebuild.</li>
+  <li>Parar, remover e limpar tudo no final (e o erro real de tentar remover container rodando).</li>
+</ul>
+</div>
+
+<hr>
+
+<h2>A ideia: o Nginx empresta o servidor, a pasta é sua</h2>
+<p>Pense no container como uma <strong>caixa de areia com um programa dentro</strong>. A imagem <code>nginx:alpine</code> traz o servidor web Nginx configurado para servir os arquivos que estiverem na pasta <code>/usr/share/nginx/html</code> <em>dentro do container</em>. Se essa pasta estiver vazia, o Nginx devolve o "Welcome to nginx!" padrão.</p>
+<p>A mágica deste projeto é não copiar o site para dentro da imagem, e sim <strong>apontar uma pasta da máquina da Ana para dentro do container</strong>. Esse truque chama-se <strong>bind mount</strong> (montagem de pasta) e é a forma de um container "enxergar" um diretório do host — a aula <a href="volumes-tipos.html">Volumes nomeados, bind mounts e tmpfs</a> detalha os três tipos de montagem:</p>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Tipo</th><th>Sintaxe</th><th>Para que serve</th></tr>
+<tr><td>Volume nomeado</td><td><code>-v dados:/var/lib/mysql</code></td><td>Dados que o Docker gerencia e que sobrevivem ao container (bancos de dados).</td></tr>
+<tr><td><strong>Bind mount</strong></td><td><code>-v /home/ana/site:/usr/share/nginx/html</code></td><td>Uma pasta do seu computador aparece dentro do container — ideal para desenvolver (o que você edita no host aparece na hora).</td></tr>
+<tr><td>tmpfs</td><td><code>--tmpfs /tmp</code></td><td>Uma pasta na memória RAM, descartável — para arquivos temporários.</td></tr>
+</table>
+</div>
+<p>Neste projeto vamos usar o bind mount com a flag <code>:ro</code> (<em>read-only</em>, somente leitura): o container consegue <strong>ler</strong> seus arquivos, mas não consegue modificar nem apagar nada — uma proteção de graça.</p>
+
+<hr>
+
+<h2>Passo 1: crie o site</h2>
+<p>No terminal da <code>ana@notebook</code>, crie a pasta do projeto e o arquivo dentro dela:</p>
+<pre class="term">$ mkdir -p ~/site
+$ cd ~/site
+$ ls -la   « pasta vazia por enquanto</pre>
+<p>A estrutura que vamos criar é minimale:</p>
+<pre class="file">site/
+└── index.html</pre>
+<p>Agora o arquivo em si. Crie <code>index.html</code> com o conteúdo abaixo (é um HTML simples, só para o trabalho da faculdade):</p>
+<pre class="file" data-file="site/index.html">&lt;!doctype html&gt;
+&lt;html lang="pt-BR"&gt;
+&lt;head&gt;
+  &lt;meta charset="utf-8"&gt;
+  &lt;meta name="viewport" content="width=device-width, initial-scale=1"&gt;
+  &lt;title&gt;Meu site no Docker&lt;/title&gt;
+  &lt;style&gt;
+    body { font-family: sans-serif; max-width: 640px; margin: 40px auto; padding: 0 16px; line-height: 1.6; }
+    h1 { color: #0b5cad; }
+    code { background: #eef3f8; padding: 2px 6px; border-radius: 4px; }
+  &lt;/style&gt;
+&lt;/head&gt;
+&lt;body&gt;
+  &lt;h1&gt;Olá! Este site está rodando dentro de um container Nginx 🐳&lt;/h1&gt;
+  &lt;p&gt;Este arquivo está na pasta <code>~/site</code> do meu notebook, e o Nginx dentro do
+     container está lendo ele direto de lá, gracias a um bind mount.&lt;/p&gt;
+  &lt;p&gt;Edite este arquivo e recarregue a página — a mudança aparece na hora,
+     sem reconstruir imagem nenhuma.&lt;/p&gt;
+&lt;/body&gt;
+&lt;/html&gt;</pre>
+<p>Confira que o arquivo foi criado:</p>
+<pre class="term" data-cwd="~/site">$ ls -la
+total 12
+-rw-r--r-- 1 ana ana  612 Nov 24 12:00 index.html
+$ head -3 index.html
+&lt;!doctype html&gt;
+&lt;html lang="pt-BR"&gt;
+&lt;head&gt;</pre>
+
+<hr>
+
+<h2>Passo 2: suba o Nginx apontando para a sua pasta</h2>
+<p>Ainda na pasta <code>~/site</code>, rode o comando abaixo. Leia a anatomia primeiro — cada peça tem um motivo:</p>
+<dl class="anatomy">
+  <dt>docker run</dt><dd>cria e inicia um container novo.</dd>
+  <dt>-d</dt><dd><em>detach</em>: roda em segundo plano e devolve o terminal na hora (senão o terminal ficaria preso no container).</dd>
+  <dt>-p 8080:80</dt><dd>publica a porta: <code>HOST:CONTAINER</code>. A porta <strong>80 do container</strong> (onde o Nginx escuta) passa a responder na <strong>porta 8080 da máquina da Ana</strong>. Formato sempre <code>-p host:container</code> — a aula <a href="portas.html">Publicando portas</a> detalha.</dd>
+  <dt>-v $(pwd):/usr/share/nginx/html:ro</dt><dd>o bind mount: <code>$(pwd)</code> é a pasta atual (<code>/home/ana/site</code>), montada em <code>/usr/share/nginx/html</code> dentro do container, com <code>:ro</code> = somente leitura.</dd>
+  <dt>--name meu-site</dt><dd>dá um nome previsível ao container. Sem isso, o Docker inventa nomes como <code>keen_blackwell</code> — bons para diversão, ruins para Automação.</dd>
+  <dt>nginx:alpine</dt><dd>a imagem usada (Nginx sobre Alpine, ~48MB — a aula <a href="imagens-oficiais.html">Imagens oficiais</a> explica as tags).</dd>
+</dl>
+<pre class="term" data-cwd="~/site">$ docker run -d -p 8080:80 -v $(pwd):/usr/share/nginx/html:ro --name meu-site nginx:alpine
+9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c3b2a1908172a3b4c5d6e7f8a9b0c1d2e3f4
+
+$ docker ps
+CONTAINER ID   IMAGE          COMMAND                  CREATED          STATUS          PORTS                   NAMES
+9f8e7d6c5b4a   nginx:alpine   "/docker-entrypoint.…"   8 seconds ago    Up 8 seconds    0.0.0.0:8080->80/tcp   meu-site</pre>
+<p>Três coisas para reparar na saída:</p>
+<ul>
+  <li>O <code>docker run -d</code> imprime o <strong>ID completo</strong> do container (64 caracteres hexadecimais). Dá para usar só os primeiros 12 dígitos nos próximos comandos.</li>
+  <li>Na coluna <strong>STATUS</strong>, <code>Up 8 seconds</code> diz que o container está rodando.</li>
+  <li>Na coluna <strong>PORTS</strong>, <code>0.0.0.0:8080->80/tcp</code> confirma o redirecionamento: tudo que chegar na 8080 do host vai para a 80 do container. <code>0.0.0.0</code> significa "todas as interfaces" — ou seja, dá para acessar de outro dispositivo da rede também, se quiser restringir para só o seu computador, use <code>-p 127.0.0.1:8080:80</code>.</li>
+</ul>
+
+<div class="try" data-goal="meu-site" data-solucao="docker run -d -p 8080:80 --name meu-site nginx:alpine">
+<p class="try-task"><strong>Missão:</strong> suba o container (adicione <code>-v $(pwd):/usr/share/nginx/html:ro</code> se quiser) e depois rode <code>docker ps</code> — o nome <code>meu-site</code> deve aparecer na lista.</p>
+</div>
+
+<hr>
+
+<h2>Passo 3: veja no navegador e no terminal</h2>
+<p>Abra <strong>http://localhost:8080</strong> no navegador da Ana. Você deve ver a página "Olá! Este site está rodando dentro de um container Nginx 🐳". Se aparecer "Welcome to nginx!", o bind mount não entrou (você rodou o comando fora da pasta <code>site</code>?) — confira com <code>docker inspect meu-site</code> e procure a parte de Mounts.</p>
+<p>Pelo terminal, dá para provar que o servidor responde:</p>
+<pre class="term">$ curl -s http://localhost:8080 | head -8
+&lt;!doctype html&gt;
+&lt;html lang="pt-BR"&gt;
+&lt;head&gt;
+  &lt;meta charset="utf-8"&gt;
+  &lt;meta name="viewport" content="width=device-width, initial-scale=1"&gt;
+  &lt;title&gt;Meu site no Docker&lt;/title&gt;
+
+$ curl -sI http://localhost:8080 | head -1
+HTTP/1.1 200 OK   « 200 OK = deu certo</pre>
+<p>E os logs do container mostram cada acesso que você fez — o Nginx registra todas as requisições:</p>
+<pre class="term">$ docker logs meu-site
+/docker-entrypoint.sh: Configuration complete; ready for start up
+172.17.0.1 - - [24/Nov/2025:12:00:00 +0000] "GET / HTTP/1.1" 200 612 "-" "curl/8.5.0"
+172.17.0.1 - - [24/Nov/2025:12:00:05 +0000] "GET / HTTP/1.1" 200 612 "-" "Mozilla/5.0"</pre>
+<p>O IP <code>172.17.0.1</code> é o endereço interno do próprio host na rede do Docker; <code>"GET / HTTP/1.1" 200</code> é a requisição que chegou e foi atendida com sucesso.</p>
+
+<div class="try" data-goal="ready for start up" data-solucao="docker logs meu-site">
+<p class="try-task"><strong>Missão:</strong> confira os logs do Nginx: rode <code>docker logs meu-site</code> e procure a linha <code>ready for start up</code>.</p>
+</div>
+
+<hr>
+
+<h2>Passo 4: edite e veja na hora (o pulo do gato)</h2>
+<p>Este é o momento "uau" do projeto. Abra o <code>index.html</code> no editor da Ana, mude o título para <code>&lt;h1&gt;Agora com título novo! 🐳&lt;/h1&gt;</code>, salve, e recarregue o navegador. A mudança aparece <strong>na hora</strong> — porque o Nginx está lendo o arquivo direto da pasta do host, não de uma cópia dentro da imagem.</p>
+<pre class="term">$ curl -s http://localhost:8080 | grep h1
+  &lt;h1&gt;Agora com título novo! 🐳&lt;/h1&gt;</pre>
+<p>É por isso que desenvolvedores usam bind mount durante o desenvolvimento: em vez de reconstruir a imagem a cada vírgula (<code>docker build</code> leva segundos a minutos), o arquivo é servido ao vivo. Em produção, o caminho inverso é mais comum: o site é copiado <em>para dentro</em> da imagem no build (<code>COPY</code> no Dockerfile), garantindo que o que foi testado é exatamente o que vai para o ar.</p>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Situação</th><th>Abordagem</th><th>Comando</th></tr>
+<tr><td>Desenvolvimento (editando toda hora)</td><td>Bind mount: pasta do host dentro do container</td><td><code>-v $(pwd):/usr/share/nginx/html:ro</code></td></tr>
+<tr><td>Produção (site pronto, imagem imutável)</td><td>Cópia dentro da imagem no build</td><td><code>COPY . /usr/share/nginx/html</code> no Dockerfile</td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>Passo 5: pare e limpe tudo</h2>
+<p>Terminou de mostrar para a turma? Hora de devolver o notebook ao estado original. A ordem importa: <strong>primeiro para, depois remove</strong>:</p>
+<pre class="term">$ docker stop meu-site
+meu-site
+$ docker rm meu-site
+meu-site
+$ docker ps -a
+CONTAINER ID   IMAGE   COMMAND   CREATED   STATUS   PORTS   NAMES   « vazio: nada parado sobrando
+$ docker ps
+CONTAINER ID   IMAGE   COMMAND   CREATED   STATUS   PORTS   NAMES   « vazio: nada rodando</pre>
+<p>Repare que a <strong>imagem</strong> <code>nginx:alpine</code> continua na máquina (<code>docker images</code>) — só o container foi apagado. Imagens são reutilizáveis; containers são descartáveis. Esse é o modelo mental do Docker.</p>
+
+<div class="warn"><strong>Erro real que a Ana cometeu:</strong> ela tentou dar <code>docker rm meu-site</code> <em>antes</em> do stop, e o Docker recusou:
+<pre class="term">$ docker rm meu-site
+Error response from daemon: cannot remove container "meu-site": container is running: stop the container before removing or force remove</pre>
+A mensagem já diz a solução: pare antes (<code>docker stop meu-site</code>) ou force com <code>docker rm -f meu-site</code>. O <code>-f</code> manda um SIGKILL — útil para containers travados, mas perigoso para bancos de dados (pode corromper arquivos).</div>
+
+<div class="warn"><strong>Outro erro real:</strong> se a porta 8080 já estiver ocupada (quem sabe outro container esquecido?), o run falha na hora:
+<pre class="term">$ docker run -d -p 8080:80 --name meu-site nginx:alpine
+docker: Error response from daemon: driver failed programming external connectivity on endpoint meu-site (...): Bind for 0.0.0.0:8080 failed: port is already allocated.</pre>
+Solução: veja quem está usando a porta (<code>docker ps</code> ou <code>sudo ss -ltnp | grep 8080</code>) e ou apague esse container ou escolha outra porta do host: <code>-p 8081:80</code> — o lado do container continua 80. A página <a href="problemas.html">Erros comuns</a> lista esse e outros sustos.</div>
+
+<hr>
+
+<h2>Por baixo do capô: o que o Docker fez</h2>
+<p>Quando a Ana rodou aquele <code>docker run</code> longo, o Docker Engine trabalhou bastante nos bastidores. Dá para ver o resultado com <code>docker inspect</code> — ele devolve um JSON enorme com todos os detalhes do container:</p>
+<pre class="term">$ docker inspect meu-site --format '{{json .Mounts}}' | python3 -m json.tool
+[
+    {
+        "Type": "bind",
+        "Source": "/home/ana/site",
+        "Destination": "/usr/share/nginx/html",
+        "Mode": "ro",
+        "RW": false
+    }
+]
+
+$ docker inspect meu-site --format '{{json .NetworkSettings.Ports}}'
+{"80/tcp":[{"HostIp":"0.0.0.0","HostPort":"8080"}]}</pre>
+<p>Traduzindo: o inspect confirma que existe um mount do tipo <code>bind</code>, da pasta <code>/home/ana/site</code> do host para <code>/usr/share/nginx/html</code> do container, em modo somente leitura (<code>"RW": false</code>); e que a porta 80/tcp do container está publicada na 8080 do host em todas as interfaces. A aula <a href="docker-inspect.html">docker inspect a fundo</a> mostra outros usos do comando.</p>
+<p>Também dá para <strong>entrar dentro do container</strong> e olhar a pasta montada por dentro — como se fosse um segundo computador:</p>
+<pre class="term">$ docker exec meu-site ls -la /usr/share/nginx/html
+total 16
+-rw-r--r-- 1 ana ana  612 Nov 24 12:00 index.html
+
+$ docker exec meu-site cat /usr/share/nginx/html/index.html | grep h1
+  &lt;h1&gt;Agora com título novo! 🐳&lt;/h1&gt;
+
+$ docker exec meu-site sh -c 'echo "tentando escrever..." > /usr/share/nginx/html/teste.txt'
+sh: can't create /usr/share/nginx/html/teste.txt: Read-only file system   « o :ro funcionando!</pre>
+<p>Repare na última linha: a escrita falhou com <code>Read-only file system</code> — é o <code>:ro</code> protegendo a pasta da Ana. Sem o <code>:ro</code>, o container conseguiria escrever (e apagar!) arquivos do host — por isso a flag é padrão em sites estáticos.</p>
+
+<hr>
+
+<h2>Variantes do comando (e quando usar cada uma)</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Situação</th><th>Comando</th><th>Por quê</th></tr>
+<tr><td>Desenvolver o site (editar ao vivo)</td><td><code>docker run -d -p 8080:80 -v $(pwd):/usr/share/nginx/html:ro --name meu-site nginx:alpine</code></td><td>Bind mount: cada edição no host aparece na hora.</td></tr>
+<tr><td>Publicar só para o próprio computador</td><td><code>… -p 127.0.0.1:8080:80 …</code></td><td>Só o navegador da máquina acessa; ninguém da rede entra.</td></tr>
+<tr><td>Porta alta qualquer no host</td><td><code>… -p 8080:80 …</code> ou <code>-P</code> (maiúsculo)</td><td><code>-P</code> escolhe uma porta automática do host para a 80 do container (aparece no <code>docker ps</code>).</td></tr>
+<tr><td>Teste rápido, container descartável</td><td><code>docker run --rm -p 8080:80 -v $(pwd):/usr/share/nginx/html:ro nginx:alpine</code></td><td>O <code>--rm</code> apaga o container ao parar — bom para testes, ruim se você quer inspecionar depois.</td></tr>
+<tr><td>Site pronto para produção</td><td>Dockerfile com <code>COPY . /usr/share/nginx/html</code> + build</td><td>A imagem carrega o site dentro dela: imutável e rastreável.</td></tr>
+</table>
+</div>
+
+<div class="mc" data-answer="2">
+<p class="mc-q">Por que o site da Ana aparece na hora depois de editar o <code>index.html</code>, sem rodar <code>docker build</code> de novo?</p>
+<label><input type="radio" name="p1q1"> Porque o Nginx baixa o arquivo da internet a cada acesso.</label>
+<label><input type="radio" name="p1q1"> Porque a pasta do host está montada dentro do container com <code>-v</code> (bind mount), e o Nginx lê o arquivo direto do disco.</label>
+<label><input type="radio" name="p1q1"> Porque o Docker atualiza a imagem automaticamente quando o arquivo muda.</label>
+<label><input type="radio" name="p1q1"> Porque o navegador guarda uma cópia editável da página.</label>
+</div>
+
+<div class="mc" data-answer="3">
+<p class="mc-q">No comando <code>-p 8080:80</code>, qual número é a porta do <strong>seu computador</strong> (host) e qual é a do container?</p>
+<label><input type="radio" name="p1q2"> 80 é do host e 8080 é do container.</label>
+<label><input type="radio" name="p1q2"> As duas são do container.</label>
+<label><input type="radio" name="p1q2"> 8080 é do host e 80 é do container (formato HOST:CONTAINER).</label>
+<label><input type="radio" name="p1q2"> Não importa a ordem, o Docker descobre sozinho.</label>
+</div>
+
+<hr>
+
+<h2>Desafio extra (5 minutos)</h2>
+<p>Acrescente um segundo arquivo ao site, <code>sobre.html</code>, e um link no <code>index.html</code> apontando para ele. Recarregue o navegador: o Nginx serve o arquivo novo <strong>sem nenhum comando novo</strong> — porque a pasta inteira está montada, não só o index. Depois adicione uma subpasta <code>css/</code> com um <code>style.css</code> e referencie no HTML. Tudo aparece na hora.</p>
+
+<hr>
+
+<h2>Checklist do projeto 1</h2>
+<ul>
+  <li>☐ Criei a pasta <code>~/site</code> com o <code>index.html</code> dentro.</li>
+  <li>☐ Rodei o <code>docker run -d -p 8080:80 -v $(pwd):/usr/share/nginx/html:ro --name meu-site nginx:alpine</code> <strong>de dentro da pasta</strong>.</li>
+  <li>☐ O <code>docker ps</code> mostrou <code>meu-site</code> com <code>0.0.0.0:8080->80/tcp</code>.</li>
+  <li>☐ Abri <code>http://localhost:8080</code> e vi a minha página (não o "Welcome to nginx!").</li>
+  <li>☐ Testei com <code>curl -s http://localhost:8080</code> e vi os logs com <code>docker logs meu-site</code>.</li>
+  <li>☐ Editei o HTML e a mudança apareceu na hora (bind mount funcionando).</li>
+  <li>☐ Limpei tudo: <code>docker stop meu-site</code> + <code>docker rm meu-site</code>, e o <code>docker ps -a</code> ficou vazio.</li>
+</ul>
+
+<hr>
+
+<h2>Resumo</h2>
+<ul>
+  <li>A imagem <code>nginx:alpine</code> serve os arquivos de <code>/usr/share/nginx/html</code> dentro do container.</li>
+  <li>Com <code>-v $(pwd):/usr/share/nginx/html:ro</code> (bind mount), a pasta do host aparece dentro do container — e com <code>:ro</code> o container só lê.</li>
+  <li><code>-p 8080:80</code> publica a porta 80 do container na 8080 do host (formato <code>HOST:CONTAINER</code>); o <code>docker ps</code> mostra isso na coluna PORTS.</li>
+  <li>Graças ao bind mount, editar o arquivo no host reflete na hora no site — sem rebuild. Em produção, o caminho é copiar o site para dentro da imagem com <code>COPY</code>.</li>
+  <li>Limpeza: <code>docker stop</code> → <code>docker rm</code> (remover rodando dá erro; use <code>-f</code> só quando tiver certeza).</li>
+  <li>Porta ocupada dá <code>port is already allocated</code> — troque a porta do host ou apague o container que está usando ela.</li>
+</ul>
+
+<div class="tip"><strong>Próxima aula:</strong> <a href="projeto-api-node.html">API Node.js com Dockerfile</a> — agora em vez de servir um arquivo pronto, vamos empacotar uma aplicação de verdade numa imagem.</div>
+
+</div>
+</main>
+</div>
+<script src="assets/site.js?v=4"></script>
+</body>
+</html>

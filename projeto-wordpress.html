@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Projeto 4: WordPress + MySQL com Docker Compose | Guia Docker</title>
+<meta name="description" content="Projeto passo a passo completo: a Ana instala um WordPress de verdade no notebook dela usando só Docker Compose — sem instalar PHP, Apache nem MySQL na máquina. docker-compose.yml com os serviços wordpress e mysql:8.0, variáveis WORDPRESS_DB_* e MYSQL_* comentadas, volumes nomeados que persistem os dados, porta 8080, assistente de instalação no navegador, compose ps/logs, teste de persistência (down + up), backup do volume com tar e erros reais (porta ocupada, Error establishing a database connection). Missões no simulador.">
+<link rel="stylesheet" href="assets/style.css?v=4">
+<script>try{var t=localStorage.getItem("tema");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<meta http-equiv="Cache-Control" content="no-store, must-revalidate">
+<script>try{history.scrollRestoration="manual"}catch(e){}(function(){var n=0;function t(){window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;if(++n<60)setTimeout(t,50)}t();window.addEventListener("pagehide",function(){window.scrollTo(0,0);document.documentElement.scrollTop=0;});window.addEventListener("pageshow",function(){window.scrollTo(0,0)});window.addEventListener("load",function(){window.scrollTo(0,0)});})();document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(a){var h=a.getAttribute("href")||"";if(/[.]html($|[?#])/.test(h)&&a.host===location.host){window.scrollTo(0,0);document.documentElement.scrollTop=0;}}});</script>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" id="sidebar" aria-label="Tópicos"></nav>
+<main class="main">
+<div class="content">
+
+<div class="pager"></div>
+
+<h1>Projeto 4: <span class="hl">WordPress</span> + MySQL</h1>
+
+<p class="intro">A Ana quer um blog para publicar os resumos da faculdade, mas não quer sujar o notebook instalando PHP, Apache e MySQL na mão (e depois descobrir que a versão do PHP quebrou o WordPress). Com Docker Compose ela descreve dois serviços — <code>wordpress</code> e <code>mysql</code> — e em minutos tem um WordPress completo rodando em <code>http://localhost:8080</code>, com os dados guardados em volumes que sobrevivem a qualquer <code>down</code>.</p>
+
+<div class="note">
+<strong>Você vai aprender</strong>
+<ul>
+  <li>Por que WordPress + banco é o exemplo clássico de Compose: dois containers que precisam um do outro.</li>
+  <li>Subir serviços com imagens oficiais grandes (<code>wordpress:latest</code>, <code>mysql:8.0</code>) sem escrever Dockerfile.</li>
+  <li>Configurar os dois containers <strong> só com variáveis de ambiente</strong> (<code>WORDPRESS_DB_*</code> e <code>MYSQL_*</code>).</li>
+  <li>Volumes nomeados para persistência: <code>down</code> e <code>up</code> de novo sem perder nada.</li>
+  <li>O assistente de instalação do WordPress no navegador, passo a passo.</li>
+  <li>Como fazer backup do volume do banco com um container auxiliar (<code>tar</code>).</li>
+  <li>Erros reais: porta ocupada e "Error establishing a database connection".</li>
+</ul>
+</div>
+
+<hr>
+
+<h2>A ideia: dois containers, uma conversa só deles</h2>
+<p>O WordPress precisa de duas coisas para funcionar: um <strong>servidor web com PHP</strong> (a imagem oficial <code>wordpress</code> já traz Apache + PHP configurados) e um <strong>banco MySQL</strong>. A imagem do WordPress, na primeira subida, lê variáveis de ambiente e configura a conexão com o banco sozinho — a Ana só precisa dizer <em>onde</em> está o banco e quais são as credenciais.</p>
+<pre class="file">navegador
+   │  http://localhost:8080
+   ▼
+┌──────────────────┐  WORDPRESS_DB_HOST=db:3306   ┌──────────────┐
+│  wordpress:80    │ ───────────────────────────► │  mysql:3306  │
+│  (Apache + PHP)  │     usuário/senha/banco      │  (MySQL 8)   │
+│  volume wp-…    │                              │  volume dbdata│
+└──────────────────┘                              └──────────────┘
+        ▲ os dois na rede "wordpress_default" criada pelo Compose ▲</pre>
+<p>O <code>db:3306</code> no meio é o nome do serviço do banco + a porta padrão do MySQL — de novo, o DNS interno do Compose resolve <code>db</code> para o IP do container do MySQL. A aula <a href="containers-conversando.html">Containers se comunicando por nome</a> explica essa mágica.</p>
+
+<hr>
+
+<h2>Passo 1: a pasta e o docker-compose.yml</h2>
+<pre class="term">$ mkdir -p ~/wordpress
+$ cd ~/wordpress</pre>
+<p>Crie o arquivo abaixo. Cada bloco está comentado:</p>
+<pre class="file" data-file="wordpress/docker-compose.yml"># wordpress/docker-compose.yml
+services:
+
+  wordpress:                      # o site em si
+    image: wordpress:latest       # imagem oficial: Apache + PHP + WordPress
+    ports:
+      - "8080:80"                 # host 8080 → container 80 (Apache)
+    environment:
+      WORDPRESS_DB_HOST: db:3306  # onde está o MySQL: serviço "db", porta 3306
+      WORDPRESS_DB_USER: wordpress
+      WORDPRESS_DB_PASSWORD: senha_do_wp
+      WORDPRESS_DB_NAME: wordpress
+    volumes:
+      - wp-content:/var/www/html/wp-content   # temas, plugins e uploads persistem
+    depends_on:
+      - db                        # sobe depois do banco (só ordem de subida)
+
+  db:                             # o banco de dados
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: senha_do_root   # senha do root (1ª subida)
+      MYSQL_DATABASE: wordpress            # cria esse banco vazio
+      MYSQL_USER: wordpress                # cria esse usuário…
+      MYSQL_PASSWORD: senha_do_wp          # …com essa senha (a mesma do WordPress!)
+    volumes:
+      - dbdata:/var/lib/mysql     # dados do MySQL persistem aqui
+
+volumes:
+  wp-content:                     # declara os volumes nomeados usados acima
+  dbdata:</pre>
+<p>Repare no detalhe que faz as credenciais "baterem": o serviço <code>db</code> cria o usuário <code>wordpress</code> com a senha <code>senha_do_wp</code>, e o serviço <code>wordpress</code> usa exatamente essas mesmas credenciais nas variáveis <code>WORDPRESS_DB_*</code>. Se uma letra differser entre os dois lados, o WordPress não conecta no banco.</p>
+
+<div class="warn"><strong>Essas senhas são de exemplo.</strong> Em algo sério, use senhas fortes e ponha tudo no <code>.env</code> (como no projeto 3): <code>WORDPRESS_DB_PASSWORD: ${WP_DB_PASSWORD}</code> e <code>MYSQL_PASSWORD: ${WP_DB_PASSWORD}</code>, com o <code>.env</code> no <code>.gitignore</code>. Aqui usamos texto puro porque é um WordPress local de estudo.</div>
+
+<hr>
+
+<h2>Passo 2: suba os dois containers</h2>
+<pre class="term" data-cwd="~/wordpress">$ docker compose up -d
+[+] Running 5/5
+ ✔ Network wordpress_default          Created   0.1s
+ ✔ Volume "wordpress_wp-content"      Created   0.0s
+ ✔ Volume "wordpress_dbdata"          Created   0.0s
+ ✔ Container wordpress-db-1           Started   8.4s
+ ✔ Container wordpress-wordpress-1    Started   6.1s
+
+$ docker compose ps
+NAME                    IMAGE            COMMAND                  SERVICE     CREATED         STATUS         PORTS
+wordpress-wordpress-1   wordpress:latest "docker-entrypoint.s…"   wordpress   30 seconds ago  Up 29 seconds  0.0.0.0:8080->80/tcp
+wordpress-db-1          mysql:8.0        "docker-entrypoint.s…"   db          30 seconds ago  Up 29 seconds  3306/tcp, 33060/tcp</pre>
+<p>Observe: o <code>db</code> mostra <code>3306/tcp</code> <em>sem</em> <code>0.0.0.0:…</code> — a porta existe só dentro da rede interna do Compose, não está publicada no host. Mais uma vez: banco não deve ficar exposto.</p>
+<p>Os logs mostram o MySQL criando o banco na primeira subida:</p>
+<pre class="term">$ docker compose logs db | tail -3
+... [Note] [MY] - ready for connections. Version: '8.0.40'  socket: '/var/run/mysqld/mysqld.sock' port: 3306</pre>
+
+<div class="try" data-goal="Started" data-solucao="docker compose up -d">
+<p class="try-task"><strong>Missão:</strong> suba o WordPress + MySQL com um comando: rode <code>docker compose up -d</code> e confira os containers <code>Started</code>.</p>
+</div>
+
+<div class="try" data-goal="CONTAINER ID" data-solucao="docker compose ps">
+<p class="try-task"><strong>Missão:</strong> liste os serviços do projeto: rode <code>docker compose ps</code>.</p>
+</div>
+
+<hr>
+
+<h2>Passo 3: instale o WordPress no navegador (o famoso "5 minutos")</h2>
+<p>Abra <strong>http://localhost:8080</strong>. Como o banco está vazio, o WordPress mostra o assistente de instalação. No navegador da Ana:</p>
+<ol class="passo">
+  <li>A tela de idioma aparece → escolha <strong>Português do Brasil</strong> → Continuar.</li>
+  <li>O WordPress avisa que precisa dos dados do banco → clique em <strong>Vamos lá!</strong></li>
+  <li>Ele já preencheu tudo sozinho (graças às variáveis <code>WORDPRESS_DB_*</code>) → <strong>Enviar</strong>. Se aparecer "Isso significa que a conexão com o banco de dados foi estabelecida"… na verdade a mensagem é "Tudo certo! Já podemos instalar…" → <strong>Instalar agora</strong>.</li>
+  <li>Preencha: <strong>Título do site</strong> (ex.: "Blog da Ana"), <strong>nome de usuário</strong>, <strong>senha</strong>, <strong>seu e-mail</strong> → <strong>Instalar WordPress</strong>.</li>
+  <li>"Sucesso!" → clique em <strong>Acessar</strong> e faça login com o usuário e senha que acabou de criar.</li>
+</ol>
+<p>Pelo terminal dá para confirmar que o site responde (na primeira vez ele redireciona para a instalação):</p>
+<pre class="term">$ curl -sI http://localhost:8080 | head -1
+HTTP/1.1 302 Found   « redireciona para /wp-admin/install.php na primeira vez
+$ curl -sI http://localhost:8080/wp-admin/ | head -1
+HTTP/1.1 302 Found   « depois de instalado, /wp-admin/ pede login</pre>
+<p>Depois de instalar, a home responde <code>200 OK</code> e o <code>curl -s http://localhost:8080</code> mostra o HTML do tema.</p>
+
+<hr>
+
+<h2>Passo 4: seus dados estão nos volumes (teste de persistência)</h2>
+<p>A Ana publica um post, instala um tema e faz upload de uma imagem. Onde isso ficou? Nos volumes <code>wp-content</code> (arquivos do site) e <code>dbdata</code> (banco). Agora o teste de fogo — derrube tudo e suba de novo:</p>
+<pre class="term" data-cwd="~/wordpress">$ docker compose down
+[+] Running 3/3
+ ✔ Container wordpress-wordpress-1   Removed
+ ✔ Container wordpress-db-1          Removed
+ ✔ Network wordpress_default         Removed
+
+$ docker volume ls
+DRIVER    VOLUME NAME
+local     wordpress_dbdata
+local     wordpress_wp-content     « os volumes continuam aqui
+
+$ docker compose up -d
+...
+ ✔ Container wordpress-db-1           Started
+ ✔ Container wordpress-wordpress-1    Started
+
+$ curl -sI http://localhost:8080 | head -1
+HTTP/1.1 200 OK   « site no ar, JÁ INSTALADO — não pede mais o assistente</pre>
+<p>O post, o tema e a imagem continuam lá, porque não estavam dentro dos containers (que foram apagados), e sim nos volumes. <strong>Container é descartável; volume é permanente.</strong></p>
+<div class="warn"><strong>Para apagar de verdade (dados incluídos):</strong> use <code>docker compose down -v</code>. O <code>-v</code> remove também os volumes nomeados declarados no YAML. Sem o <code>-v</code>, os volumes ficam. Pense duas vezes antes de usar <code>-v</code> num banco de dados.</div>
+
+<div class="try" data-goal="dbdata" data-solucao="docker volume create dbdata">
+<p class="try-task"><strong>Missão:</strong> crie um volume nomeado como os do projeto: rode <code>docker volume create dbdata</code> e depois <code>docker volume ls</code> para vê-lo na lista.</p>
+</div>
+
+<hr>
+
+<h2>Passo 5: backup dos dados (bônus prático)</h2>
+<p>Volumes são pastas no host (em <code>/var/lib/docker/volumes/…</code>), então dá para fazer backup deles como qualquer pasta — o truque é usar um container auxiliar com a pasta montada:</p>
+<pre class="term" data-cwd="~/wordpress">$ docker run --rm -v wordpress_dbdata:/dados -v $(pwd):/backup alpine tar czf /backup/dbdata.tar.gz -C /dados .
+$ ls -lh dbdata.tar.gz
+-rw-r--r-- 1 ana ana 12M Nov 24 13:00 dbdata.tar.gz</pre>
+<p>Para restaurar, é o caminho inverso: suba um container com o volume vazio montado e o backup montado, e rode o <code>tar xzf</code>. E para inspecionar um volume sem saber o nome exato, <code>docker volume inspect wordpress_dbdata</code> mostra o <code>Mountpoint</code> no host (precisa de sudo para ler direto lá).</p>
+
+<hr>
+
+<h2>As variáveis usadas, resumidas</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Variável</th><th>Serviço</th><th>Para que serve</th></tr>
+<tr><td><code>WORDPRESS_DB_HOST</code></td><td><code>wordpress</code></td><td>Onde o WordPress encontra o MySQL: <code>db:3306</code> = serviço <code>db</code>, porta 3306.</td></tr>
+<tr><td><code>WORDPRESS_DB_USER</code> / <code>WORDPRESS_DB_PASSWORD</code> / <code>WORDPRESS_DB_NAME</code></td><td><code>wordpress</code></td><td>Credenciais e nome do banco que o WordPress vai usar na conexão.</td></tr>
+<tr><td><code>MYSQL_ROOT_PASSWORD</code></td><td><code>db</code></td><td>Senha do usuário <code>root</code> do MySQL — obrigatória na primeira subida.</td></tr>
+<tr><td><code>MYSQL_DATABASE</code></td><td><code>db</code></td><td>Cria esse banco vazio na primeira subida.</td></tr>
+<tr><td><code>MYSQL_USER</code> / <code>MYSQL_PASSWORD</code></td><td><code>db</code></td><td>Cria o usuário que o WordPress vai usar (tem que bater com <code>WORDPRESS_DB_USER/PASSWORD</code>).</td></tr>
+</table>
+</div>
+<p>Essas variáveis são lidas pelos <em>scripts de entrada</em> das imagens oficiais na primeira inicialização — é o padrão de configuração de imagens no Docker: em vez de editar arquivos de configuração na mão, você passa variáveis de ambiente (a aula <a href="variaveis-ambiente.html">Variáveis de ambiente</a> generaliza).</p>
+
+<hr>
+
+<h2>Erros comuns neste projeto</h2>
+<div class="warn"><strong>Porta 8080 ocupada:</strong>
+<pre class="term">$ docker compose up -d
+docker: Error response from daemon: Bind for 0.0.0.0:8080 failed: port is already allocated</pre>
+Outro processo (quem sabe o projeto 1 esquecido?) está usando a 8080. Solução rápida: mude o <code>ports:</code> do serviço <code>wordpress</code> para <code>"8081:80"</code> e acesse <code>localhost:8081</code>. Para descobrir quem usa a porta: <code>sudo ss -ltnp | grep 8080</code>.</div>
+
+<div class="warn"><strong>"Error establishing a database connection":</strong> na primeira subida o MySQL demora alguns segundos para criar o banco e o usuário; se o container do WordPress tenta conectar antes, ele mostra essa tela de erro. Solução: espere ~10 segundos e recarregue a página, ou rode <code>docker compose restart wordpress</code>. Se continuar, confira se <code>WORDPRESS_DB_PASSWORD</code> é exatamente igual ao <code>MYSQL_PASSWORD</code>.</div>
+
+<div class="warn"><strong>O container do banco fica "restarting":</strong> geralmente a senha do root está vazia (<code>MYSQL_ROOT_PASSWORD</code> faltando gera o aviso <code>WARN: The "MYSQL_ROOT_PASSWORD" variable is not set</code> e o MySQL recusa subir sem senha de root). Preencha a variável e rode <code>docker compose up -d</code> de novo.</div>
+
+<hr>
+
+<h2>Variantes que valem a pena tentar</h2>
+<p>Depois que o básico funciona, estas são as variações que os tutoriais adoram — todas são mudanças pequenas no mesmo YAML:</p>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Quero…</th><th>Como faz</th></tr>
+<tr><td>…ver o banco pelo navegador (phpMyAdmin)</td><td>Adicione um 3º serviço: <code>phpmyadmin:</code> com <code>image: phpmyadmin</code>, <code>environment: PMA_HOST: db</code> e <code>ports: "8081:80"</code>. Acesse <code>localhost:8081</code> e entre com <code>wordpress</code>/<code>senha_do_wp</code>.</td></tr>
+<tr><td>…usar MariaDB em vez de MySQL</td><td>Troque <code>image: mysql:8.0</code> por <code>image: mariadb:11</code> e as variáveis <code>MYSQL_*</code> continuam as mesmas (MariaDB é compatível).</td></tr>
+<tr><td>…senhas fora do YAML</td><td>Crie um <code>.env</code> na pasta com <code>WP_DB_PASSWORD=…</code> etc. e troque no YAML por <code>${WP_DB_PASSWORD}</code>. Adicione <code>.env</code> ao <code>.gitignore</code>.</td></tr>
+<tr><td>…outra porta no host</td><td>Mude só o número à esquerda: <code>"8090:80"</code> → acesse <code>localhost:8090</code>. O lado direito (80) é o Apache dentro do container e não muda.</td></tr>
+<tr><td>…ver os logs do Apache/PHP</td><td><code>docker compose logs -f wordpress</code> — cada acesso ao site aparece lá.</td></tr>
+</table>
+</div>
+
+<div class="mc" data-answer="2">
+<p class="mc-q">A Ana deu <code>docker compose down</code> e depois <code>docker compose up -d</code> no projeto do WordPress. O site voltou instalado, com o post que ela tinha publicado. Por quê?</p>
+<label><input type="radio" name="wqq1"> Porque os containers não foram realmente apagados.</label>
+<label><input type="radio" name="wqq1"> Porque os dados ficam nos volumes nomeados (<code>dbdata</code> e <code>wp-content</code>), que o <code>down</code> sem <code>-v</code> não apaga.</label>
+<label><input type="radio" name="wqq1"> Porque o navegador guardou a página em cache.</label>
+<label><input type="radio" name="wqq1"> Porque a imagem <code>wordpress</code> já vem com o site instalado.</label>
+</div>
+
+<div class="mc" data-answer="3">
+<p class="mc-q">No <code>WORDPRESS_DB_HOST: db:3306</code>, o que significa <code>db</code>?</p>
+<label><input type="radio" name="wqq2"> O IP 172.x do banco, que muda a cada subida.</label>
+<label><input type="radio" name="wqq2"> Um domínio público na internet.</label>
+<label><input type="radio" name="wqq2"> O nome do serviço <code>db</code> no docker-compose.yml, que o DNS interno do Compose resolve para o IP do container do MySQL.</label>
+<label><input type="radio" name="wqq2"> A porta 3306 written de trás para frente.</label>
+</div>
+
+<hr>
+
+<h2>Desafio extra</h2>
+<ol class="passo">
+  <li>Publique um post no WordPress e faça upload de uma imagem pelo admin.</li>
+  <li>Derrube com <code>docker compose down</code> e suba de novo — confirme que o post e a imagem continuaram (estão no volume <code>wp-content</code>).</li>
+  <li>Olhe os arquivos do tema dentro do volume: <code>docker run --rm -v wordpress_wp-content:/dados alpine ls /dados</code>.</li>
+  <li>Faça o backup do volume com o comando <code>tar</code> do passo 5.</li>
+</ol>
+
+<hr>
+
+<h2>Checklist do projeto 4</h2>
+<ul>
+  <li>☐ Criei <code>~/wordpress/docker-compose.yml</code> com os serviços <code>wordpress</code> e <code>db</code>.</li>
+  <li>☐ As credenciais batem dos dois lados (<code>WORDPRESS_DB_PASSWORD</code> = <code>MYSQL_PASSWORD</code>).</li>
+  <li>☐ <code>docker compose up -d</code> criou rede + 2 volumes + 2 containers <code>Started</code>.</li>
+  <li>☐ <code>docker compose ps</code> mostrou os dois serviços; o <code>db</code> sem porta publicada no host.</li>
+  <li>☐ Instalei o WordPress em <code>localhost:8080</code> pelo assistente do navegador.</li>
+  <li>☐ Publiquei um post, derrubei com <code>down</code>, subi de novo e o post continuava (volumes persistem).</li>
+  <li>☐ Fiz backup do volume do banco com <code>tar</code> num container auxiliar.</li>
+  <li>☐ Limpei no final: <code>docker compose down</code> (guardei os volumes) ou <code>down -v</code> (apaguei tudo).</li>
+</ul>
+
+<hr>
+
+<h2>Resumo</h2>
+<ul>
+  <li>WordPress + MySQL é o exemplo clássico de Compose: dois containers oficiais, configurados só por variáveis de ambiente, na mesma rede interna.</li>
+  <li>As variáveis <code>MYSQL_*</code> criam banco/usuário na 1ª subida; as <code>WORDPRESS_DB_*</code> dizem ao WordPress onde conectar (<code>db:3306</code>, pelo nome do serviço).</li>
+  <li>Os dados ficam nos volumes nomeados (<code>dbdata</code>, <code>wp-content</code>): <code>down</code> não apaga; só <code>down -v</code> apaga.</li>
+  <li>Banco sem <code>ports:</code> não é alcançável de fora da rede do Compose — proteção de graça.</li>
+  <li>Erros comuns: porta do host ocupada (mude o lado esquerdo do <code>ports:</code>) e "Error establishing a database connection" (espere o MySQL subir / confira as senhas).</li>
+  <li>Backup de volume = montar o volume num container auxiliar e rodar <code>tar</code>.</li>
+</ul>
+
+<div class="tip"><strong>Próxima aula:</strong> <a href="projeto-python-flask.html">API Python Flask com PostgreSQL</a> — o último projeto: uma API em Python que consulta um banco de verdade dentro do Compose.</div>
+
+</div>
+</main>
+</div>
+<script src="assets/site.js?v=4"></script>
+</body>
+</html>

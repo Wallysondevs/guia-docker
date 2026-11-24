@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Instalar o Docker — Linux, macOS e Windows (WSL2) | Guia Docker</title>
+<meta name="description" content="Como instalar o Docker Engine no Ubuntu/Debian, Arch, Fedora, macOS (Docker Desktop) e Windows (WSL2 + Docker Desktop): o passo a passo completo do repositório oficial, o que é cada pacote (docker-ce, containerd, buildx, compose-plugin), como verificar com docker --version e docker run hello-world, o grupo docker e o erro 'permission denied', e o erro 'Cannot connect to the Docker daemon'.">
+<link rel="stylesheet" href="assets/style.css?v=4">
+<script>try{var t=localStorage.getItem("tema");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<meta http-equiv="Cache-Control" content="no-store, must-revalidate">
+<script>try{history.scrollRestoration="manual"}catch(e){}(function(){var n=0;function t(){window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;if(++n<60)setTimeout(t,50)}t();window.addEventListener("pagehide",function(){window.scrollTo(0,0);document.documentElement.scrollTop=0;});window.addEventListener("pageshow",function(){window.scrollTo(0,0)});window.addEventListener("load",function(){window.scrollTo(0,0)});})();document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(a){var h=a.getAttribute("href")||"";if(/[.]html($|[?#])/.test(h)&&a.host===location.host){window.scrollTo(0,0);document.documentElement.scrollTop=0;}}});</script>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" id="sidebar" aria-label="Tópicos"></nav>
+<main class="main">
+<div class="content">
+
+<div class="pager"></div>
+
+<h1>Instalar o <span class="hl">Docker</span></h1>
+
+<p class="intro">A forma oficial e mais simples de instalar em <strong>qualquer sistema</strong> é o <strong>Docker Desktop</strong> (macOS, Windows e até Linux). Em servidores Linux, o recomendado é instalar só o <strong>Docker Engine</strong> pelo repositório oficial — é mais leve, sem interface gráfica. Esta aula mostra os dois caminhos, passo a passo, e como conferir se deu certo.</p>
+
+<div class="note">
+<strong>Você vai aprender</strong>
+<ul>
+  <li>Instalar no <strong>Ubuntu/Debian</strong>, <strong>Arch</strong>, <strong>Fedora</strong> (Engine puro, via repositório oficial).</li>
+  <li>Instalar no <strong>macOS</strong> e <strong>Windows</strong> (Docker Desktop + WSL2).</li>
+  <li>O que é cada pacote instalado (<code>docker-ce</code>, <code>containerd.io</code>, <code>buildx</code>, <code>compose-plugin</code>…).</li>
+  <li>Verificar a instalação: <code>docker --version</code> e <code>docker run hello-world</code>.</li>
+  <li>O pós-instalação no Linux: grupo <code>docker</code> e o erro <code>permission denied</code>.</li>
+  <li>O erro <code>Cannot connect to the Docker daemon</code> (daemon parado) e como ligar o serviço.</li>
+</ul>
+</div>
+
+<hr>
+
+<h2>Antes de começar: Engine ou Desktop?</h2>
+<p>Há duas formas de ter o Docker na máquina. Pense assim: o <strong>Docker Engine</strong> é o motor puro (só linha de comando, ideal para servidores e para o WSL2 no Windows). O <strong>Docker Desktop</strong> é o motor + um pacote com interface gráfica, atualizações automáticas e integração fácil — ideal para notebook (macOS/Windows) de desenvolvimento.</p>
+
+<div class="table-wrap">
+<table class="ref">
+<tr><th></th><th>Docker Engine puro</th><th>Docker Desktop</th></tr>
+<tr><td><strong>Onde usar</strong></td><td>Servidores Linux, WSL2</td><td>Notebooks macOS/Windows (e Linux também)</td></tr>
+<tr><td><strong>Interface gráfica</strong></td><td>Não tem (só terminal)</td><td>Tem (Dashboard com containers, imagens, volumes)</td></tr>
+<tr><td><strong>Peso</strong></td><td>Leve (~100MB)</td><td>Mais pesado (VM Linux interna no macOS/Windows)</td></tr>
+<tr><td><strong>Instalação</strong></td><td>Repositório oficial (abaixo)</td><td>Baixar o instalador em docker.com</td></tr>
+<tr><td><strong>Grátis?</strong></td><td>Sim, 100% open source</td><td>Grátis para uso pessoal, education e pequenas empresas</td></tr>
+</table>
+</div>
+
+<p>Nesta aula: <strong>Linux → Engine puro</strong> (passo a passo oficial); <strong>macOS/Windows → Docker Desktop</strong>.</p>
+
+<hr>
+
+<h2>Linux (Ubuntu / Debian) — Docker Engine</h2>
+<p>A Ana usa Ubuntu no <code>notebook</code> dela. A instalação oficial adiciona o <strong>repositório da própria Docker</strong> ao apt (para receber atualizações automáticas) e instala cinco pacotes. Cada comando abaixo é explicado depois:</p>
+<pre class="term">$ sudo apt update
+$ sudo apt install ca-certificates curl
+$ sudo install -m 0755 -d /etc/apt/keyrings
+$ sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+$ sudo chmod a+r /etc/apt/keyrings/docker.asc
+$ echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release &amp;&amp; echo "$VERSION_CODENAME") stable" | sudo tee /etc/apt/sources.list.d/docker.list &gt; /dev/null
+$ sudo apt update
+$ sudo apt install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin</pre>
+
+<dl class="anatomy">
+  <dt>ca-certificates curl</dt><dd>Ferramentas para baixar arquivos com HTTPS e verificar certificados — o apt precisa delas para falar com o repositório da Docker com segurança.</dd>
+  <dt>/etc/apt/keyrings/docker.asc</dt><dd>A <strong>chave pública</strong> da Docker, baixada do site oficial. Ela serve para o apt conferir que os pacotes que você baixa foram assinados pela Docker (e não por um impostor).</dd>
+  <dt>sources.list.d/docker.list</dt><dd>O endereço do repositório oficial, gravado na configuração do apt. O <code>$VERSION_CODENAME</code> descobre sozinho se é <code>noble</code>, <code>jammy</code> etc.</dd>
+  <dt>docker-ce</dt><dd>O <strong>Engine</strong> em si ("Community Edition"): o daemon <code>dockerd</code> e a CLI. É o coração da instalação.</dd>
+  <dt>docker-ce-cli</dt><dd>O comando <code>docker</code> (em versões novas já vem junto com o <code>docker-ce</code>, mas o pacote garante).</dd>
+  <dt>containerd.io</dt><dd>O <strong>runtime</strong> de containers que o Docker usa por baixo (o dockerd conversa com ele).</dd>
+  <dt>docker-buildx-plugin</dt><dd>O plugin <code>docker buildx</code> — o construtor de imagens moderno (builds multi-plataforma, cache remoto).</dd>
+  <dt>docker-compose-plugin</dt><dd>O plugin <code>docker compose</code> (v2) — para subir vários containers com um arquivo YAML (nível 2 do guia).</dd>
+</dl>
+
+<p>Depois de instalar, ligue o serviço e faça ele iniciar sozinho no boot:</p>
+<pre class="term">$ sudo systemctl enable --now docker
+$ sudo systemctl status docker    « deve aparecer "active (running)"</pre>
+
+<hr>
+
+<h2>Linux (Arch)</h2>
+<pre class="term">$ sudo pacman -S docker docker-compose
+$ sudo systemctl enable --now docker</pre>
+<p>O pacote <code>docker</code> do repositório oficial do Arch já traz o Engine + CLI, e <code>docker-compose</code> é o plugin v2.</p>
+
+<h2>Linux (Fedora)</h2>
+<pre class="term">$ sudo dnf -y install dnf-plugins-core
+$ sudo dnf config-manager --add-repo https://download.docker.com/linux/fedora/docker-ce.repo
+$ sudo dnf install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+$ sudo systemctl enable --now docker</pre>
+
+<h2>Outras distribuições</h2>
+<p>Qualquer distro Linux serve (o Docker é só um serviço que fala com o kernel). A forma genérica está em <a href="https://docs.docker.com/engine/install/">docs.docker.com/engine/install</a> — escolha a sua distro na lista. Se a sua não estiver lá, dá para usar o <strong>script de conveniência</strong>: <code>curl -fsSL https://get.docker.com | sudo sh</code> (prático para testes e VMs; em produção, prefira o repositório oficial passo a passo).</p>
+
+<hr>
+
+<h2>macOS e Windows — Docker Desktop</h2>
+<p>Baixe o instalador em <a href="https://www.docker.com/products/docker-desktop/">docker.com/products/docker-desktop</a>, instale e abra o app. Pronto: o <code>docker</code> já funciona no terminal.</p>
+<p>No <strong>Windows</strong>, é preciso ter o <strong>WSL2</strong> ativo (o subsistema Linux do Windows) — o instalador do Docker Desktop cuida disso automaticamente na primeira execução; se pedir, rode <code>wsl --install</code> no PowerShell como administrador e reinicie.</p>
+<p>No <strong>macOS</strong>, o Desktop roda o Engine dentro de uma VM Linux interna (leve) — por isso o comando <code>docker</code> funciona igual no Terminal do Mac.</p>
+
+<div class="warning">
+<strong>Licença do Docker Desktop</strong>
+<p>O Docker Desktop é gratuito para uso pessoal, estudantil, emONGs e empresas pequenas (menos de 250 funcionários ou US$10M de receita). Empresa maior precisa de licença paga — nesse caso, no servidor Linux dá para usar só o Engine gratuito. Para aprender e usar em casa, não paga nada.</p>
+</div>
+
+<hr>
+
+<h2>Verificar a instalação</h2>
+<p>Fechou o terminal e abriu de novo (ou reiniciou)? Rode os dois comandos abaixo. O primeiro diz a versão; o segundo é o teste de fumaça oficial:</p>
+<pre class="term">$ docker --version
+Docker version 27.3.1, build ce12f7b
+$ docker run hello-world
+
+Hello from Docker!
+This message shows that your installation appears to be working correctly.
+
+To generate this message, Docker took the following steps:
+ 1. The Docker client contacted the Docker daemon.
+ 2. The Docker daemon pulled the "hello-world" image from the Docker Hub.
+ 3. The Docker daemon created a new container from that image.
+ 4. The Docker daemon streamed that output to the Docker client.</pre>
+
+<div class="try" data-goal="Docker version" data-solucao="docker --version">
+<p class="try-task"><strong>No simulador:</strong> rode <code>docker --version</code> para ver a versão que o guia imita.</p>
+</div>
+
+<p>Se o <code>docker --version</code> deu certo mas o <code>hello-world</code> não, o problema quase sempre é o daemon parado ou permissão — as duas seções abaixo.</p>
+
+<hr>
+
+<h2>Pós-instalação no Linux: o grupo docker</h2>
+<p>Em servidor Linux, depois de instalar, o seu usuário ainda não pode falar com o daemon. Teste:</p>
+<pre class="term">$ docker ps
+permission denied while trying to connect to the Docker daemon socket at unix:///var/run/docker.sock: Get "http://%2Fvar%2Frun%2Fdocker.sock/v1.27/containers/json": dial unix /var/run/docker.sock: connect: permission denied</pre>
+<p>A correção é colocar seu usuário no grupo <code>docker</code> (esse grupo pode criar containers, ou seja, tem poder de root na máquina):</p>
+<pre class="term">$ sudo usermod -aG docker $USER
+$ newgrp docker          « ou: saia e entre de novo na sessão (logout/login)
+$ docker ps
+CONTAINER ID   IMAGE   COMMAND   CREATED   STATUS   PORTS   NAMES</pre>
+
+<div class="warning"><strong>Segurança:</strong> o grupo <code>docker</code> dá poderes de root (quem manda no grupo docker manda no sistema, porque consegue montar a raiz do host dentro de um container). Em produção, prefira rodar o Docker como serviço e usar <code>sudo</code> só quando necessário, ou configure o <strong>rootless mode</strong> (Docker sem root, com socket do usuário).</div>
+
+<hr>
+
+<h2>Erro comum: "Cannot connect to the Docker daemon"</h2>
+<p>Esse erro quer dizer uma coisa só: a CLI está instalada, mas o <strong>serviço dockerd não está rodando</strong> (ou você não tem permissão no socket — caso anterior).</p>
+<pre class="term">$ docker ps
+Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?
+$ sudo systemctl start docker      « liga agora
+$ sudo systemctl enable docker     « liga sozinho no boot
+$ sudo systemctl status docker
+● docker.service - Docker Application Container Engine
+   Active: active (running)</pre>
+<p>No Docker Desktop (Mac/Windows), o equivalente é <strong>abrir o aplicativo</strong> — enquanto ele não estiver rodando (baleia na barra de menus), o comando dá esse erro.</p>
+
+<hr>
+
+<h2>Erros comuns na hora de instalar</h2>
+
+<div class="warning">
+<strong>"Package 'docker' has no installation candidate" (Ubuntu/Debian)</strong>
+<p>Você tentou <code>sudo apt install docker</code> (o pacote antigo da distro, que já não existe ou é outra coisa). A instalação correta é pelo repositório oficial, com os comandos desta aula — o pacote certo chama-se <code>docker-ce</code>.</p>
+</div>
+
+<div class="warning">
+<strong>"signature does not match" / erro de chave GPG</strong>
+<p>A chave em <code>/etc/apt/keyrings/docker.asc</code> está errada ou corrompida (acontece quando se copia o comando errado). Apague o arquivo e refaça o passo do <code>curl</code> exatamente como está acima.</p>
+</div>
+
+<div class="warning">
+<strong>Windows: "WSL2 installation is incomplete"</strong>
+<p>Rode <code>wsl --install</code> no PowerShell como administrador, reinicie o computador e abra o Docker Desktop de novo. Sem o WSL2 o Desktop não sobe.</p>
+</div>
+
+<div class="mc" data-answer="2">
+<p class="mc-q">No Ubuntu, depois de adicionar o repositório oficial, qual pacote instala o Docker Engine?</p>
+<label><input type="radio" name="q1"> <code>docker</code></label>
+<label><input type="radio" name="q1"> <code>docker-ce</code></label>
+<label><input type="radio" name="q1"> <code>docker.io</code></label>
+<label><input type="radio" name="q1"> <code>containerd</code> sozinho</label>
+</div>
+
+<div class="mc" data-answer="3">
+<p class="mc-q"><code>docker ps</code> responde "permission denied … docker.sock". O que fazer?</p>
+<label><input type="radio" name="q2"> Reinstalar o Docker inteiro</label>
+<label><input type="radio" name="q2"> Rodar tudo com <code>sudo</code> para sempre, sem mudar nada</label>
+<label><input type="radio" name="q2"> <code>sudo usermod -aG docker $USER</code> e trocar de sessão (newgrp/logout)</label>
+<label><input type="radio" name="q2"> Apagar o arquivo docker.sock</label>
+</div>
+
+<div class="mc" data-answer="1">
+<p class="mc-q">"Cannot connect to the Docker daemon" significa que…</p>
+<label><input type="radio" name="q3"> O serviço dockerd não está rodando (no Linux: <code>sudo systemctl start docker</code>)</label>
+<label><input type="radio" name="q3"> A internet caiu</label>
+<label><input type="radio" name="q3"> O comando <code>docker</code> não existe</label>
+<label><input type="radio" name="q3"> O disco está cheio</label>
+</div>
+
+<hr>
+
+<h2>Resumo</h2>
+<ul>
+  <li>Linux (servidor/WSL2): instale o <strong>Docker Engine</strong> pelo repositório oficial — pacote <code>docker-ce</code> + <code>docker-ce-cli</code> + <code>containerd.io</code> + plugins <code>buildx</code> e <code>compose</code>; depois <code>sudo systemctl enable --now docker</code>.</li>
+  <li>macOS/Windows: <strong>Docker Desktop</strong> (no Windows precisa do WSL2; o instalador cuida disso).</li>
+  <li>Teste de fumaça: <code>docker --version</code> e <code>docker run hello-world</code>.</li>
+  <li><code>permission denied</code> no socket → adicione o usuário ao grupo <code>docker</code> (<code>sudo usermod -aG docker $USER</code> + nova sessão). Cuidado: o grupo docker equivale a root.</li>
+  <li><code>Cannot connect to the Docker daemon</code> → o serviço está parado; ligue com <code>systemctl start docker</code> (ou abra o Docker Desktop).</li>
+  <li>Pacotes: <code>docker-ce</code> = Engine; <code>containerd.io</code> = runtime; <code>docker-buildx-plugin</code> = builds modernos; <code>docker-compose-plugin</code> = Compose v2.</li>
+</ul>
+
+<div class="tip"><strong>Próxima aula:</strong> <a href="simulador.html">Terminal Simulado</a> — antes de mexer no Docker de verdade, aprenda a usar a máquina fictícia <code>ana@notebook</code> que tem em toda página do guia para praticar sem medo.</div>
+
+</div>
+</main>
+</div>
+<script src="assets/site.js?v=4"></script>
+</body>
+</html>

@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>docker stats — CPU, memória, rede e disco em tempo real | Guia Docker</title>
+<meta name="description" content="O docker stats: a tabela viva de recursos dos containers rodando (CPU %, MEM USAGE / LIMIT, MEM %, NET I/O, BLOCK I/O e PIDS), como ler cada coluna, --no-stream para tirar uma foto única (snapshot, ideal para scripts), --format com templates Go ({{.Name}}, {{.CPUPerc}}, {{.MemPerc}}), como limitar a containers específicos, a tabela de alertas e como diagnosticar um container lento ou que morre de OOM (Exited 137).">
+<link rel="stylesheet" href="assets/style.css?v=4">
+<script>try{var t=localStorage.getItem("tema");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<meta http-equiv="Cache-Control" content="no-store, must-revalidate">
+<script>try{history.scrollRestoration="manual"}catch(e){}(function(){var n=0;function t(){window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;if(++n<60)setTimeout(t,50)}t();window.addEventListener("pagehide",function(){window.scrollTo(0,0);document.documentElement.scrollTop=0;});window.addEventListener("pageshow",function(){window.scrollTo(0,0)});window.addEventListener("load",function(){window.scrollTo(0,0)});})();document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(a){var h=a.getAttribute("href")||"";if(/[.]html($|[?#])/.test(h)&&a.host===location.host){window.scrollTo(0,0);document.documentElement.scrollTop=0;}}});</script>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" id="sidebar" aria-label="Tópicos"></nav>
+<main class="main">
+<div class="content">
+
+<div class="pager"></div>
+
+<h1><span class="hl">docker stats</span> — recursos em tempo real</h1>
+
+<p class="intro">Quem está consumindo CPU? Quem está enchendo a memória? O <code>docker stats</code> mostra uma <strong>tabela viva</strong>, atualizada a cada segundo, com o uso de recursos de cada container rodando — é o <code>top</code> dos containers (pense no painel de um carro: velocímetro, marcador de combustível, temperatura do motor).</p>
+
+<div class="note">
+<strong>Você vai aprender</strong>
+<ul>
+  <li>Ler as colunas: <code>CPU %</code>, <code>MEM USAGE / LIMIT</code>, <code>MEM %</code>, <code>NET I/O</code>, <code>BLOCK I/O</code> e <code>PIDS</code>.</li>
+  <li><code>--no-stream</code>: imprimir uma única vez e sair (snapshot, ideal para scripts).</li>
+  <li><code>--format</code> com templates Go (<code>{{.CPUPerc}}</code>, <code>{{.MemPerc}}</code>…).</li>
+  <li>Passar nomes/IDs para monitorar só alguns containers.</li>
+  <li>Diagnosticar container lento, com vazamento de memória (OOM kill, <code>Exited 137</code>) ou com disco travado.</li>
+</ul>
+</div>
+
+<hr>
+
+<h2>A cena: a loja da Ana está lenta</h2>
+<p>Num sábado de pico, os clientes da minhaloja reclamaram que o site estava lento. A Ana abriu o <code>ana@notebook</code>, subiu os dois containers do projeto dela e abriu o painel:</p>
+<pre class="term">$ docker run -d --name web -p 8080:80 nginx:alpine
+$ docker run -d --name banco -e POSTGRES_PASSWORD=segredo postgres:16-alpine
+$ docker stats
+CONTAINER ID   NAME      CPU %     MEM USAGE / LIMIT     MEM %     NET I/O       BLOCK I/O     PIDS
+a1b2c3d4e5f6   web       0.02%     8.5MiB / 7.79GiB      0.11%     1.2kB / 0B    648kB / 0B    5
+b2c3d4e5f6a1   banco     1.34%     68.2MiB / 7.79GiB     0.86%     3.4kB / 0B    12MB / 4MB     28
+^C</pre>
+<p>A tabela se atualiza sozinha a cada segundo; <kbd>Ctrl</kbd>+<kbd>C</kbd> sai (os containers continuam rodando — o <code>stats</code> só <em>observa</em>, não mata nada). Sem container rodando, a tabela aparece só com o cabeçalho.</p>
+
+<hr>
+
+<h2>As colunas, uma a uma</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Coluna</th><th>O que é</th><th>Dica de leitura</th></tr>
+<tr><td><code>CONTAINER ID</code> / <code>NAME</code></td><td>O container daquela linha.</td><td>O ID sai truncado (12 caracteres); o nome é o que você deu no <code>--name</code>.</td></tr>
+<tr><td><code>CPU %</code></td><td>Porcentagem da CPU da máquina usada pelo container.</td><td>Pode passar de 100% em máquinas com vários núcleos (ex.: 250% = 2,5 núcleos inteiros).</td></tr>
+<tr><td><code>MEM USAGE / LIMIT</code></td><td>Memória em uso agora / limite de memória disponível.</td><td>O limite é o da máquina, a menos que você tenha imposto um com <code>--memory</code> (aula <a href="limites-recursos.html">Limites de CPU e memória</a>).</td></tr>
+<tr><td><code>MEM %</code></td><td>Percentual do limite de memória que está em uso.</td><td>Perto de 100% = perigo de OOM kill (veremos abaixo).</td></tr>
+<tr><td><code>NET I/O</code></td><td>Tráfego de rede acumulado: entrada / saída.</td><td>Cresce sempre — é acumulado desde que o container subiu, não por segundo.</td></tr>
+<tr><td><code>BLOCK I/O</code></td><td>Leitura / escrita em disco acumuladas.</td><td>Banco de dados costuma liderar aqui.</td></tr>
+<tr><td><code>PIDS</code></td><td>Número de processos/threads rodando dentro do container.</td><td>Se cresce sem parar, há vazamento de processos.</td></tr>
+</table>
+</div>
+<p>Atenção: <code>NET I/O</code> e <code>BLOCK I/O</code> são <strong>acumulados</strong> (desde o início), não por segundo. Para ver a velocidade do momento, olhe a diferença entre duas atualizações da tabela.</p>
+
+<hr>
+
+<h2>Anatomia do comando</h2>
+<dl class="anatomy">
+  <dt>docker stats</dt><dd>abre a tabela viva de todos os containers <strong>rodando</strong> (parados não aparecem).</dd>
+  <dt>--no-stream</dt><dd>imprime a tabela uma única vez e já sai (snapshot) — perfeito para scripts e logs.</dd>
+  <dt>--format</dt><dd>saída personalizada com template Go (veremos já).</dd>
+  <dt>--no-trunc</dt><dd>mostra o ID completo do container (por padrão sai com 12 caracteres).</dd>
+  <dt>web banco</dt><dd>lista opcional de containers (nome ou ID) para monitorar só eles.</dd>
+</dl>
+
+<hr>
+
+<h2>--no-stream: uma foto só (snapshot)</h2>
+<p>Por padrão o <code>docker stats</code> fica em tempo real (streaming), grudado no terminal. Com <code>--no-stream</code>, ele imprime a tabela <strong>uma única vez e devolve o terminal</strong> — ideal para registrar o uso de recursos num log ou numa variável de script:</p>
+<pre class="term">$ docker stats --no-stream
+CONTAINER ID   NAME   CPU %   MEM USAGE / LIMIT     MEM %   NET I/O       BLOCK I/O   PIDS
+a1b2c3d4e5f6   web    0.05%   12.5MiB / 7.79GiB     0.16%   1.2kB / 0B    0B / 0B     5
+b2c3d4e5f6a1   banco  1.20%   68.2MiB / 7.79GiB     0.86%   3.4kB / 0B    12MB / 4MB   28</pre>
+
+<div class="try" data-goal="12.5MiB" data-solucao="docker stats --no-stream">
+<p class="try-task"><strong>Missão:</strong> suba um container (<code>docker run -d --name web nginx:alpine</code>) e rode <code>docker stats --no-stream</code> — a tabela deve mostrar a linha do container (com o uso de memória, ex.: <code>12.5MiB</code>) e o comando deve voltar na hora.</p>
+</div>
+
+<div class="try" data-goal="CONTAINER ID" data-solucao="docker stats">
+<p class="try-task"><strong>Missão:</strong> sem nenhum container rodando, rode <code>docker stats</code>: a saída mostra <strong>só o cabeçalho</strong> (<code>CONTAINER ID … PIDS</code>), porque parados não entram na tabela.</p>
+</div>
+
+<hr>
+
+<h2>Só alguns containers</h2>
+<p>Passe os nomes ou IDs no final para monitorar só quem interessa:</p>
+<pre class="term">$ docker stats --no-stream web
+CONTAINER ID   NAME   CPU %   MEM USAGE / LIMIT     MEM %   NET I/O       BLOCK I/O   PIDS
+a1b2c3d4e5f6   web    0.05%   12.5MiB / 7.79GiB     0.16%   1.2kB / 0B    0B / 0B     5
+$ docker stats web banco   « só esses dois, em tempo real</pre>
+
+<hr>
+
+<h2>--format: saída sob medida com templates Go</h2>
+<p>Assim como no <code>docker inspect --format</code> (aula <a href="docker-inspect.html">docker inspect</a>), o <code>stats</code> aceita templates Go. Os campos mais usados: <code>{{.Container}}</code>, <code>{{.Name}}</code>, <code>{{.CPUPerc}}</code>, <code>{{.MemUsage}}</code>, <code>{{.MemPerc}}</code>, <code>{{.NetIO}}</code>, <code>{{.BlockIO}}</code>, <code>{{.PIDs}}</code>:</p>
+<pre class="term">$ docker stats --no-stream --format "{{.Name}}: CPU {{.CPUPerc}} | MEM {{.MemUsage}} ({{.MemPerc}})"
+web: CPU 0.05% | MEM 12.5MiB / 7.79GiB (0.16%)
+banco: CPU 1.20% | MEM 68.2MiB / 7.79GiB (0.86%)
+$ docker stats --no-stream --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemPerc}}"
+NAME      CPU %     MEM %
+web       0.05%     0.16%
+banco     1.20%     0.86%</pre>
+<p>Útil para um alerta simples de monitoramento:</p>
+<pre class="term">$ docker stats --no-stream --format "{{.Name}} {{.MemPerc}}" | awk '$2+0 > 80 {print "ALERTA: " $1 " com memoria acima de 80%: " $2}'</pre>
+
+<hr>
+
+<h2>Lendo os sinais de alerta</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Sinal no stats</th><th>O que pode estar acontecendo</th><th>O que fazer</th></tr>
+<tr><td><code>CPU %</code> alto e constante</td><td>Um processo dentro do container consumindo muito processamento (loop infinito, carga pesada, build dentro do container).</td><td><code>docker exec &lt;container&gt; top</code> para ver o processo; ajuste a aplicação ou imponha <code>--cpus</code> (aula <a href="limites-recursos.html">Limites</a>).</td></tr>
+<tr><td><code>MEM %</code> perto de 100%</td><td>Risco de <strong>OOM Kill</strong>: o kernel mata o processo e o container sai com <code>Exited (137)</code>.</td><td>Veja <code>docker ps -a</code>; aumente o limite (<code>--memory</code>) ou corrija o vazamento de memória da aplicação.</td></tr>
+<tr><td><code>BLOCK I/O</code> crescendo rápido</td><td>Muito acesso a disco — banco em disco lento, muitos arquivos pequenos, log descontrolado.</td><td>Verifique o driver de logs (aula <a href="logging.html">Drivers de log</a>) e se há volume/SSD adequado.</td></tr>
+<tr><td><code>NET I/O</code> alto</td><td>Muito tráfego de rede (downloads, muitos acessos simultâneos, DDoS).</td><td>Limite taxa no proxy reverso; confira se não há vazamento de conexões.</td></tr>
+<tr><td><code>PIDS</code> crescendo sem parar</td><td>Vazamento de processos (cada requisição abre um processo e não fecha).</td><td>Reinicie o container como paliativo e corrija a aplicação.</td></tr>
+</table>
+</div>
+
+<div class="warn"><strong>Container morrendo "do nada"?</strong> Olhe o <code>MEM %</code> no <code>docker stats</code>: se a memória chega no limite, o kernel mata o processo (OOM Kill) e o container aparece como <code>Exited (137)</code> no <code>docker ps -a</code>:
+<pre class="term">$ docker ps -a
+CONTAINER ID   IMAGE     STATUS
+f6a1b2c3d4e5   app-api   Exited (137) 5 minutes ago     « 137 = morto pelo kernel por falta de memória
+$ docker inspect --format 'exit code: {{.State.ExitCode}}' f6a1b2c3d4e5
+exit code: 137</pre>
+Solução: aumentar o limite (flag <code>--memory</code>, aula <a href="limites-recursos.html">Limites de CPU e memória</a>) ou corrigir o vazamento de memória da aplicação. O <code>docker inspect --format '{{.State.ExitCode}}'</code> confirma o 137 (aula <a href="docker-inspect.html">docker inspect</a>).</div>
+
+<hr>
+
+<h2>stats × system df × top: quem vê o quê?</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Comando</th><th>O que mostra</th><th>Quando usar</th></tr>
+<tr><td><code>docker stats</code></td><td>Uso <strong>agora</strong> de cada container rodando: CPU, memória, rede, disco, processos (tabela viva).</td><td>"Meu container está lento/agindo estranho agora?"</td></tr>
+<tr><td><code>docker system df</code></td><td>Espaço em <strong>disco</strong> acumulado do Docker (imagens, containers parados, volumes, cache).</td><td>"O disco encheu — o Docker é o culpado?" (aula <a href="docker-system-df.html">docker system df</a>)</td></tr>
+<tr><td><code>top</code> / <code>htop</code> no host</td><td>Processos da <strong>máquina inteira</strong>, incluindo o próprio daemon do Docker.</td><td>"A máquina inteira está lenta, não só um container"</td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>Stats dos serviços do Compose</h2>
+<p>Os containers criados pelo <code>docker compose up</code> aparecem no <code>docker stats</code> como qualquer outro — com os nomes do projeto (<code>meuapp-web-1</code>, <code>meuapp-banco-1</code>):</p>
+<pre class="term" data-cwd="~/meuapp">$ docker compose up -d
+$ docker stats --no-stream
+CONTAINER ID   NAME             CPU %   MEM USAGE / LIMIT     MEM %   NET I/O       BLOCK I/O     PIDS
+a1b2c3d4e5f6   meuapp-web-1     0.03%   9.1MiB / 7.79GiB      0.12%   1.5kB / 0B    648kB / 8kB   5
+b2c3d4e5f6a1   meuapp-banco-1   2.10%   74.6MiB / 7.79GiB     0.94%   4.2kB / 0B    18MB / 4MB     30</pre>
+<p>Também existe o <code>docker compose top</code>, que mostra os <strong>processos dentro</strong> de cada serviço do projeto (é o <code>top</code> deles, sem precisar entrar com <code>docker exec</code>):</p>
+<pre class="term" data-cwd="~/meuapp">$ docker compose top banco
+UID    PID     CPU %   MEM %   TIME
+999    1201    1.8%    0.9%    0:01.23 postgres
+999    1245    0.0%    0.1%    0:00.05 postgres: checkpointer</pre>
+
+<hr>
+
+<h2>Registrando um snapshot num log</h2>
+<p>Como o <code>--no-stream</code> devolve o terminal na hora, dá para guardar a foto do uso de recursos num arquivo — útil para comparar antes e depois de uma mudança na aplicação:</p>
+<pre class="term">$ docker stats --no-stream >> /var/log/meuapp-stats.log
+$ tail -8 /var/log/meuapp-stats.log
+CONTAINER ID   NAME   CPU %   MEM USAGE / LIMIT     MEM %   NET I/O       BLOCK I/O   PIDS
+a1b2c3d4e5f6   web    0.05%   12.5MiB / 7.79GiB     0.16%   1.2kB / 0B    0B / 0B     5</pre>
+<p>O <code>&gt;&gt;</code> anexa ao fim do arquivo (em vez de apagar com <code>&gt;</code>), então o log vira um histórico. Num servidor de verdade, esse tipo de coleta normalmente é feita por ferramentas de monitoramento (Prometheus + cAdvisor, Grafana…), mas para um notebook de estudo o <code>stats --no-stream</code> no <code>crontab</code> já resolve.</p>
+
+<hr>
+
+<h2>Quiz rápido</h2>
+<div class="mc" data-answer="2">
+<p class="mc-q">1. Para que serve o <code>--no-stream</code> no docker stats?</p>
+<label><input type="radio" name="q1"> Para esconder a coluna de rede</label>
+<label><input type="radio" name="q1"> Para imprimir a tabela uma única vez e devolver o terminal (snapshot, bom para scripts)</label>
+<label><input type="radio" name="q1"> Para parar todos os containers</label>
+<label><input type="radio" name="q1"> Para mostrar o ID completo dos containers</label>
+</div>
+
+<div class="mc" data-answer="3">
+<p class="mc-q">2. Um container aparece como <code>Exited (137)</code> no docker ps -a. O que aconteceu?</p>
+<label><input type="radio" name="q2"> Saiu normalmente com erro 137</label>
+<label><input type="radio" name="q2"> Foi parado pelo usuário</label>
+<label><input type="radio" name="q2"> Foi morto pelo kernel (OOM kill) por estouro de memória — veja o MEM % no stats</label>
+<label><input type="radio" name="q2"> A imagem estava corrompida</label>
+</div>
+
+<div class="mc" data-answer="1">
+<p class="mc-q">3. No <code>docker stats</code>, o que significa <code>CPU %</code> acima de 100%?</p>
+<label><input type="radio" name="q3"> Erro de cálculo</label>
+<label><input type="radio" name="q3"> O container está usando mais de um núcleo de CPU (ex.: 250% = 2,5 núcleos)</label>
+<label><input type="radio" name="q3"> A memória acabou</label>
+<label><input type="radio" name="q3"> O disco está cheio</label>
+</div>
+
+<hr>
+
+<h2>Resumo</h2>
+<ul>
+  <li><code>docker stats</code> é a tabela viva de recursos dos containers <strong>rodando</strong>: <code>CPU %</code>, <code>MEM USAGE / LIMIT</code>, <code>MEM %</code>, <code>NET I/O</code>, <code>BLOCK I/O</code>, <code>PIDS</code>. <kbd>Ctrl</kbd>+<kbd>C</kbd> sai sem parar nada.</li>
+  <li><code>--no-stream</code> tira uma foto única e devolve o terminal (snapshot para scripts/logs); <code>docker stats web banco</code> filtra só alguns containers.</li>
+  <li><code>--format</code> com templates Go: <code>{{.Name}}</code>, <code>{{.CPUPerc}}</code>, <code>{{.MemUsage}}</code>, <code>{{.MemPerc}}</code>, <code>{{.NetIO}}</code>, <code>{{.BlockIO}}</code>, <code>{{.PIDs}}</code>; prefixo <code>table</code> gera cabeçalho.</li>
+  <li><code>NET I/O</code> e <code>BLOCK I/O</code> são acumulados desde a subida; CPU% pode passar de 100% (vários núcleos).</li>
+  <li>Tabela de alertas: CPU alto = processo consumindo; MEM% perto de 100% = OOM kill iminente (<code>Exited (137)</code>, confirmado com <code>docker inspect --format '{{.State.ExitCode}}'</code>); BLOCK I/O crescendo = disco; PIDS crescendo = vazamento de processos.</li>
+  <li>Complementos: <code>docker system df</code> para espaço em disco acumulado e <code>top</code> no host para a máquina inteira.</li>
+</ul>
+
+<div class="tip"><strong>Próxima aula:</strong> <a href="usuario-nao-root.html">Rodar como usuário não-root (USER)</a> — nível 3, segurança: o próximo passo depois de diagnosticar a máquina.</div>
+
+</div>
+</main>
+</div>
+<script src="assets/site.js?v=4"></script>
+</body>
+</html>

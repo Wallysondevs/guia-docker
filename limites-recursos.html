@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Limites de CPU e memória (--memory, --cpus) | Guia Docker</title>
+<meta name="description" content="Por que limitar recursos de containers em produção (o vizinho barulhento e o OOM killer do kernel): --memory 512m com as unidades b/k/m/g, --memory-swap e --memory-reservation, --cpus 1.5 e --cpu-shares, --pids-limit contra fork bomb, o que acontece quando a memória acaba (OOM kill, Exited 137, OOMKilled: true no inspect), como acompanhar com docker stats e como declarar os limites no docker-compose.yml (deploy.resources).">
+<link rel="stylesheet" href="assets/style.css?v=4">
+<script>try{var t=localStorage.getItem("tema");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<meta http-equiv="Cache-Control" content="no-store, must-revalidate">
+<script>try{history.scrollRestoration="manual"}catch(e){}(function(){var n=0;function t(){window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;if(++n<60)setTimeout(t,50)}t();window.addEventListener("pagehide",function(){window.scrollTo(0,0);document.documentElement.scrollTop=0;});window.addEventListener("pageshow",function(){window.scrollTo(0,0)});window.addEventListener("load",function(){window.scrollTo(0,0)});})();document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(a){var h=a.getAttribute("href")||"";if(/[.]html($|[?#])/.test(h)&&a.host===location.host){window.scrollTo(0,0);document.documentElement.scrollTop=0;}}});</script>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" id="sidebar" aria-label="Tópicos"></nav>
+<main class="main">
+<div class="content">
+
+<div class="pager"></div>
+
+<h1><span class="hl">--memory e --cpus</span> — limites de recursos</h1>
+
+<p class="intro">A Ana subiu três containers no servidor da Loja Aurora sem limitar nada: a API, o banco e um worker de relatórios. Numa terça-feira à noite, o worker disparou um relatório gigante, consumiu <strong>toda a memória RAM do servidor</strong> e o kernel matou processos às cegas — inclusive o banco de dados. O site inteiro caiu. Esse é o problema do "vizinho barulhento": sem limites, qualquer container pode comer todos os recursos da máquina e derrubar os outros. Com <code>--memory</code>, <code>--cpus</code> e <code>--pids-limit</code> você isola cada container como se fosse uma máquina pequena.</p>
+
+<div class="note">
+<strong>Você vai aprender</strong>
+<ul>
+  <li>Por que limitar recursos em produção (OOM killer, previsibilidade, custo).</li>
+  <li><code>--memory 512m</code> e as unidades <code>b</code>, <code>k</code>, <code>m</code>, <code>g</code>.</li>
+  <li><code>--memory-swap</code> (RAM + swap) e <code>--memory-reservation</code> (limite "leve").</li>
+  <li><code>--cpus 1.5</code>, <code>--cpu-shares</code> (peso relativo) e <code>--pids-limit</code> (contra fork bomb).</li>
+  <li>O que acontece quando o limite estoura: <code>Exited (137)</code> e <code>OOMKilled: true</code>.</li>
+  <li>Como acompanhar o uso real com <a href="docker-stats.html">docker stats</a> e declarar limites no Compose.</li>
+</ul>
+</div>
+
+<hr>
+
+<h2>A ideia: cada container vira uma máquina pequena</h2>
+<p>Sem limites, o container enxerga <em>toda</em> a máquina: todos os núcleos de CPU, toda a RAM. É como morar num prédio sem paredes: o vizinho barulhento (um processo descontrolado) ocupa o salón inteiro e ninguém mais usa. Os <strong>cgroups</strong> (o mecanismo do kernel que o Docker usa por baixo) permitem criar "paredes": você diz "esse apartamento usa no máximo 512MB e 1 núcleo de CPU", e o kernel faz valer.</p>
+
+<hr>
+
+<h2>--memory: o teto de memória RAM</h2>
+<p>Defina o máximo de memória que o container pode usar. Se passar disso, o kernel mata o processo dentro do container (OOM kill):</p>
+<pre class="term">$ docker run -d --name api --memory 512m -p 3000:3000 node:22-alpine node server.js
+f3a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5</pre>
+<p>As unidades aceitas são <code>b</code> (bytes), <code>k</code> (KB), <code>m</code> (MB) e <code>g</code> (GB) — maiúsculas também valem: <code>--memory 512m</code>, <code>--memory 1g</code>, <code>--memory 268435456</code> (tudo igual; 268435456 bytes = 256MB). O valor mínimo aceito pelo Docker é 4m (4MB).</p>
+
+<hr>
+
+<h2>--memory-swap e --memory-reservation</h2>
+<p>Se você define só <code>--memory</code>, o Docker assume <code>--memory-swap</code> = 2× a memória (o container pode usar até metade do total em swap). Para <strong>desativar a swap</strong> do container, iguale os dois valores:</p>
+<pre class="term">$ docker run -d --name api --memory 512m --memory-swap 512m …   « sem swap</pre>
+<dl class="anatomy">
+  <dt>--memory 512m</dt><dd>Teto duro de RAM do container (passou disso, OOM kill).</dd>
+  <dt>--memory-swap 1g</dt><dd>Teto de RAM + swap. Se for igual ao <code>--memory</code>, a swap fica desligada para o container (útil para bancos de dados, que odeiam swap).</dd>
+  <dt>--memory-reservation 256m</dt><dd>Limite "leve" (soft limit): o container pode passar dele quando a máquina tem memória sobrando, mas é o primeiro a ceder quando faltar (o kernel aperta primeiro quem tem reservation menor).</dd>
+</dl>
+
+<hr>
+
+<h2>--cpus: o teto de processador</h2>
+<p>Um container sem limite usa todos os núcleos disponíveis. Com <code>--cpus</code>, você diz quantos núcleos (ou frações) ele pode usar:</p>
+<pre class="term">$ docker run -d --name worker --cpus 1.5 node:22-alpine node worker.js
+b2c3d4e5f6a1…</pre>
+<p><code>--cpus 1.5</code> = um núcleo e meio. <code>--cpus 0.5</code> = metade de um núcleo. Para peso relativo entre vários containers na mesma máquina, use <code>--cpu-shares</code> (ex.: <code>--cpu-shares 512</code> — padrão é 1024; na disputa por CPU, quem tem mais shares leva mais tempo de processador) e <code>--cpu-period</code>/<code>--cpu-quota</code> (controle fino de quota dentro de um período de 100ms).</p>
+
+<hr>
+
+<h2>--pids-limit: proteção contra fork bomb</h2>
+<p>Um processo descontrolado (ou malicioso) pode criar milhares de processos e travar o kernel inteiro — o famoso <em>fork bomb</em>. O <code>--pids-limit</code> trava a quantidade de processos dentro do container:</p>
+<pre class="term">$ docker run -d --name api --pids-limit 200 --memory 512m --cpus 1 -p 3000:3000 node:22-alpine node server.js
+c3d4e5f6a1b2…</pre>
+<p>Passou de 200 processos? O próximo <code>fork()</code> recebe erro. Barato de ligar, protege o host.</p>
+
+<div class="try" data-goal="--memory=512m" data-solucao="docker run -d --name api --memory=512m --cpus=1 --pids-limit 200 nginx:alpine">
+<p class="try-task"><strong>Missão:</strong> suba um container com limites — <code>docker run -d --name api --memory=512m --cpus=1 nginx:alpine</code> (no simulador, use <code>=</code> nas flags) — e depois veja ele rodando com <code>docker ps</code>.</p>
+</div>
+
+<div class="try" data-goal="CPU" data-solucao="docker stats">
+<p class="try-task"><strong>Missão extra:</strong> com o container <code>api</code> no ar, rode <code>docker stats</code> e veja as colunas de <code>CPU %</code> e <code>MEM USAGE / LIMIT</code> — é assim que você acompanha se o limite está perto de estourar.</p>
+</div>
+
+<hr>
+
+<h2>O que acontece quando o limite estoura (OOM kill)</h2>
+<p>Se o container tenta usar mais memória do que o <code>--memory</code> permite, o kernel mata o processo e o container para com código <strong>137</strong> (128 + 9 = SIGKILL):</p>
+<pre class="term">$ docker ps -a
+CONTAINER ID   IMAGE            STATUS                          PORTS     NAMES
+c3d4e5f6a1b2   node:22-alpine   Exited (137) 4 seconds ago              api
+
+$ docker inspect api --format '{{.State.OOMKilled}}'
+true
+
+$ docker logs api | tail -3
+Killed                                    « o kernel matou o processo: memória estourou</pre>
+<p>O <code>OOMKilled: true</code> no inspect confirma que foi falta de memória, não um erro da aplicação. Se tiver <code>--restart unless-stopped</code> (<a href="healthcheck.html">aula anterior</a>), o container volta sozinho depois de morrer.</p>
+
+<div class="warning"><strong>Sem limite, o OOM killer pode matar o processo errado.</strong> Num servidor sem <code>--memory</code>, quando a RAM acaba, o kernel escolhe uma vítima pela heurística dele — às vezes o banco de dados, não o culpado (exatamente o que aconteceu com o worker de relatórios da Ana). Limite sempre os containers em produção e acompanhe o uso com <a href="docker-stats.html">docker stats</a>.</div>
+
+<div class="cenario">
+<strong>Cenário real: o relatório que matou o banco</strong>
+<p>O worker de relatórios da Loja Aurora rodava sem <code>--memory</code>. No relatório anual, ele carregou a planilha inteira na RAM (6GB) num servidor de 8GB — e o kernel, sem nada limitado, matou o PostgreSQL para liberar memória. Site fora do ar na segunda-feira de manhã. Depois de dar <code>--memory 1g</code> no worker (e <code>--restart on-failure:3</code>), o pior que acontece agora é o worker morrer com <code>Exited (137)</code> e voltar sozinho — o banco segue intacto. É isso que limite compra: previsibilidade.</p>
+</div>
+
+<hr>
+
+<h2>Declarando limites no docker-compose.yml</h2>
+<p>Em produção a Ana não usa <code>docker run</code> solto: ela declara os limites no <code>docker-compose.yml</code> (aula <a href="compose-yaml.html">compose</a>), na seção <code>deploy.resources</code> — que também vale no <a href="swarm-intro.html">Swarm</a>, por réplica:</p>
+<pre class="file" data-file="docker-compose.yml">services:
+  api:
+    image: ana/minha-api:1.0
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
+      restart_policy:
+        condition: unless-stopped
+  worker:
+    image: ana/minha-api:1.0
+    command: node worker.js
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 1G
+          pids: 200
+  db:
+    image: postgres:16-alpine
+    deploy:
+      resources:
+        limits:
+          memory: 2G</pre>
+<p>Repare: <code>limits</code> é o teto duro (vale <code>--memory</code>/<code>--cpus</code>), <code>reservations</code> é o soft (vale <code>--memory-reservation</code>), e <code>pids</code> limita processos. O <code>restart_policy.condition</code> é o equivalente do <code>--restart</code> no Compose/Swarm.</p>
+
+<hr>
+
+<h2>Resumo das flags de recursos</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Flag</th><th>Exemplo</th><th>O que limita</th></tr>
+<tr><td><code>--memory</code> / <code>-m</code></td><td><code>--memory 512m</code></td><td>Memória RAM (OOM kill ao passar). Unidades: b, k, m, g.</td></tr>
+<tr><td><code>--memory-swap</code></td><td><code>--memory-swap 1g</code></td><td>RAM + swap total; igual ao <code>--memory</code> = sem swap.</td></tr>
+<tr><td><code>--memory-reservation</code></td><td><code>--memory-reservation 256m</code></td><td>Limite "leve" (soft): cede primeiro quando faltar RAM.</td></tr>
+<tr><td><code>--cpus</code></td><td><code>--cpus 1.5</code></td><td>Núcleos de CPU (frações valem).</td></tr>
+<tr><td><code>--cpu-shares</code></td><td><code>--cpu-shares 512</code></td><td>Peso relativo na disputa por CPU (padrão 1024).</td></tr>
+<tr><td><code>--pids-limit</code></td><td><code>--pids-limit 200</code></td><td>Quantidade máxima de processos (anti fork bomb).</td></tr>
+<tr><td><code>--oom-kill-disable</code></td><td>—</td><td>Impede o kernel de matar o container por OOM (use com cuidado!).</td></tr>
+</table>
+</div>
+<p>Esses limites também aparecem no <code>docker inspect</code> (<code>.HostConfig.Memory</code>, <code>.HostConfig.NanoCpus</code>, <code>.HostConfig.PidsLimit</code>) — dá para auditar um container assim. E no <a href="swarm-intro.html">Swarm</a>, declared em <code>deploy.resources.limits</code>, valem por réplica do serviço.</p>
+
+<hr>
+
+<h2>Como escolher os limites certos (sem chute)</h2>
+<p>Chutar limite dá dois problemas: muito justo (OOM kill à toa) ou muito folgado (não protege nada). O jeito certo é medir:</p>
+<ol class="passo">
+  <li>Suba o container <strong>sem limite</strong> em ambiente de teste com carga parecida com a de produção (faça o relatório, simule os acessos).</li>
+  <li>Acompanhe com <code>docker stats api</code> por alguns minutos e anote o pico de <code>MEM USAGE</code> e de <code>CPU %</code>:</li>
+</ol>
+<pre class="term">$ docker stats api
+CONTAINER ID   NAME   CPU %   MEM USAGE / LIMIT   MEM %   NET I/O       BLOCK I/O   PIDS
+c3d4e5f6a1b2   api    12.50%  380MiB / 7.79GiB    4.75%   1.2MB / 0B    2GB / 12MB  45</pre>
+<p>(Aqui sem limite: o "LIMIT" mostra a RAM total da máquina, 7.79GiB.)</p>
+<ol class="passo" start="3">
+  <li>Defina o limite um pouco acima do pico observado: pico de 380MB → <code>--memory 512m</code>. CPU a 120% (1,2 núcleos) → <code>--cpus 2</code>.</li>
+  <li>Deixe o <code>--restart unless-stopped</code> ligado: se um pico inesperado estourar o limite, o container morre e volta sozinho em vez de travar a máquina.</li>
+  <li>Reavalie de tempos em tempos: <code>docker stats</code> no servidor mostra todos os containers e o quanto cada um está perto do teto.</li>
+</ol>
+
+<hr>
+
+<h2>Quiz rápido</h2>
+<div class="mc" data-answer="3">
+<p class="mc-q">1. O que acontece quando um container com <code>--memory 512m</code> tenta usar 600MB?</p>
+<label><input type="radio" name="q1"> Ele usa a swap automaticamente e segue</label>
+<label><input type="radio" name="q1"> O Docker avisa e continua</label>
+<label><input type="radio" name="q1"> O kernel mata o processo (OOM kill) e o container para com Exited (137)</label>
+<label><input type="radio" name="q1"> Ele reduz a velocidade da app</label>
+</div>
+
+<div class="mc" data-answer="2">
+<p class="mc-q">2. Como desligar a swap de um container que tem <code>--memory 512m</code>?</p>
+<label><input type="radio" name="q2"> <code>--no-swap</code></label>
+<label><input type="radio" name="q2"> <code>--memory-swap 512m</code> (igual ao --memory)</label>
+<label><input type="radio" name="q2"> <code>--swap 0</code></label>
+<label><input type="radio" name="q2"> Não dá para desligar</label>
+</div>
+
+<div class="mc" data-answer="4">
+<p class="mc-q">3. Para que serve o <code>--pids-limit</code>?</p>
+<label><input type="radio" name="q3"> Limitar a memória por processo</label>
+<label><input type="radio" name="q3"> Limitar a porta de rede</label>
+<label><input type="radio" name="q3"> Limitar o uso de disco</label>
+<label><input type="radio" name="q3"> Limitar a quantidade de processos dentro do container (proteção contra fork bomb)</label>
+</div>
+
+<div class="mc" data-answer="1">
+<p class="mc-q">4. Onde você declara limites de memória/CPU no docker-compose.yml?</p>
+<label><input type="radio" name="q4"> Em <code>deploy.resources.limits</code> (memory, cpus) e <code>reservations</code></label>
+<label><input type="radio" name="q4"> Em <code>ports:</code></label>
+<label><input type="radio" name="q4"> Em <code>volumes:</code></label>
+<label><input type="radio" name="q4"> Não dá para declarar no Compose</label>
+</div>
+
+<hr>
+
+<h2>Resumo</h2>
+<ul>
+  <li>Sem limites, um container pode consumir toda a CPU/RAM da máquina e derrubar os outros (vizinho barulhento).</li>
+  <li><code>--memory 512m</code> (unidades b/k/m/g) = teto de RAM; estourado, o kernel mata o processo: <code>Exited (137)</code> + <code>OOMKilled: true</code>.</li>
+  <li><code>--memory-swap</code> controla RAM+swap (igual ao <code>--memory</code> desliga swap); <code>--memory-reservation</code> é o limite leve.</li>
+  <li><code>--cpus 1.5</code> limita núcleos (frações valem); <code>--cpu-shares</code> dá peso relativo na disputa por CPU.</li>
+  <li><code>--pids-limit 200</code> barra o fork bomb.</li>
+  <li>No Compose/Swarm, os limites vão em <code>deploy.resources.limits</code> e valem por réplica; acompanhe o uso com <code>docker stats</code>.</li>
+</ul>
+
+<div class="tip"><strong>Próxima aula:</strong> <a href="logging.html">Drivers de log e rotação</a>.</div>
+
+<div class="pager"></div>
+
+</div>
+</main>
+</div>
+<script src="assets/site.js?v=4"></script>
+</body>
+</html>

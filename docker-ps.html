@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>docker ps — vendo os containers rodando e parados | Guia Docker</title>
+<meta name="description" content="O comando docker ps: listar containers rodando, docker ps -a para todos, as colunas CONTAINER ID, IMAGE, COMMAND, CREATED, STATUS, PORTS e NAMES explicadas, o significado de cada status (Up, Exited (0), Exited (1), Created, Restarting), variações úteis (-q, -l, -s, --format) e o uso em scripts como docker rm $(docker ps -aq). Missões no simulador.">
+<link rel="stylesheet" href="assets/style.css?v=4">
+<script>try{var t=localStorage.getItem("tema");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<meta http-equiv="Cache-Control" content="no-store, must-revalidate">
+<script>try{history.scrollRestoration="manual"}catch(e){}(function(){var n=0;function t(){window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;if(++n<60)setTimeout(t,50)}t();window.addEventListener("pagehide",function(){window.scrollTo(0,0);document.documentElement.scrollTop=0;});window.addEventListener("pageshow",function(){window.scrollTo(0,0)});window.addEventListener("load",function(){window.scrollTo(0,0)});})();document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(a){var h=a.getAttribute("href")||"";if(/[.]html($|[?#])/.test(h)&&a.host===location.host){window.scrollTo(0,0);document.documentElement.scrollTop=0;}}});</script>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" id="sidebar" aria-label="Tópicos"></nav>
+<main class="main">
+<div class="content">
+
+<div class="pager"></div>
+
+<h1><span class="hl">docker ps</span> — listando containers</h1>
+
+<p class="intro">Depois de rodar alguns containers com <code>docker run</code>, você precisa vê-los. O <code>docker ps</code> é a lista dos containers <strong>rodando agora</strong>. Com <code>-a</code>, aparecem <strong>todos</strong>, inclusive os que já pararam. Pense nele como o "gerenciador de tarefas" do Docker.</p>
+
+<div class="note">
+<strong>Você vai aprender</strong>
+<ul>
+  <li><code>docker ps</code> (só os rodando) e <code>docker ps -a</code> (todos).</li>
+  <li>A ler cada coluna: <code>CONTAINER ID</code>, <code>IMAGE</code>, <code>COMMAND</code>, <code>CREATED</code>, <code>STATUS</code>, <code>PORTS</code>, <code>NAMES</code>.</li>
+  <li>Os status: <code>Up</code>, <code>Exited (0)</code>, <code>Exited (1)</code>, <code>Created</code>, <code>Restarting</code>.</li>
+  <li>Variações: <code>-q</code>, <code>-l</code>, <code>-s</code>, <code>--format</code>.</li>
+  <li>Usar o ID curto no lugar do nome, e <code>docker ps</code> em scripts.</li>
+</ul>
+</div>
+
+<hr>
+
+<h2>A cena: a Ana subiu três serviços</h2>
+<p>Depois da aula de <a href="docker-run.html">docker run</a>, a Ana subiu no <code>notebook</code> dela um site, um cache e um banco para testar o projeto novo:</p>
+<pre class="term">$ docker run -d --name web   nginx:alpine
+$ docker run -d --name cache redis:7-alpine
+$ docker run -d --name banco postgres:16-alpine</pre>
+<p>Agora ela quer ver o que está no ar:</p>
+
+<div class="try" data-goal="CONTAINER ID" data-solucao="docker ps">
+<p class="try-task"><strong>Missão:</strong> rode <code>docker ps</code> para ver os containers rodando agora.</p>
+</div>
+
+<pre class="term">$ docker ps
+CONTAINER ID   IMAGE              COMMAND                  CREATED          STATUS          PORTS      NAMES
+a1b2c3d4e5f6   nginx:alpine       "/docker-entrypoint.…"   10 seconds ago   Up 10 seconds   80/tcp     web
+b2c3d4e5f6a1   redis:7-alpine     "docker-entrypoint.s…"   8 seconds ago    Up 8 seconds    6379/tcp   cache
+d4e5f6a1b2c3   postgres:16-alpine "docker-entrypoint.s…"   5 seconds ago    Up 5 seconds    5432/tcp   banco</pre>
+
+<p>Três linhas, três containers rodando. Cada coluna responde uma pergunta:</p>
+
+<hr>
+
+<h2>As colunas, uma a uma</h2>
+<dl class="anatomy">
+  <dt>CONTAINER ID</dt><dd>Os primeiros 12 caracteres do ID único (um hash de 64 caracteres no fundo). Dá para usar esse pedaço no lugar do nome: <code>docker stop a1b2c3d4e5f6</code> funciona igual.</dd>
+  <dt>IMAGE</dt><dd>A imagem que originou o container (<code>nginx:alpine</code> etc.).</dd>
+  <dt>COMMAND</dt><dd>O comando que o container está rodando agora (o padrão da imagem ou o que você passou depois do nome da imagem no <code>run</code>).</dd>
+  <dt>CREATED</dt><dd>Quanto tempo atrás o container foi <strong>criado</strong> (não é quando começou a rodar).</dd>
+  <dt>STATUS</dt><dd>A estado atual — a coluna mais importante (tabela abaixo).</dd>
+  <dt>PORTS</dt><dd>Portas que o container expõe <em>dentro da rede dele</em> (ex.: <code>80/tcp</code>) e, se você publicó com <code>-p</code>, o mapeamento <code>0.0.0.0:8080-&gt;80/tcp</code>.</dd>
+  <dt>NAMES</dt><dd>O nome: o que você pôs em <code>--name</code> ou o aleatório que o Docker inventou.</dd>
+</dl>
+
+<h3>Os status possíveis</h3>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>STATUS</th><th>Significado</th><th>Você vê em</th></tr>
+<tr><td><code>Up 5 seconds</code></td><td>Rodando agora</td><td><code>docker ps</code></td></tr>
+<tr><td><code>Exited (0) 1 minute ago</code></td><td>Terminou com sucesso (código 0)</td><td>só com <code>docker ps -a</code></td></tr>
+<tr><td><code>Exited (1) …</code></td><td>Terminou com erro — veja <code>docker logs</code></td><td>só com <code>docker ps -a</code></td></tr>
+<tr><td><code>Exited (137) …</code></td><td>Morto com SIGKILL (ex.: <code>docker kill</code>)</td><td>só com <code>docker ps -a</code></td></tr>
+<tr><td><code>Created</code></td><td>Criado, mas nunca iniciado (<code>docker create</code>)</td><td>só com <code>docker ps -a</code></td></tr>
+<tr><td><code>Restarting</code></td><td>Caiu e está voltando (por causa do <code>--restart</code>)</td><td>nos dois</td></tr>
+<tr><td><code>Up 2 hours (healthy)</code></td><td>Rodando e passando no healthcheck</td><td><code>docker ps</code></td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>-a: todos os containers (inclusive parados)</h2>
+<p>O <code>-a</code> (de <em>all</em>) é o que você mais vai usar depois do <code>ps</code> puro, porque é onde aparecem os containers que já terminaram:</p>
+
+<div class="try" data-goal="Exited" data-solucao="docker ps -a">
+<p class="try-task"><strong>Missão:</strong> rode <code>docker run --rm hello-world</code> e depois <code>docker ps -a</code> — com <code>--rm</code> o container some, então rode <code>docker run hello-world</code> (sem --rm) antes para ver um "Exited" na lista.</p>
+</div>
+
+<pre class="term">$ docker run hello-world        « sem --rm: o container fica parado depois
+$ docker ps
+CONTAINER ID   IMAGE   COMMAND   CREATED   STATUS   PORTS   NAMES   « vazio: nada rodando
+$ docker ps -a
+CONTAINER ID   IMAGE          STATUS                       PORTS     NAMES
+a1b2c3d4e5f6   nginx:alpine   Up 2 minutes                 80/tcp    web
+c3d4e5f6a1b2   hello-world    Exited (0) 10 seconds ago            wizardly_curie</pre>
+
+<p>Agora sim: o <code>web</code> continua <code>Up</code> e o hello-world aparece como <code>Exited (0)</code>.</p>
+
+<div class="try" data-goal="Up 2 minutes" data-solucao="docker run -d --name cache redis:7-alpine">
+<p class="try-task"><strong>Missão:</strong> suba um container novo (<code>docker run -d --name cache redis:7-alpine</code>) e depois rode <code>docker ps</code> — a coluna STATUS vai mostrar <code>Up 2 minutes</code>.</p>
+</div>
+
+<hr>
+
+<h2>Variações úteis</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Comando</th><th>O que faz</th></tr>
+<tr><td><code>docker ps</code></td><td>Só os containers rodando.</td></tr>
+<tr><td><code>docker ps -a</code></td><td>Todos (rodando + parados).</td></tr>
+<tr><td><code>docker ps -q</code></td><td>Só os IDs, um por linha (útil em scripts: <code>docker rm $(docker ps -aq)</code>).</td></tr>
+<tr><td><code>docker ps -l</code></td><td>Só o último container criado.</td></tr>
+<tr><td><code>docker ps -s</code></td><td>Mostra também o tamanho em disco de cada container.</td></tr>
+<tr><td><code>docker ps --format "{{.Names}}: {{.Status}}"</code></td><td>Saída personalizada (template Go) — ex.: <code>web: Up 2 minutes</code>.</td></tr>
+<tr><td><code>docker ps --filter "name=web"</code></td><td>Filtra por nome (<code>status=running</code>, <code>ancestor=nginx</code>…).</td></tr>
+</table>
+</div>
+
+<pre class="term">$ docker ps --format "{{.Names}} está {{.Status}}"
+web está Up 2 minutes
+cache está Up 2 minutes
+banco está Up 2 minutes</pre>
+
+<hr>
+
+<h2>Usando o ID curto e scripts</h2>
+<p>Você não precisa digitar o nome inteiro: os primeiros caracteres do ID bastam (desde que não haja ambiguidade):</p>
+<pre class="term">$ docker stop a1b2          « os 4 primeiros caracteres já bastam
+web</pre>
+<p>E dá para encadear comandos com <code>$(...)</code> — o famoso "limpa tudo que estiver parado":</p>
+<pre class="term">$ docker rm $(docker ps -aq)    « -aq = todos os IDs, só de containers parados? não: de TODOS; use com cuidado
+$ docker rm $(docker ps -q)     « só os rodando (para parar primeiro: docker stop $(docker ps -q))</pre>
+
+<div class="warning">
+<strong>Cuidado com <code>docker rm $(docker ps -aq)</code></strong>
+<p>Esse comando apaga <strong>TODOS</strong> os containers parados da máquina — inclusive os de outros projetos que você queria manter parados. Antes de rodar, olhe o que vai ser apagado com <code>docker ps -a</code>. E container rodando não sai nesse comando: primeiro <code>docker stop $(docker ps -q)</code>.</p>
+</div>
+
+<div class="warning">
+<strong><code>docker ps</code> vazio não é erro</strong>
+<p>Se a lista vier só com o cabeçalho, não é bug: é que não tem nenhum container <strong>rodando</strong> agora. Rode <code>docker ps -a</code> para ver se há containers parados.</p>
+</div>
+
+<div class="mc" data-answer="2">
+<p class="mc-q">Qual a diferença entre <code>docker ps</code> e <code>docker ps -a</code>?</p>
+<label><input type="radio" name="q1"> <code>ps</code> mostra imagens; <code>ps -a</code> mostra containers</label>
+<label><input type="radio" name="q1"> <code>ps</code> mostra só os rodando; <code>ps -a</code> mostra todos, inclusive os parados</label>
+<label><input type="radio" name="q1"> Não há diferença</label>
+<label><input type="radio" name="q1"> <code>-a</code> ordena por idade</label>
+</div>
+
+<div class="mc" data-answer="3">
+<p class="mc-q">Na coluna STATUS aparece <code>Exited (0) 10 seconds ago</code>. O que isso quer dizer?</p>
+<label><input type="radio" name="q2"> O container está rodando há 10 segundos</label>
+<label><input type="radio" name="q2"> O container foi criado há 10 segundos e está parado</label>
+<label><input type="radio" name="q2"> O container terminou sozinho com código 0 (sucesso) há 10 segundos</label>
+<label><input type="radio" name="q2"> O container vai ser apagado em 10 segundos</label>
+</div>
+
+<div class="mc" data-answer="1">
+<p class="mc-q">Para que serve o <code>-q</code> no <code>docker ps -q</code>?</p>
+<label><input type="radio" name="q3"> Mostrar só os IDs dos containers, um por linha (bom para scripts)</label>
+<label><input type="radio" name="q3"> Mostrar o tamanho dos containers</label>
+<label><input type="radio" name="q3"> Ordenar por nome</label>
+<label><input type="radio" name="q3"> Mostrar só o último container</label>
+</div>
+
+<hr>
+
+<h2>Exemplo completo: portas publicadas aparecem no ps</h2>
+<p>Quando você publica porta com <code>-p</code> (aula <a href="portas.html">Portas</a>), a coluna <code>PORTS</code> mostra o mapeamento completo:</p>
+<pre class="term">$ docker run -d -p 8080:80 --name meu-site nginx:alpine
+$ docker run -d -p 127.0.0.1:5432:5432 --name banco postgres:16-alpine
+$ docker ps
+CONTAINER ID   IMAGE              STATUS         PORTS                           NAMES
+f3a1b2c3d4e5   nginx:alpine       Up 5 seconds   0.0.0.0:8080->80/tcp            meu-site
+d4e5f6a1b2c3   postgres:16-alpine Up 3 seconds   127.0.0.1:5432->5432/tcp        banco</pre>
+<p>Leia a coluna PORTS assim: <code>IP_DO_HOST:PORTA_DO_HOST-&gt;PORTA_DO_CONTAINER/protocolo</code>. Ou seja: o Nginx responde na porta 8080 de <strong>todas</strong> as interfaces da máquina (<code>0.0.0.0</code>), e o Postgres só no <strong>localhost</strong> (<code>127.0.0.1</code>) — mais seguro para um banco.</p>
+
+<h3>Sem -p, a porta fica só interna</h3>
+<pre class="term">$ docker run -d --name interno nginx:alpine
+$ docker ps
+… PORTS
+… 80/tcp                     « só 80/tcp: o container expõe 80 na rede interna dele, mas nada publicado no host</pre>
+<p>Nesse caso o site <strong>não</strong> abre em <code>localhost</code> — só outros containers na mesma rede alcançariam. Publicar é com <code>-p</code>.</p>
+
+<hr>
+
+<h2>O ciclo de vida visto pelo ps</h2>
+<p>Acompanhe um mesmo container pelas fases — é o jeito mais fácil de entender os status:</p>
+<pre class="term">$ docker create --name ciclo hello-world     « só criou
+$ docker ps -a
+… STATUS     NAMES
+… Created    ciclo
+$ docker start ciclo                          « ligou
+$ docker ps
+… (vazio: já saiu na hora)
+$ docker ps -a
+… STATUS                    NAMES
+… Exited (0) 2 seconds ago   ciclo
+$ docker start ciclo                          « religa o MESMO container
+$ docker ps -a
+… Exited (0) 5 seconds ago   ciclo
+$ docker rm ciclo                             « apagou de vez
+$ docker ps -a                                   « não aparece mais</pre>
+
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Comando</th><th>Status no ps -a depois</th></tr>
+<tr><td><code>docker create nome img</code></td><td><code>Created</code></td></tr>
+<tr><td><code>docker start nome</code> (container que fica vivo)</td><td>some do ps -a? não: aparece no <code>ps</code> como <code>Up</code></td></tr>
+<tr><td><code>docker start nome</code> (container que sai na hora, tipo hello-world)</td><td><code>Exited (0)</code></td></tr>
+<tr><td><code>docker stop nome</code></td><td><code>Exited (0)</code> (ou <code>Exited (143)</code> se foi SIGTERM forçado)</td></tr>
+<tr><td><code>docker kill nome</code></td><td><code>Exited (137)</code></td></tr>
+<tr><td><code>docker rm nome</code></td><td>some da lista</td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>Filtros na prática</h2>
+<p>Além de <code>-a</code> e <code>-q</code>, dá para filtrar a lista sem escrever código:</p>
+<pre class="term">$ docker ps --filter "name=web"            « só containers cujo nome contém "web"
+$ docker ps --filter "ancestor=nginx:alpine"  « só containers criados dessa imagem
+$ docker ps -a --filter "status=exited"     « só os que pararam
+$ docker ps --filter "publish=8080"        « só os que publicaram a 8080
+$ docker ps -a --filter "exited=1"         « só os que saíram com código 1 (erro) — olhe os logs deles!</pre>
+
+<h3>Lendo a saída com --format</h3>
+<p>O <code>--format</code> usa um mini-template com campos entre <code>{{ }}</code>:</p>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Campo</th><th>Mostra</th></tr>
+<tr><td><code>{{.ID}}</code></td><td>ID curto do container</td></tr>
+<tr><td><code>{{.Image}}</code></td><td>A imagem</td></tr>
+<tr><td><code>{{.Names}}</code></td><td>O nome</td></tr>
+<tr><td><code>{{.Status}}</code></td><td>O status (Up / Exited…)</td></tr>
+<tr><td><code>{{.Ports}}</code></td><td>As portas publicadas</td></tr>
+<tr><td><code>{{.RunningFor}}</code></td><td>Há quanto tempo está rodando</td></tr>
+</table>
+</div>
+<pre class="term">$ docker ps --format "{{.Names}} ({{.Image}}): {{.Status}} — portas: {{.Ports}}"
+web (nginx:alpine): Up 2 minutes — portas: 0.0.0.0:8080->80/tcp
+cache (redis:7-alpine): Up 2 minutes — portas: 6379/tcp</pre>
+
+<hr>
+
+<h2>Resumo</h2>
+<ul>
+  <li><code>docker ps</code> = containers <strong>rodando</strong>; <code>docker ps -a</code> = <strong>todos</strong> (rodando + parados).</li>
+  <li>Colunas: <code>CONTAINER ID</code> (12 primeiros caracteres bastam), <code>IMAGE</code>, <code>COMMAND</code>, <code>CREATED</code>, <code>STATUS</code>, <code>PORTS</code>, <code>NAMES</code>.</li>
+  <li>Status: <code>Up</code> (rodando), <code>Exited (0)</code> (terminou com sucesso), <code>Exited (1)</code> (erro — veja <code>logs</code>), <code>Created</code>, <code>Restarting</code>.</li>
+  <li>Variações: <code>-q</code> (só IDs), <code>-l</code> (último), <code>-s</code> (tamanho), <code>--format</code> (saída própria), <code>--filter</code>.</li>
+  <li>Em scripts: <code>docker stop $(docker ps -q)</code>, <code>docker rm $(docker ps -aq)</code> — com cuidado para não apagar o que não deve.</li>
+</ul>
+
+<div class="tip"><strong>Próxima aula:</strong> <a href="ajuda.html">Obtendo ajuda (docker --help, docker COMANDO --help)</a> — você não precisa decorar todas as opções: o próprio Docker lista tudo no <code>--help</code>.</div>
+
+</div>
+</main>
+</div>
+<script src="assets/site.js?v=4"></script>
+</body>
+</html>

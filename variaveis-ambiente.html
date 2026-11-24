@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Variáveis de ambiente (-e) em containers | Guia Docker</title>
+<meta name="description" content="Como passar variáveis de ambiente para containers com -e e --env-file: a ideia (configurar o programa sem trocar a imagem), exemplos reais com POSTGRES_PASSWORD, MYSQL_ROOT_PASSWORD, NODE_ENV, -e VAR=valor e -e VAR (herda do seu shell), como ver as variáveis dentro do container (printenv, docker inspect), o arquivo .env, e o aviso de segurança de que variáveis ficam visíveis no docker inspect. Missões no simulador.">
+<link rel="stylesheet" href="assets/style.css?v=4">
+<script>try{var t=localStorage.getItem("tema");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<meta http-equiv="Cache-Control" content="no-store, must-revalidate">
+<script>try{history.scrollRestoration="manual"}catch(e){}(function(){var n=0;function t(){window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;if(++n<60)setTimeout(t,50)}t();window.addEventListener("pagehide",function(){window.scrollTo(0,0);document.documentElement.scrollTop=0;});window.addEventListener("pageshow",function(){window.scrollTo(0,0)});window.addEventListener("load",function(){window.scrollTo(0,0)});})();document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(a){var h=a.getAttribute("href")||"";if(/[.]html($|[?#])/.test(h)&&a.host===location.host){window.scrollTo(0,0);document.documentElement.scrollTop=0;}}});</script>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" id="sidebar" aria-label="Tópicos"></nav>
+<main class="main">
+<div class="content">
+
+<div class="pager"></div>
+
+<h1>Variáveis de <span class="hl">ambiente (-e)</span></h1>
+
+<p class="intro">Muitas imagens precisam de configuração na hora de subir: a senha do banco, o modo de produção, a porta interna. Você passa isso com <code>-e NOME=valor</code> — sem trocar a imagem, só mudando o comportamento do container. Pense numa variável de ambiente como um "interruptor e mostrador" do programa dentro da caixa.</p>
+
+<div class="note">
+<strong>Você vai aprender</strong>
+<ul>
+  <li>Para que servem variáveis de ambiente num container (config sem trocar imagem).</li>
+  <li><code>-e NOME=valor</code> (uma ou várias vezes) e <code>-e NOME</code> (herda do seu shell).</li>
+  <li><code>--env-file .env</code>: ler várias de um arquivo.</li>
+  <li>Exemplos reais: <code>POSTGRES_PASSWORD</code>, <code>MYSQL_ROOT_PASSWORD</code>, <code>NODE_ENV</code>.</li>
+  <li>Como ver as variáveis dentro do container (<code>printenv</code>) e no <code>docker inspect</code>.</li>
+  <li>Segurança: variáveis aparecem no <code>docker inspect</code> — não bote segredos nelas em máquina compartilhada.</li>
+</ul>
+</div>
+
+<hr>
+
+<h2>A ideia: a mesma caixa, regulagens diferentes</h2>
+<p>A imagem <code>postgres</code> é sempre a mesma — mas cada uso precisa de uma senha diferente. Em vez de criar uma imagem por senha, você passa a senha como variável de ambiente na hora do <code>run</code>:</p>
+<pre class="term">$ docker run -d --name banco \
+    -e POSTGRES_PASSWORD=segredo123 \
+    -e POSTGRES_USER=ana \
+    -e POSTGRES_DB=minha_loja \
+    -p 127.0.0.1:5432:5432 \
+    postgres:16-alpine</pre>
+<p>A página da imagem no Docker Hub lista as variáveis que ela aceita (para o postgres: <code>POSTGRES_PASSWORD</code> é <strong>obrigatória</strong> — sem ela o container nem sobe).</p>
+
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Imagem</th><th>Variáveis típicas</th></tr>
+<tr><td><code>postgres</code></td><td><code>POSTGRES_PASSWORD</code>*, <code>POSTGRES_USER</code>, <code>POSTGRES_DB</code></td></tr>
+<tr><td><code>mysql</code></td><td><code>MYSQL_ROOT_PASSWORD</code>*, <code>MYSQL_DATABASE</code>, <code>MYSQL_USER</code>, <code>MYSQL_PASSWORD</code></td></tr>
+<tr><td><code>redis</code></td><td>senha via config; <code>REDIS_ARGS</code> em imagens variantes</td></tr>
+<tr><td><code>node</code> (sua API)</td><td><code>NODE_ENV=production</code>, <code>PORT=3000</code>, <code>DATABASE_URL=…</code></td></tr>
+<tr><td><code>nginx</code></td><td><code>NGINX_HOST</code>, <code>NGINX_PORT</code> (imagens variantes)</td></tr>
+</table>
+</div>
+<p>* obrigatórias — se faltarem, o container inicia e cai na hora (veja o erro com <code>docker logs</code>).</p>
+
+<hr>
+
+<h2>Uma variável, várias, e herdar do seu shell</h2>
+<dl class="anatomy">
+  <dt>-e POSTGRES_PASSWORD=segredo</dt><dd>Define <code>POSTGRES_PASSWORD</code> com o valor <code>segredo</code> dentro do container. A flag pode repetir: <code>-e A=1 -e B=2 -e C=3</code>.</dd>
+  <dt>-e MINHA_VAR</dt><dd>Sem <code>=</code>: o Docker pega o valor da variável <strong>do seu shell</strong> e passa para dentro. Ex.: se no seu terminal <code>export API_KEY=abc</code>, então <code>docker run -e API_KEY …</code> leva <code>abc</code> para dentro.</dd>
+  <dt>espaços no valor</dt><dd>Se o valor tem espaço, ponha entre aspas: <code>-e "MOTD=Bem vinda, Ana"</code>.</dd>
+</dl>
+
+<pre class="term">$ docker run -d --name api \
+    -e NODE_ENV=production \
+    -e PORT=3000 \
+    -e DATABASE_URL \
+    -p 3000:3000 \
+    node:22-alpine node server.js     « DATABASE_URL veio do shell da Ana</pre>
+
+<hr>
+
+<h2>--env-file: várias variáveis de um arquivo .env</h2>
+<p>Quando são muitas variáveis, junte num arquivo <code>.env</code> (um <code>NOME=valor</code> por linha):</p>
+<pre class="term">$ cat .env
+NODE_ENV=production
+PORT=3000
+DATABASE_URL=postgres://ana:segredo@banco:5432/loja
+$ docker run -d --env-file .env -p 3000:3000 --name api node:22-alpine node server.js</pre>
+<p>O Compose (nível 2) também lê <code>.env</code> sozinho — aula <a href="compose-yaml.html">docker-compose.yml</a>.</p>
+
+<div class="warning">
+<strong>Nunca commite o .env no Git</strong>
+<p>O <code>.env</code> tem senhas. Coloque <code>.env</code> no <code>.gitignore</code> e mantenha um <code>.env.example</code> só com os nomes (sem valores) para a equipe saber o que precisa preencher.</p>
+</div>
+
+<hr>
+
+<h2>Vendo as variáveis dentro do container</h2>
+<p>Duas formas. A primeira, rodando <code>printenv</code> dentro do container com <code>docker exec</code> (aula <a href="docker-exec.html">exec</a>):</p>
+
+<div class="try" data-goal="(exec:" data-solucao="docker exec api sh -c echo">
+<p class="try-task"><strong>Missão:</strong> suba um container com variável (<code>docker run -d -e NODE_ENV=production --name api node:22-alpine</code>) e rode <code>docker exec api printenv NODE_ENV</code> para ver a variável dentro dele.</p>
+</div>
+
+<pre class="term">$ docker run -d -e NODE_ENV=production --name api node:22-alpine
+$ docker exec api printenv NODE_ENV
+production
+$ docker exec api printenv          « todas as variáveis do container
+PATH=/usr/local/sbin:…
+NODE_ENV=production
+…</pre>
+
+<p>A segunda, sem entrar no container: o <code>docker inspect</code> mostra as variáveis na seção <code>Env</code>:</p>
+<pre class="term">$ docker inspect api --format '{{range .Config.Env}}{{println .}}{{end}}'
+PATH=/usr/local/sbin:…
+NODE_ENV=production</pre>
+
+<div class="warning">
+<strong>Segurança: variáveis ficam visíveis no docker inspect</strong>
+<p>Qualquer pessoa com acesso ao Docker da máquina vê as variáveis de todos os containers pelo <code>docker inspect</code>. Em máquina compartilhada ou servidor de produção, prefira passar segredos por <strong>volumes</strong> (arquivo montado com permissão restrita) ou por sistemas de segredos (Docker Secrets no Swarm — nível 3). Nunca deixe senha hardcoded na imagem (via <code>ENV</code> no Dockerfile): qualquer um que baixa a imagem vê.</p>
+</div>
+
+<hr>
+
+<h2>ENV no Dockerfile × -e no run</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th></th><th>ENV no Dockerfile</th><th>-e no docker run</th></tr>
+<tr><td>Quando define</td><td>Na hora do <code>build</code> (fica gravado na imagem)</td><td>Na hora do <code>run</code> (vale só para aquele container)</td></tr>
+<tr><td>Quem vê o valor</td><td>Todo mundo que baixa a imagem</td><td>Só quem tem acesso à máquina/container</td></tr>
+<tr><td>Uso típico</td><td>Valores públicos e fixos (ex.: <code>ENV NODE_ENV=production</code> numa imagem de produção)</td><td>Segredos e config por ambiente (senha do banco, URL externa)</td></tr>
+<tr><td>Pode mudar sem rebuild?</td><td>Não</td><td><strong>Sim</strong> — é só dar <code>-e</code> com outro valor (sobrescreve o do Dockerfile)</td></tr>
+</table>
+</div>
+<p>Regra prática: <strong>padrão público vai no Dockerfile (ENV); segredo e config de ambiente vão no <code>-e</code>/<code>.env</code></strong>. A aula <a href="dockerfile-expose-env.html">EXPOSE, ENV e ARG</a> aprofunda a parte do Dockerfile.</p>
+
+<div class="mc" data-answer="2">
+<p class="mc-q">Para passar a senha do Postgres na hora de subir o banco, o comando certo é:</p>
+<label><input type="radio" name="q1"> <code>docker run postgres --password segredo</code></label>
+<label><input type="radio" name="q1"> <code>docker run -e POSTGRES_PASSWORD=segredo postgres:16-alpine</code></label>
+<label><input type="radio" name="q1"> <code>docker run -p POSTGRES_PASSWORD=segredo postgres</code></label>
+<label><input type="radio" name="q1"> editar a imagem postgres</label>
+</div>
+
+<div class="mc" data-answer="3">
+<p class="mc-q">O que faz <code>-e API_KEY</code> (sem <code>=valor</code>)?</p>
+<label><input type="radio" name="q2"> Dá erro</label>
+<label><input type="radio" name="q2"> Define API_KEY vazia</label>
+<label><input type="radio" name="q2"> Pega o valor da variável API_KEY do seu shell e passa para dentro do container</label>
+<label><input type="radio" name="q2"> Apaga a variável dentro do container</label>
+</div>
+
+<div class="mc" data-answer="2">
+<p class="mc-q">Onde ficam visíveis as variáveis passadas com <code>-e</code>?</p>
+<label><input type="radio" name="q3"> Em lugar nenhum, são criptografadas</label>
+<label><input type="radio" name="q3"> No <code>docker inspect</code> do container (seção Env) — e dentro dele com <code>printenv</code></label>
+<label><input type="radio" name="q3"> Só no Docker Hub</label>
+<label><input type="radio" name="q3"> No navegador</label>
+</div>
+
+<hr>
+
+<h2>Exemplo completo: API + banco com variáveis</h2>
+<p>Juntando o que a Ana aprendeu: um banco Postgres e uma API, conversando por variáveis de ambiente:</p>
+<pre class="term">$ docker run -d --name banco \
+    -e POSTGRES_PASSWORD=segredo123 \
+    -e POSTGRES_USER=ana \
+    -e POSTGRES_DB=loja \
+    -p 127.0.0.1:5432:5432 \
+    postgres:16-alpine
+$ docker run -d --name api \
+    -e NODE_ENV=production \
+    -e DATABASE_URL=postgres://ana:segredo123@banco:5432/loja \
+    -p 3000:3000 \
+    --link banco \
+    node:22-alpine node server.js
+$ docker exec api printenv DATABASE_URL
+postgres://ana:segredo123@banco:5432/loja
+$ curl -s http://localhost:3000/produtos | head -c 120
+[{"id":1,"nome":"Caderno","preco":19.9},…</pre>
+<p>Repare: a API reaches o banco pelo <strong>nome</strong> <code>banco</code> (o Docker resolve nomes de containers na mesma rede — aula <a href="containers-conversando.html">containers se comunicando</a>, nível 2).</p>
+
+<h3>Debugando: o container sobe e cai na hora</h3>
+<p>Sintoma clássico de variável obrigatória faltando:</p>
+<pre class="term">$ docker run -d --name banco2 postgres:16-alpine    « esqueceu a POSTGRES_PASSWORD
+$ docker ps -a
+… Exited (1) 2 seconds ago   banco2
+$ docker logs banco2
+Error: Database is uninitialized and superuser password is not specified.
+       You must specify POSTGRES_PASSWORD to a non-empty value for superuser…</pre>
+<p>O propio log diz o que faltou. Esse padrão — <code>ps -a</code> vê <code>Exited (1)</code>, <code>logs</code> explica — é o fluxo de debug de qualquer container (aula <a href="problemas.html">erros comuns</a> resume a tabela).</p>
+
+<h3>Variáveis comuns em apps web (resumo)</h3>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Variável</th><th>Para que serve</th><th>Exemplo</th></tr>
+<tr><td><code>NODE_ENV</code></td><td>Modo do app (production liga otimizações e desliga debug)</td><td><code>production</code></td></tr>
+<tr><td><code>PORT</code></td><td>Porta interna que o app ouve</td><td><code>3000</code></td></tr>
+<tr><td><code>DATABASE_URL</code></td><td>Conexão completa com o banco</td><td><code>postgres://…</code></td></tr>
+<tr><td><code>DEBUG</code></td><td>Nível de log detalhado</td><td><code>app:*</code></td></tr>
+<tr><td><code>TZ</code></td><td>Fuso horário do container</td><td><code>America/Sao_Paulo</code></td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>Debug: "a variável não chegou dentro do container"</h2>
+<p>Sintoma comum: você passou <code>-e</code> e o programa diz que a variável está vazia. Checklist:</p>
+<ol class="passo">
+  <li>Nome certo? <code>docker exec X printenv</code> lista todas — procure a sua (Cuidado: maiúsculas importam: <code>node_env</code> ≠ <code>NODE_ENV</code>).</li>
+  <li>Valor com espaço? Tem que ir entre aspas: <code>-e "TITULO=Olá mundo"</code> — sem aspas, o shell quebra em dois.</li>
+  <li>Usa <code>-e VAR</code> (herda do shell) mas a variável não estava exportada? Faça <code>export VAR=valor</code> antes do run.</li>
+  <li>Está no <code>.env</code> mas esqueceu o <code>--env-file .env</code>? Ou o arquivo não está na pasta atual?</li>
+  <li>O programa lê a variável só na inicialização — se o container já estava rodando, recria: <code>docker rm X</code> + <code>run</code> de novo.</li>
+</ol>
+
+<div class="warning">
+<strong>-e não persiste</strong>
+<p>As variáveis passadas com <code>-e</code> valem só para aquele container. Se você recriar sem o <code>-e</code>, elas somem (a menos que estejam no <code>ENV</code> da imagem). Para não esquecer: mantenha um <code>.env</code> ou um script/compose com os <code>-e</code>.</p>
+</div>
+
+<hr>
+
+<h2>Boas práticas com variáveis</h2>
+<ul>
+  <li><strong>Um lugar só para a lista</strong>: mantenha um <code>.env.example</code> no projeto (só os nomes) e o <code>.env</code> real no <code>.gitignore</code> — a equipe toda sabe o que precisa preencher.</li>
+  <li><strong>Nomeie com o padrão do programa</strong>: a imagem oficial diz quais variáveis aceita (ex.: <code>POSTGRES_PASSWORD</code>). Não invente nome — o programa não vai ler.</li>
+  <li><strong>Valores com espaço ou caracteres especiais</strong>: sempre entre aspas: <code>-e "MSG=olá, tudo bem?"</code>.</li>
+  <li><strong>Não misture camadas</strong>: <code>ENV</code> no Dockerfile para o que é fixo e público; <code>-e</code>/<code>.env</code> para o que muda por ambiente ou é segredo.</li>
+  <li><strong>Verifique depois</strong>: <code>docker exec X printenv</code> — ver com os olhos beats adivinhar.</li>
+</ul>
+
+<hr>
+
+<h2>Resumo</h2>
+<ul>
+  <li>Variáveis de ambiente configuram o programa dentro do container <strong>sem trocar a imagem</strong>: <code>-e NOME=valor</code> (repita a flag para várias).</li>
+  <li><code>-e NOME</code> (sem <code>=</code>) herda o valor do seu shell. <code>--env-file .env</code> lê várias de um arquivo (cuidado para não commitar o .env!).</li>
+  <li>Exemplos reais: <code>POSTGRES_PASSWORD</code> (obrigatória no postgres), <code>MYSQL_ROOT_PASSWORD</code>, <code>NODE_ENV=production</code>, <code>PORT</code>, <code>DATABASE_URL</code>.</li>
+  <li>Para ver dentro do container: <code>docker exec X printenv</code>. De fora: <code>docker inspect X</code> (seção <code>Env</code>) — e é por isso que <strong>segredo não vai em <code>-e</code> em máquina compartilhada</strong>.</li>
+  <li><code>ENV</code> no Dockerfile = valor fixo e público gravado na imagem; <code>-e</code> no run = valor por container, pode sobrescrever o ENV.</li>
+</ul>
+
+<div class="tip"><strong>Próxima aula:</strong> <a href="volumes-intro.html">Volumes (-v): pastas que persistem</a> — a última peça do nível 1: e se os dados do container não podem sumir quando ele for apagado?</div>
+
+</div>
+</main>
+</div>
+<script src="assets/site.js?v=4"></script>
+</body>
+</html>

@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>docker volume: criar, listar, inspecionar e remover volumes | Guia Docker</title>
+<meta name="description" content="O subgrupo docker volume: create para criar volumes nomeados (com --label e --driver), ls para listar (com -q e --filter), inspect para ver detalhes como o Mountpoint, rm para remover (e o erro real de volume in use), prune para limpar os não usados (com cuidado — é destrutivo), e como fazer backup de um volume (tar pelo Mountpoint ou container auxiliar). Exemplo completo criando um volume dedicado para o Postgres pela Ana no notebook, com saídas reais do Docker Engine 27, tabela de subcomandos, erros e quiz.">
+<link rel="stylesheet" href="assets/style.css?v=4">
+<script>try{var t=localStorage.getItem("tema");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<meta http-equiv="Cache-Control" content="no-store, must-revalidate">
+<script>try{history.scrollRestoration="manual"}catch(e){}(function(){var n=0;function t(){window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;if(++n<60)setTimeout(t,50)}t();window.addEventListener("pagehide",function(){window.scrollTo(0,0);document.documentElement.scrollTop=0;});window.addEventListener("pageshow",function(){window.scrollTo(0,0)});window.addEventListener("load",function(){window.scrollTo(0,0)});})();document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(a){var h=a.getAttribute("href")||"";if(/[.]html($|[?#])/.test(h)&&a.host===location.host){window.scrollTo(0,0);document.documentElement.scrollTop=0;}}});</script>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" id="sidebar" aria-label="Tópicos"></nav>
+<main class="main">
+<div class="content">
+
+<div class="pager"></div>
+
+<h1><span class="hl">docker volume</span> — criar, listar e remover</h1>
+
+<p class="intro">Volumes nomeados são <strong>objetos gerenciados pelo Docker</strong>, como imagens, containers e redes — e têm um subgrupo próprio de comandos: <code>docker volume</code>. Aqui você cria volumes antes de usar (bom para scripts e para documentar a infraestrutura), lista o que existe na máquina, inspeciona e remove o que não precisa mais. A Ana vai organizar os dados do projeto dela assim.</p>
+
+<div class="note">
+<strong>Você vai aprender</strong>
+<ul>
+  <li><code>docker volume create</code> para criar um volume nomeado — e o <code>--label</code> para etiquetar.</li>
+  <li><code>docker volume ls</code> para listar, com <code>-q</code> (só nomes) e <code>--filter</code> (ex.: <code>dangling=true</code>).</li>
+  <li>Um exemplo completo: volume dedicado para o Postgres, com os dados sobrevivendo à troca de container.</li>
+  <li><code>docker volume rm</code> e o erro real de "volume is in use".</li>
+  <li><code>docker volume prune</code> para apagar todos os volumes não usados — e por que é destrutivo.</li>
+  <li>Como fazer backup de um volume (tar pelo Mountpoint ou via container auxiliar).</li>
+</ul>
+</div>
+
+<hr>
+
+<h2>O básico: create e ls</h2>
+<pre class="term" data-cwd="~">$ docker volume create dados
+dados
+$ docker volume ls
+DRIVER    VOLUME NAME
+local     dados</pre>
+<p>O <code>create</code> devolve o nome do volume — essa linha é a confirmação de que deu certo. O <code>ls</code> lista todos os volumes locais: repare que o driver padrão é sempre <code>local</code> (os dados ficam no disco da máquina, em <code>/var/lib/docker/volumes/</code>).</p>
+<dl class="anatomy">
+  <dt>docker volume</dt><dd>o subgrupo de comandos que gerencia volumes.</dd>
+  <dt>create</dt><dd>cria um volume nomeado (driver <code>local</code> por padrão).</dd>
+  <dt>dados</dt><dd>o nome do volume — precisa ser único na máquina e é esse nome que você usa no <code>-v dados:/caminho</code>.</dd>
+</dl>
+
+<div class="tip"><strong>Nome descritivo salva vidas:</strong> em vez de <code>vol1</code>, use <code>dados-postgres</code>, <code>uploads-site</code>, <code>cache-redis</code>. Daqui a seis meses, <code>docker volume ls</code> vai mostrar uma lista e você vai saber para que serve cada um sem abrir o projeto.</div>
+
+<hr>
+
+<h2>Etiquetando volumes com --label</h2>
+<p>Volumes órfãos (criados e esquecidos) são o terror de toda máquina com Docker. Para saber <em>para que serve</em> cada volume, prenda etiquetas na criação:</p>
+<pre class="term" data-cwd="~">$ docker volume create --label projeto=minha-api --label ambiente=dev dados-api
+dados-api
+$ docker volume ls --filter label=projeto=minha-api
+DRIVER    VOLUME NAME
+local     dados-api
+$ docker volume ls -q --filter dangling=true   « só os volumes sem container usando (órfãos)</pre>
+<p>O <code>-q</code> imprime só os nomes, um por linha — perfeito para scripts (<code>for v in $(docker volume ls -q --filter dangling=true); do …</code>).</p>
+
+<hr>
+
+<h2>Exemplo completo: volume dedicado para o Postgres</h2>
+<p>Em vez de deixar o Docker criar o volume implicitamente no <code>docker run</code>, a Ana cria antes — bom para scripts e para deixar claro na máquina o que é o quê:</p>
+<pre class="term" data-cwd="~">$ docker volume create dados-postgres
+dados-postgres
+$ docker run -d --name meu-banco \
+>     -e POSTGRES_PASSWORD=segredo \
+>     -e POSTGRES_USER=ana \
+>     -p 5432:5432 \
+>     -v dados-postgres:/var/lib/postgresql/data \
+>     postgres:16-alpine
+c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1
+$ docker ps
+CONTAINER ID   IMAGE              STATUS         PORTS                     NAMES
+c3d4e5f6a1b2   postgres:16-alpine Up 4 seconds   0.0.0.0:5432->5432/tcp    meu-banco
+$ docker volume ls
+DRIVER    VOLUME NAME
+local     dados
+local     dados-postgres</pre>
+<p>Agora os dados do banco sobrevivem ao container. A Ana testa: cria uma tabela, apaga o container, sobe outro com o mesmo volume:</p>
+<pre class="term" data-cwd="~">$ docker exec meu-banco psql -U ana -d postgres -c "CREATE TABLE teste (id int);"
+CREATE TABLE
+$ docker rm -f meu-banco
+meu-banco
+$ docker run -d --name meu-banco -e POSTGRES_PASSWORD=segredo -e POSTGRES_USER=ana \
+>     -p 5432:5432 -v dados-postgres:/var/lib/postgresql/data postgres:16-alpine
+$ docker exec meu-banco psql -U ana -d postgres -c "\dt"
+ teste   « a tabela continua lá, no volume</pre>
+
+<hr>
+
+<h2>docker volume rm: remover um volume</h2>
+<pre class="term" data-cwd="~">$ docker volume rm dados
+dados</pre>
+<p>Sem erro, o comando devolve o nome do volume removido. Mas se algum container estiver usando o volume, o Docker recusa:</p>
+<pre class="term" data-cwd="~">$ docker volume rm dados-postgres
+Error response from daemon: remove dados-postgres: volume is in use - [c3d4e5f6a1b2]</pre>
+<div class="warn"><strong>Volume em uso não pode ser removido:</strong> <code>Error response from daemon: remove dados-postgres: volume is in use - [c3d4e5f6a1b2]</code>. Pare e remova o container primeiro (<code>docker rm -f meu-banco</code>) e só depois rode o <code>docker volume rm</code>. E lembre: <strong>apagar o volume apaga os dados de vez</strong> — não tem lixeira. Se quiser guardar, faça backup antes (veja abaixo).</div>
+
+<div class="warn"><strong>Erro de digitação no nome:</strong> <code>docker volume rm dados-postgre</code> (faltando o s) dá <code>Error response from daemon: volume dados-postgre does not exist</code> — o Docker não adivinha nem sugere. O <code>docker volume ls</code> antes ajuda a acertar o nome.</div>
+
+<hr>
+
+<h2>Backup de um volume (duas formas)</h2>
+<p>Como o volume é uma pasta no host (<code>/var/lib/docker/volumes/dados-postgres/_data</code>), dá para empacotar com <code>tar</code>. A forma mais segura é usar um container auxiliar que monta o volume e o destino do backup — assim você não mexe no Mountpoint direto (o que pode corromper bancos rodando):</p>
+<pre class="term" data-cwd="~">$ docker run --rm \
+>     -v dados-postgres:/dados:ro \
+>     -v /home/ana/backups:/backup \
+>     alpine tar czf /backup/dados-postgres.tar.gz -C /dados .
+$ ls -lh /home/ana/backups
+dados-postgres.tar.gz   187MB   « backup pronto no host</pre>
+<p>Para restaurar, é o inverso: monte o volume (vazio ou não) e descompacte dentro dele. Em produção, prefira o backup nativo do banco (<code>pg_dump</code>) — o tar do volume só vale com o banco parado ou em modo consistente.</p>
+
+<hr>
+
+<h2>docker volume prune: limpar volumes não usados</h2>
+<p>Com o tempo, volumes de containers antigos vão sobrando. O <code>prune</code> apaga todos os volumes que <strong>nenhum container está usando</strong>:</p>
+<pre class="term" data-cwd="~">$ docker volume prune
+WARNING! This will remove all local volumes not used by at least one container.
+Are you sure you want to continue? [y/N] y
+Deleted Volumes:
+dados-antigos
+uploads-teste
+
+Total reclaimed space: 1.24GB</pre>
+<p>Para só listar os volumes "órfãos" sem apagar nada, use <code>docker volume ls -q --filter dangling=true</code> (vimos acima).</p>
+<div class="warn"><strong>Cuidado: o prune é destrutivo e não pergunta volume por volume</strong> — só mostra o aviso inicial. Ele pula os volumes em uso, mas "em uso" significa "referenciado por algum container existente" — um container parado também conta como uso. Só rode quando tiver certeza de que os volumes órfãos realmente não prestam. E <strong>nunca rode <code>docker system prune -a --volumes</code> sem ler antes</strong> — isso apaga também imagens (aula <a href="docker-system-prune.html">docker system prune</a>).</div>
+
+<hr>
+
+<h2>Copiar arquivos para dentro e fora de um volume: docker cp</h2>
+<p>Às vezes você precisa jogar um arquivo para dentro de um volume (um dump de banco para restaurar, um certificado novo) ou puxar algo de dentro dele, sem entrar no container. O <code>docker cp</code> faz essa ponte entre o host e o container — e funciona com volumes porque o caminho do volume existe dentro do container:</p>
+<pre class="term" data-cwd="~">$ docker cp /home/ana/backup.sql meu-banco:/tmp/backup.sql
+Successfully copied 2.56kB to meu-banco:/tmp/backup.sql
+$ docker exec meu-banco psql -U ana -d postgres -f /tmp/backup.sql   « restaurou o dump
+$ docker cp meu-banco:/var/lib/postgresql/data/postgresql.conf /home/ana/postgresql.conf.bak
+Successfully copied 4.12kB to /home/ana/postgresql.conf.bak   « puxou a config para o host</pre>
+<p>O primeiro copia do host para o container (e cai no volume, se o destino estiver nele); o segundo copia do container para o host. Útil também para inspecionar: <code>docker cp meu-banco:/var/lib/postgresql/data/PG_VERSION /tmp/</code>.</p>
+
+<div class="tip"><strong>docker cp vs. editar direto no Mountpoint:</strong> evite editar arquivos direto em <code>/var/lib/docker/volumes/…/_data</code> no host — o Docker não sabe que você mexeu ali, e bancos como o Postgres podem corromper os dados. Use <code>docker cp</code> (ou um container auxiliar) para entrar e sair de volumes.</div>
+
+<hr>
+
+<h2>Um volume em vários containers (compartilhamento)</h2>
+<p>Nada impede dois containers de montarem o <strong>mesmo volume</strong> — é um jeito comum de compartilhar arquivos entre eles (ex.: um container gera relatórios, outro serve eles por HTTP):</p>
+<pre class="term" data-cwd="~">$ docker run -d --name gerador -v dados-compartilhados:/dados alpine sh -c "while true; do date > /dados/hora.txt; sleep 5; done"
+$ docker run -d --name web -p 8080:80 -v dados-compartilhados:/usr/share/nginx/html:ro nginx:alpine
+$ curl http://localhost:8080/hora.txt
+qui 24 nov 13:45:12 -03 2025   « o arquivo que o gerador escreveu, servido pelo nginx</pre>
+<p>Os dois containers enxergam a mesma pasta ao mesmo tempo. Cuidado com bancos de dados nesse modo: dois Postgres apontando para o mesmo volume corrompem os dados — banco não se compartilha assim (a não ser em modo cluster, que é outra história).</p>
+
+<hr>
+
+<h2>Script de backup reutilizável</h2>
+<p>Com o que vimos, dá para guardar o backup num scriptzinho. A Ana salva isso como <code>backup-volume.sh</code> na home dela:</p>
+<pre class="file">#!/bin/bash
+# arquivo: backup-volume.sh — empacota um volume nomeado em tar.gz na pasta ~/backups
+VOLUME="$1"                       # nome do volume (ex.: dados-postgres)
+DESTINO="$HOME/backups"           # pasta dos backups no host
+mkdir -p "$DESTINO"
+docker run --rm \
+    -v "$VOLUME":/dados:ro \
+    -v "$DESTINO":/backup \
+    alpine tar czf "/backup/$VOLUME-$(date +%F).tar.gz" -C /dados .
+echo "Backup de $VOLUME salvo em $DESTINO"</pre>
+<p>Uso: <code>./backup-volume.sh dados-postgres</code>. Repare no <code>:ro</code>: o container auxiliar lê o volume mas não consegue alterá-lo — o backup não corrompe o original.</p>
+
+<hr>
+
+<h2>Resumo dos subcomandos</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Comando</th><th>O que faz</th></tr>
+<tr><td><code>docker volume create dados</code></td><td>Cria o volume nomeado <code>dados</code>; aceita <code>--label chave=valor</code> e <code>--driver</code>.</td></tr>
+<tr><td><code>docker volume ls</code></td><td>Lista todos os volumes. <code>-q</code> = só os nomes; <code>--filter label=…</code> ou <code>--filter dangling=true</code> = filtra.</td></tr>
+<tr><td><code>docker volume inspect dados</code></td><td>Mostra o JSON completo do volume, com <code>Mountpoint</code>, <code>Driver</code> e <code>Labels</code> (próxima aula).</td></tr>
+<tr><td><code>docker volume rm dados</code></td><td>Remove o volume — só se nenhum container estiver usando.</td></tr>
+<tr><td><code>docker volume prune</code></td><td>Remove todos os volumes locais não usados por nenhum container (destrutivo!).</td></tr>
+</table>
+</div>
+
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Sintoma</th><th>Causa</th></tr>
+<tr><td><code>volume is in use - […]</code></td><td>Tem container (até parado) usando o volume: <code>docker rm</code> ele antes</td></tr>
+<tr><td><code>volume … does not exist</code></td><td>Nome errado (confira com <code>docker volume ls</code>)</td></tr>
+<tr><td>Volume aparece vazio no <code>ls</code> mas tem dados</td><td>Os dados estão no <code>Mountpoint</code> do host — <code>docker volume inspect</code> mostra onde</td></tr>
+</table>
+</div>
+
+<div class="try" data-goal="dados" data-solucao="docker volume create dados">
+<p class="try-task"><strong>Missão:</strong> crie um volume chamado <code>dados</code> com <code>docker volume create dados</code> e depois confirme com <code>docker volume ls</code> — o nome <code>dados</code> deve aparecer na lista.</p>
+</div>
+
+<div class="try" data-goal="local" data-solucao="docker volume ls">
+<p class="try-task"><strong>Missão extra:</strong> liste os volumes com <code>docker volume ls</code> e olhe a coluna <code>DRIVER</code> — o driver padrão é <code>local</code>.</p>
+</div>
+
+<hr>
+
+<h2>Quiz rápido</h2>
+
+<div class="mc" data-answer="2">
+<p class="mc-q">1. Qual comando cria um volume nomeado chamado <code>dados</code>?</p>
+<label><input type="radio" name="q1"> <code>docker run -v dados</code></label>
+<label><input type="radio" name="q1"> <code>docker volume create dados</code></label>
+<label><input type="radio" name="q1"> <code>docker mkvol dados</code></label>
+<label><input type="radio" name="q1"> <code>docker new volume dados</code></label>
+</div>
+
+<div class="mc" data-answer="3">
+<p class="mc-q">2. A Ana rodou <code>docker volume rm dados-postgres</code> e recebeu <code>volume is in use</code>. O que fazer?</p>
+<label><input type="radio" name="q2"> Rodar <code>docker volume rm -f dados-postgres</code> — o -f apaga mesmo assim</label>
+<label><input type="radio" name="q2"> Reiniciar o computador</label>
+<label><input type="radio" name="q2"> Parar/remover o container que usa o volume (<code>docker rm -f meu-banco</code>) e só depois remover o volume</label>
+<label><input type="radio" name="q2"> Apagar a pasta <code>/var/lib/docker/volumes</code> com sudo</label>
+</div>
+
+<div class="mc" data-answer="4">
+<p class="mc-q">3. Para que serve o <code>docker volume prune</code>?</p>
+<label><input type="radio" name="q3"> Para listar volumes</label>
+<label><input type="radio" name="q3"> Para inspecionar o Mountpoint</label>
+<label><input type="radio" name="q3"> Para criar um volume</label>
+<label><input type="radio" name="q3"> Para apagar de uma vez todos os volumes locais que nenhum container está usando (cuidado: é destrutivo)</label>
+</div>
+
+<div class="mc" data-answer="1">
+<p class="mc-q">4. O que o <code>-q</code> faz no <code>docker volume ls -q</code>?</p>
+<label><input type="radio" name="q4"> Imprime só os nomes dos volumes, um por linha (bom para scripts)</label>
+<label><input type="radio" name="q4"> Mostra o tamanho de cada volume</label>
+<label><input type="radio" name="q4"> Lista só os volumes em uso</label>
+<label><input type="radio" name="q4"> Apaga os volumes vazios</label>
+</div>
+
+<hr>
+
+<h2>Resumo</h2>
+<ul>
+  <li>Volumes nomeados são objetos do Docker gerenciados pelo subgrupo <code>docker volume</code>; o driver padrão é o <code>local</code> (pasta em <code>/var/lib/docker/volumes/&lt;nome&gt;/_data</code>).</li>
+  <li><code>docker volume create dados</code> cria e devolve o nome; aceita <code>--label</code> para etiquetar (e filtrar depois). O <code>docker run -v dados:…</code> cria o volume sozinho se não existir.</li>
+  <li><code>docker volume ls</code> lista tudo; <code>-q</code> dá só os nomes; <code>--filter dangling=true</code> mostra os órfãos; <code>--filter label=…</code> filtra por etiqueta.</li>
+  <li><code>docker volume rm</code> remove só se nenhum container usar — senão <code>volume is in use</code>. Apagar volume apaga os dados de vez (faça backup antes: tar via container auxiliar).</li>
+  <li><code>docker volume prune</code> apaga todos os volumes não usados de uma vez — destrutivo, use com <code>dangling=true</code> na cabeça.</li>
+  <li>Nomes descritivos (<code>dados-postgres</code>) e labels salvam a sua vida daqui a meses.</li>
+</ul>
+
+<div class="tip"><strong>Próxima aula:</strong> <a href="volumes-inspect.html">docker inspect em volumes</a> — vamos ver onde o volume mora de verdade no host (o Mountpoint).</div>
+
+<div class="pager"></div>
+
+</div>
+</main>
+</div>
+<script src="assets/site.js?v=4"></script>
+</body>
+</html>

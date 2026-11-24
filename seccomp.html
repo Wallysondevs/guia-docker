@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Perfis de segurança (seccomp, AppArmor) | Guia Docker</title>
+<meta name="description" content="Camadas de segurança do Docker além do usuário e das capabilities: seccomp filtra as chamadas de sistema (syscalls) que o container pode fazer — o Docker já aplica um perfil padrão que bloqueia ~44 syscalls perigosas (mount, ptrace, bpf…); perfil próprio em JSON com --security-opt seccomp=perfil.json; AppArmor e SELinux confinam por perfil de aplicação; a flag no-new-privileges bloqueia o sudo dentro do container; tabela resumo das camadas e erros reais.">
+<link rel="stylesheet" href="assets/style.css?v=4">
+<script>try{var t=localStorage.getItem("tema");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<meta http-equiv="Cache-Control" content="no-store, must-revalidate">
+<script>try{history.scrollRestoration="manual"}catch(e){}(function(){var n=0;function t(){window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;if(++n<60)setTimeout(t,50)}t();window.addEventListener("pagehide",function(){window.scrollTo(0,0);document.documentElement.scrollTop=0;});window.addEventListener("pageshow",function(){window.scrollTo(0,0)});window.addEventListener("load",function(){window.scrollTo(0,0)});})();document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(a){var h=a.getAttribute("href")||"";if(/[.]html($|[?#])/.test(h)&&a.host===location.host){window.scrollTo(0,0);document.documentElement.scrollTop=0;}}});</script>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" id="sidebar" aria-label="Tópicos"></nav>
+<main class="main">
+<div class="content">
+
+<div class="pager"></div>
+
+<h1><span class="hl">seccomp</span> e AppArmor — perfis de segurança</h1>
+
+<p class="intro">A Ana já blindou o container da API da Loja Aurora por dois lados: usuário comum (aula <a href="usuario-nao-root.html">USER</a>) e capabilities mínimas (aula <a href="cap-drop.html">--cap-drop</a>). Só que ainda falta uma porta: mesmo como usuário comum e sem capabilities, o processo do container ainda pode chamar <strong>qualquer uma das ~300 syscalls do kernel</strong> — abrir arquivos, criar processos, ler memória de outros processos. O <strong>seccomp</strong> é o filtro que diz quais syscalls são permitidas. O <strong>AppArmor</strong> (e o SELinux) confinam o container por outro ângulo: o que ele pode acessar no sistema de arquivos. Nesta aula você vê como as duas camadas funcionam e como aplicá-las.</p>
+
+<div class="note">
+<strong>Você vai aprender</strong>
+<ul>
+  <li>O que é uma syscall e por que filtrá-las.</li>
+  <li>O perfil seccomp padrão do Docker e as syscalls que ele bloqueia.</li>
+  <li>Perfil seccomp próprio em JSON: <code>--security-opt seccomp=perfil.json</code>.</li>
+  <li>AppArmor: perfil <code>docker-default</code> e <code>--security-opt apparmor=…</code>; SELinux com <code>label=…</code>.</li>
+  <li>A flag extra <code>no-new-privileges</code> (bloqueia o <code>sudo</code> dentro do container).</li>
+  <li>Tabela resumo: todas as camadas de segurança do container.</li>
+</ul>
+</div>
+
+<hr>
+
+<h2>A ideia: a lista de pedidos permitidos no kernel</h2>
+<p>Toda vez que um programa quer algo do kernel — abrir um arquivo, criar um processo, falar na rede — ele faz um pedido formal chamado <strong>syscall</strong> (system call, "chamada de sistema"). O kernel tem aproximadamente 300 dessas portas de atendimento. O seccomp (de <em>secure computing mode</em>) é um filtro colocado na frente dessas portas: cada pedido é conferido numa lista e, se não estiver permitido, o kernel devolve erro na hora (<code>EPERM</code> ou <code>ENOSYS</code>), sem nem executar.</p>
+<p>É como a lista de visitantes autorizados na portaria do prédio: o pedido chega, o porteiro confere a lista, e se não tiver nome lá, não entra — não importa quem seja.</p>
+
+<hr>
+
+<h2>O perfil seccomp padrão (já vem ligado)</h2>
+<p>Desde o Docker 10, <strong>todo container já nasce com um perfil seccomp</strong> que bloqueia cerca de <strong>44 syscalls perigosas</strong> — incluindo <code>mount</code>, <code>umount2</code>, <code>ptrace</code>, <code>bpf</code>, <code>init_module</code>/<code>finit_module</code>/<code>delete_module</code> (carregar módulos do kernel), <code>kexec_load</code>, <code>reboot</code>, <code>swapon</code>/<code>swapoff</code>, <code>sethostname</code>, <code>clock_settime</code> e <code>perf_event_open</code>. A Ana confirma no notebook dela:</p>
+<pre class="term">$ docker info
+…
+Security Options:
+  apparmor
+  cgroupns
+  seccomp
+   Profile: builtin
+…</pre>
+<p>Uma syscall bloqueada não quebra o container: ela simplesmente devolve erro para o processo. É por isso que <code>mount</code> dentro de um container comum falha mesmo o processo sendo root:</p>
+<pre class="term">$ docker run --rm nginx:alpine mount -t tmpfs tmpfs /mnt
+mount: /mnt: permission denied.   « a syscall mount foi bloqueada pelo seccomp</pre>
+
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Syscall bloqueada no perfil padrão</th><th>Por que é perigosa</th></tr>
+<tr><td><code>mount</code> / <code>umount2</code></td><td>Montar sistemas de arquivos do host dentro do container = caminho clássico de escape.</td></tr>
+<tr><td><code>ptrace</code></td><td>Ler/escrever a memória de outros processos (roubar credenciais).</td></tr>
+<tr><td><code>bpf</code></td><td>Programar o kernel em baixo nível — usado em vários exploits recentes.</td></tr>
+<tr><td><code>init_module</code> / <code>delete_module</code></td><td>Carregar/descarregar módulos do kernel do host.</td></tr>
+<tr><td><code>kexec_load</code>, <code>reboot</code></td><td>Reiniciar ou trocar o kernel da máquina.</td></tr>
+<tr><td><code>perf_event_open</code></td><td>Medir o kernel de perto — usado para ataques de side-channel.</td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>Perfil seccomp próprio (JSON)</h2>
+<p>Se o perfil padrão bloqueia algo que a sua app precisa — ou se você quer ser <strong>ainda mais restritivo</strong> — crie um perfil próprio em JSON e aplique com <code>--security-opt</code>:</p>
+<pre class="file" data-file="perfil-seccomp.json">{
+  "defaultAction": "SCMP_ACT_ERRNO",
+  "architectures": ["SCMP_ARCH_X86_64", "SCMP_ARCH_X86", "SCMP_ARCH_X32"],
+  "syscalls": [
+    {
+      "names": ["accept", "accept4", "access", "brk", "chmod", "chown",
+                "close", "connect", "dup", "epoll_wait", "exit", "exit_group",
+                "fstat", "gettid", "listen", "mmap", "open", "read", "recv",
+                "send", "socket", "write"],
+      "action": "SCMP_ACT_ALLOW"
+    }
+  ]
+}</pre>
+<p>A regra <code>"defaultAction": "SCMP_ACT_ERRNO"</code> bloqueia <strong>tudo</strong> que não estiver na lista de <code>SCMP_ACT_ALLOW</code> — por isso o perfil precisa listar as syscalls que o seu app usa (o exemplo acima é didático e enxuto; um app real precisa de mais).</p>
+<pre class="term">$ docker run -d --name api --security-opt seccomp=perfil-seccomp.json -p 3000:3000 minha-api:segura
+b2c3d4e5f6a1…</pre>
+<dl class="anatomy">
+  <dt>defaultAction</dt><dd>A ação padrão para qualquer syscall não listada: <code>SCMP_ACT_ERRNO</code> (bloqueia com erro), <code>SCMP_ACT_ALLOW</code> (permite) ou <code>SCMP_ACT_KILL</code> (mata o processo).</dd>
+  <dt>syscalls[].names</dt><dd>A lista de syscalls que fogem à regra padrão.</dd>
+  <dt>syscalls[].action</dt><dd>A ação para essas syscalls — aqui, <code>SCMP_ACT_ALLOW</code>.</dd>
+</dl>
+<div class="warning"><strong>Perfil errado = container nem sobe.</strong> Se o arquivo não existir ou o JSON estiver inválido, o daemon recusa na hora: <code>Error response from daemon: open perfil-seccomp.json: no such file or directory</code> (ou erro de sintaxe JSON). Dica para descobrir as syscalls do seu app: em <em>desenvolvimento</em>, rode com <code>--security-opt seccomp=unconfined --cap-add SYS_PTRACE</code> e faça um <code>strace -c -f</code> dentro do container; aí monte a lista de <code>allow</code> e volte para o perfil restritivo em produção.</div>
+
+<hr>
+
+<h2>AppArmor (e SELinux)</h2>
+<p>Enquanto o seccomp filtra <em>syscalls</em> (o que o processo pode <strong>pedir</strong> ao kernel), o AppArmor confina <em>por perfil de aplicação</em> (o que o processo pode <strong>acessar</strong>): regras como "esse processo não pode ler <code>/proc/*/mem</code>" ou "não pode escrever em <code>/sys</code>". No Ubuntu (o sistema da Ana), o Docker já aplica o perfil <code>docker-default</code> automaticamente em todo container. Confirme de dentro:</p>
+<pre class="term">$ docker exec api cat /proc/self/attr/current
+docker-default (enforce)</pre>
+<p>"<code>enforce</code>" quer dizer que as regras estão valendo (existe também o modo <code>complain</code>, que só loga). Para usar um perfil próprio, registre-o no host e aplique no container:</p>
+<pre class="term">$ sudo apparmor_parser -r /etc/apparmor.d/meu-perfil
+$ docker run -d --security-opt apparmor=meu-perfil …</pre>
+<p>Em distros com <strong>SELinux</strong> (Fedora, RHEL, Rocky), o mecanismo é análogo: use <code>--security-opt label=…</code> e lembre dos sufixos <code>:z</code>/<code>:Z</code> nos volumes para o container poder gravar neles (ex.: <code>-v api-dados:/app/dados:Z</code>).</p>
+
+<hr>
+
+<h2>no-new-privileges: bloqueia o sudo dentro do container</h2>
+<p>Uma flag extra muito usada em produção: <code>--security-opt no-new-privileges</code> diz ao kernel que o processo <strong>nunca pode ganhar privilégios novos</strong> — ou seja, um <code>sudo</code> ou um binário setuid dentro do container não consegue elevar para root, mesmo que exista. Combina perfeitamente com a aula <a href="usuario-nao-root.html">USER</a>:</p>
+<pre class="term">$ docker run -d --name api \
+>     --user 1000:1000 \
+>     --security-opt no-new-privileges \
+>     --cap-drop ALL \
+>     -p 3000:3000 minha-api:segura
+c3d4e5f6a1b2…</pre>
+<p>Com isso, mesmo que o atacante ache um binário setuid esquecido dentro da imagem, ele não consegue usar para virar root. É barato de ligar e não atrapalha apps normais.</p>
+
+<div class="try" data-goal="no-new-privileges" data-solucao="docker run --rm --security-opt=no-new-privileges nginx:alpine">
+<p class="try-task"><strong>Missão:</strong> rode um container com <code>no-new-privileges</code>: <code>docker run --rm --security-opt no-new-privileges nginx:alpine</code> (no simulador, use <code>=</code> na flag). Lembre: por baixo, o perfil seccomp padrão já está ativo nesse container.</p>
+</div>
+
+<hr>
+
+<h2>As camadas na prática: um ataque passo a passo</h2>
+<p>Imagine que um atacante explorou uma falha na API da Loja Aurora e conseguiu executar comandos dentro do container. Veja o que cada camada faz com ele:</p>
+<ol class="passo">
+  <li>Ele tenta virar root com <code>sudo</code> → bloqueado pelo <code>no-new-privileges</code> e por não haver usuário root útil (aula <a href="usuario-nao-root.html">USER</a>).</li>
+  <li>Ele tenta <code>mount</code> do disco do host → syscall bloqueada pelo perfil seccomp padrão.</li>
+  <li>Ele tenta ler <code>/proc/1/mem</code> do host → bloqueado pelo AppArmor (<code>docker-default</code>).</li>
+  <li>Ele tenta alterar o binário da app para persistir o acesso → sistema de arquivos somente leitura (aula <a href="read-only.html">--read-only</a>).</li>
+  <li>Ele tenta abrir portas privilegiadas ou mudar rotas → sem capabilities (aula <a href="cap-drop.html">--cap-drop</a>).</li>
+</ol>
+<p>Nenhuma camada é perfeita sozinha — mas cada uma fecha uma porta, e o atacante precisa passar por todas.</p>
+
+<hr>
+
+<h2>Resumo: as camadas de segurança do container</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Camada</th><th>Opção / instrução</th><th>O que bloqueia</th></tr>
+<tr><td>Usuário</td><td><code>USER</code> / <code>--user</code></td><td>Processo não roda como root.</td></tr>
+<tr><td>Capabilities</td><td><code>--cap-drop</code> / <code>--cap-add</code></td><td>Tira os "pedaços" de poder do root.</td></tr>
+<tr><td>Syscalls</td><td>seccomp (perfil padrão ou <code>--security-opt seccomp=…</code>)</td><td>Filtra as chamadas de sistema permitidas (~44 bloqueadas por padrão).</td></tr>
+<tr><td>AppArmor / SELinux</td><td><code>--security-opt apparmor=…</code> / <code>label=…</code></td><td>Confina o acesso a arquivos e recursos do host.</td></tr>
+<tr><td>Sistema de arquivos</td><td><code>--read-only</code> + <code>--tmpfs</code></td><td>Ninguém altera o conteúdo do container.</td></tr>
+<tr><td>Privilégios novos</td><td><code>--security-opt no-new-privileges</code></td><td>setuid/sudo não consegue elevar privilégios.</td></tr>
+</table>
+</div>
+<p>Em produção, use as camadas <em>juntas</em>: usuário comum + caps mínimas + seccomp padrão + read-only + no-new-privileges. Cada uma cobre um tipo de ataque diferente.</p>
+
+<hr>
+
+<h2>Erros comuns</h2>
+<div class="warning"><strong>Perfil seccomp apontando para caminho errado:</strong> <code>--security-opt seccomp=perfil.json</code> procura o arquivo <em>relativo ao diretório onde você rodou o comando</em>. Se você rodou de <code>~/</code> e o arquivo está em <code>~/minha-api/</code>, o erro é <code>Error response from daemon: open perfil.json: no such file or directory</code>. Use o caminho completo: <code>--security-opt seccomp=$PWD/perfil.json</code>.</div>
+<div class="warning"><strong>App que precisa de uma syscall bloqueada:</strong> se a app usa <code>perf_event_open</code> ou <code>ptrace</code> (raro, mas acontece em ferramentas de monitoreo), o perfil padrão bloqueia e a app quebra com <code>Operation not permitted</code>. A solução não é desligar o seccomp (<code>seccomp=unconfined</code>) em produção: é fazer um perfil próprio que permita só essa syscall.</div>
+<div class="warning"><strong>no-new-privileges quebrando sudo legítimo:</strong> se a sua imagem depende de um script que faz <code>sudo</code> na inicialização, com <code>no-new-privileges</code> o sudo falha silenciosamente (exit code 1). Em imagens modernas você nem precisa de sudo — rode direto como o usuário certo com <code>USER</code>.</div>
+
+<hr>
+
+<h2>Quiz rápido</h2>
+<div class="mc" data-answer="2">
+<p class="mc-q">1. O que o seccomp faz?</p>
+<label><input type="radio" name="q1"> Criptografa os arquivos do container</label>
+<label><input type="radio" name="q1"> Filtra quais chamadas de sistema (syscalls) o processo do container pode fazer ao kernel</label>
+<label><input type="radio" name="q1"> Limita o uso de CPU</label>
+<label><input type="radio" name="q1"> Gerencia as portas de rede</label>
+</div>
+
+<div class="mc" data-answer="3">
+<p class="mc-q">2. O perfil seccomp padrão do Docker já vem ligado e bloqueia aproximadamente quantas syscalls?</p>
+<label><input type="radio" name="q2"> Nenhuma — só se você configurar</label>
+<label><input type="radio" name="q2"> Cerca de 5</label>
+<label><input type="radio" name="q2"> Cerca de 44 (mount, ptrace, bpf, módulos do kernel…)</label>
+<label><input type="radio" name="q2"> Todas as ~300</label>
+</div>
+
+<div class="mc" data-answer="4">
+<p class="mc-q">3. Para que serve <code>--security-opt no-new-privileges</code>?</p>
+<label><input type="radio" name="q3"> Para impedir o container de usar rede</label>
+<label><input type="radio" name="q3"> Para trocar a porta publicada</label>
+<label><input type="radio" name="q3"> Para criar um novo usuário</label>
+<label><input type="radio" name="q3"> Para impedir que processos dentro do container ganhem privilégios novos (sudo/setuid não funciona)</label>
+</div>
+
+<div class="mc" data-answer="1">
+<p class="mc-q">4. Qual a diferença entre seccomp e AppArmor?</p>
+<label><input type="radio" name="q4"> Seccomp filtra as syscalls (pedidos ao kernel); AppArmor confina o acesso a arquivos e recursos por perfil de aplicação</label>
+<label><input type="radio" name="q4"> Seccomp é para Windows; AppArmor é para Linux</label>
+<label><input type="radio" name="q4"> Não há diferença</label>
+<label><input type="radio" name="q4"> Seccomp limita a memória; AppArmor limita o disco</label>
+</div>
+
+<hr>
+
+<h2>Resumo</h2>
+<ul>
+  <li>Seccomp filtra <strong>syscalls</strong>: o Docker já aplica um perfil padrão que bloqueia ~44 chamadas perigosas (<code>mount</code>, <code>ptrace</code>, <code>bpf</code>, módulos do kernel…).</li>
+  <li>Perfil próprio em JSON com <code>--security-opt seccomp=arquivo.json</code>; <code>defaultAction: SCMP_ACT_ERRNO</code> bloqueia tudo que não estiver na lista de allow.</li>
+  <li>AppArmor/SELinux confinam por <strong>perfil de aplicação</strong> (acesso a arquivos); no Ubuntu o perfil <code>docker-default</code> já vem ativo.</li>
+  <li><code>--security-opt no-new-privileges</code> impede o processo de ganhar privilégios novos — sudo/setuid não funciona dentro do container.</li>
+  <li>As camadas se somam: usuário não-root + cap-drop + seccomp + AppArmor + read-only + no-new-privileges.</li>
+  <li>Erros reais: caminho errado do perfil JSON (<code>no such file or directory</code>) e app que depende de syscall bloqueada (<code>Operation not permitted</code>).</li>
+</ul>
+
+<div class="tip"><strong>Próxima aula:</strong> <a href="multi-stage.html">Multi-stage builds: imagens enxutas</a> — deixar a imagem final pequena já reduz a superfície de ataque.</div>
+
+<div class="pager"></div>
+
+</div>
+</main>
+</div>
+<script src="assets/site.js?v=4"></script>
+</body>
+</html>

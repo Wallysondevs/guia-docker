@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Erros comuns do Docker e soluções — mensagens reais e como resolver | Guia Docker</title>
+<meta name="description" content="Os erros mais comuns do Docker com a mensagem real impressa pelo Docker Engine 27.x, a causa e a solução passo a passo: daemon parado, permissão no socket, porta já alocada, imagem não existe, nome repetido, remover container rodando, permission denied em mount, OCI runtime exec failed, exec em container parado, disco cheio, healthcheck unhealthy, container que morre na hora, containers que não se acham na rede, variável não set no Compose, rate limit no pull, COPY failed no build e docker não encontrado. Comandos de diagnóstico e tabela resumo sintoma → causa.">
+<link rel="stylesheet" href="assets/style.css?v=4">
+<script>try{var t=localStorage.getItem("tema");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<meta http-equiv="Cache-Control" content="no-store, must-revalidate">
+<script>try{history.scrollRestoration="manual"}catch(e){}(function(){var n=0;function t(){window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;if(++n<60)setTimeout(t,50)}t();window.addEventListener("pagehide",function(){window.scrollTo(0,0);document.documentElement.scrollTop=0;});window.addEventListener("pageshow",function(){window.scrollTo(0,0)});window.addEventListener("load",function(){window.scrollTo(0,0)});})();document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(a){var h=a.getAttribute("href")||"";if(/[.]html($|[?#])/.test(h)&&a.host===location.host){window.scrollTo(0,0);document.documentElement.scrollTop=0;}}});</script>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" id="sidebar" aria-label="Tópicos"></nav>
+<main class="main">
+<div class="content">
+
+<div class="pager"></div>
+
+<h1><span class="hl">Erros comuns</span> e soluções</h1>
+
+<p class="intro">Errar faz parte — e no Docker a boa notícia é que as mensagens de erro são <strong>longas, mas sinceras</strong>: a causa quase sempre está na última linha. A Ana já colecionou sustos o suficiente para montar esta página: são os <strong>17 erros mais comuns</strong>, cada um com a mensagem real (Docker Engine 27.x), a causa e a solução passo a passo. No fim, uma tabela resumo para diagnosticar rápido.</p>
+
+<div class="note">
+<strong>Você vai aprender</strong>
+<ul>
+  <li>A ler a mensagem de erro do Docker até o fim — a causa está na última linha.</li>
+  <li>O trio de diagnóstico que resolve quase tudo: <code>docker ps -a</code>, <code>docker logs NOME</code>, <code>docker inspect NOME</code>.</li>
+  <li>Resolver: daemon parado, permissão no socket, porta ocupada, imagem inexistente, nome repetido, remover rodando, permissão em mount, exec em container parado, disco cheio, unhealthy, container que morre na hora, DNS entre containers, variável faltando, rate limit, COPY failed e "docker não encontrado".</li>
+</ul>
+</div>
+
+<hr>
+
+<h2>O ritual de diagnóstico (use antes de qualquer erro)</h2>
+<ol class="passo">
+  <li><code>docker ps -a</code> — quem está rodando? Quem está parado com <code>Exited (N)</code>? O número entre parênteses é o <strong>código de saída</strong> do processo (0 = saiu bem; 1, 137… = erro ou morte por sinal).</li>
+  <li><code>docker logs NOME</code> — o que o app imprimiu antes de morrer? Quase todo container que "sai na hora" deixou a pista aqui.</li>
+  <li><code>docker inspect NOME</code> — detalhes em JSON: rede, portas publicadas, volumes, imagem, comando, variáveis de ambiente.</li>
+  <li><code>docker system df</code> — se o erro envolve disco/espaço, esse comando mostra quem está ocupando.</li>
+</ol>
+
+<hr>
+
+<h2>1. Não conecta no daemon</h2>
+<div class="warn"><strong>Erro real:</strong> <code>docker: Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?</code></div>
+<p><strong>Causa:</strong> o servidor do Docker (<code>dockerd</code>) não está rodando — ou está, mas seu usuário não tem permissão para falar com o socket.</p>
+<pre class="term">$ sudo systemctl start docker     « inicia o serviço agora
+$ sudo systemctl enable docker    « para iniciar junto com o sistema
+$ docker info                     « confirma que está no ar
+Server:
+  Containers: 0
+  Images:     6
+  Server Version: 27.3.1</pre>
+<p>No Docker Desktop (Mac/Windows), basta abrir o aplicativo — se ele estiver aberto e o erro persiste, reinicie o app.</p>
+
+<hr>
+
+<h2>2. Permissão negada no socket</h2>
+<div class="warn"><strong>Erro real:</strong> <code>permission denied while trying to connect to the Docker daemon socket at unix:///var/run/docker.sock</code></div>
+<p><strong>Causa:</strong> seu usuário não está no grupo <code>docker</code>, que é o dono do socket. A alternativa preguiçosa é rodar tudo com <code>sudo</code> — funciona, mas acostuma mal e quebra scripts.</p>
+<pre class="term">$ sudo usermod -aG docker $USER     « adiciona seu usuário ao grupo
+$ newgrp docker                     « aplica na sessão atual (ou faça logout/login)
+$ docker ps                         « agora funciona sem sudo</pre>
+
+<hr>
+
+<h2>3. Porta já está em uso</h2>
+<div class="warn"><strong>Erro real:</strong> <code>docker: Error response from daemon: driver failed programming external connectivity on endpoint meu-site (a1b2c3d4e5f6…): Bind for 0.0.0.0:8080 failed: port is already allocated.</code></div>
+<p><strong>Causa:</strong> outro processo — outro container ou um programa do host — já está usando a porta 8080 da sua máquina.</p>
+<pre class="term">$ docker ps                                   « procure quem publicó a 8080
+… 0.0.0.0:8080->80/tcp
+$ sudo ss -ltnp | grep 8080                   « ou veja no host quem escuta a porta
+$ docker run -d -p 8081:80 --name meu-site nginx:alpine   « use outra porta do host
+$ docker run -d -p 8080:80 --name meu-site nginx:alpine   « agora foi</pre>
+<p>Lembre: no <code>-p HOST:CONTAINER</code>, é o lado <strong>HOST</strong> que precisa estar livre.</p>
+
+<hr>
+
+<h2>4. Imagem não existe / pull negado</h2>
+<div class="warn"><strong>Erro real:</strong> <code>Unable to find image 'meuapp:1.0' locally</code> seguido de <code>docker: pull access denied for meuapp, repository does not exist or may require 'docker login'.</code></div>
+<p><strong>Causa:</strong> a imagem não está no computador e o Docker tentou baixar do Hub (o <code>run</code> faz pull automático) — mas o nome/tag está errado, o repositório é privado, ou não existe.</p>
+<pre class="term">$ docker images                       « veja o que você tem local
+$ docker pull nginx:alpine            « baixa a imagem certa
+$ docker run -d -p 8080:80 nginx:alpine
+$ docker login                        « para repositórios privados, antes do pull/run</pre>
+<p>Se rodou <code>docker run api:latest</code> antes do <code>docker build -t api .</code>, dá esse mesmo erro — build primeiro, run depois.</p>
+
+<hr>
+
+<h2>5. Nome de container repetido</h2>
+<div class="warn"><strong>Erro real:</strong> <code>docker: Error response from daemon: Conflict. The container name "/meu-site" is already in use by container "a1b2c3d4e5f6…". You have to remove (or rename) that container to be able to reuse that name.</code></div>
+<p><strong>Causa:</strong> nomes são únicos — já existe um container (mesmo parado) com esse <code>--name</code>.</p>
+<pre class="term">$ docker ps -a                        « procure o dono do nome
+$ docker rm meu-site                  « apaga o container antigo (parado)
+$ docker run -d --name meu-site nginx:alpine   « agora o nome está livre
+# ou escolha outro nome:
+$ docker run -d --name meu-site-2 nginx:alpine</pre>
+
+<hr>
+
+<h2>6. Remover container que está rodando</h2>
+<div class="warn"><strong>Erro real:</strong> <code>Error response from daemon: cannot remove container "meu-site": container is running: stop the container before removing or force remove</code></div>
+<p><strong>Causa:</strong> <code>docker rm</code> sem <code>-f</code> só apaga container <strong>parado</strong>. A própria mensagem entrega a solução.</p>
+<pre class="term">$ docker stop meu-site
+meu-site
+$ docker rm meu-site
+meu-site
+# ou, se tiver certeza absoluta (banco de dados pode corromper!):
+$ docker rm -f meu-site</pre>
+
+<hr>
+
+<h2>7. Permission denied ao montar pasta</h2>
+<div class="warn"><strong>Erro real (Linux):</strong> <code>docker: Error response from daemon: failed to create shim task: OCI runtime create failed: runc create failed: unable to start container process: error during container init: open /dados/arquivo.txt: permission denied: unknown.</code><br><strong>Erro real (Docker Desktop):</strong> <code>Mounts denied: The path /home/ana/site is not shared from the host and is not known to Docker.</code></div>
+<p><strong>Causa:</strong> três CANDIDATAS comuns: (a) o caminho do host não existe; (b) no Docker Desktop, a pasta não está na lista de "File sharing" (Settings → Resources → File sharing); (c) o usuário <em>dentro</em> do container não tem permissão de ler/escrever na pasta do host.</p>
+<pre class="term">$ ls -ld /home/ana/site               « confirme que a pasta existe
+$ sudo chown -R 1000:1000 /home/ana/site   « ajusta o dono para o UID do usuário do container
+$ docker run -d -v /home/ana/site:/app/site:ro --user 1000:1000 nginx:alpine
+# no Docker Desktop: vá em Settings > Resources > File sharing e adicione a pasta</pre>
+
+<hr>
+
+<h2>8. OCI runtime exec failed (executável não existe)</h2>
+<div class="warn"><strong>Erro real:</strong> <code>docker: Error response from daemon: OCI runtime exec failed: exec failed: unable to start container process: exec: "bash": executable file not found in $PATH: unknown.</code></div>
+<p><strong>Causa:</strong> a imagem não tem aquele executável. Imagens <strong>Alpine e distroless não têm <code>bash</code></strong> — só <code>sh</code>. Também acontece com <code>curl</code> em imagens mínimas.</p>
+<pre class="term">$ docker exec -it meu-site sh        « use sh, não bash
+$ docker exec meu-site which curl     « erro se não tiver curl na imagem
+# para instalar dentro do container (Alpine):  docker exec meu-site sh -c 'apk add curl'</pre>
+
+<hr>
+
+<h2>9. exec em container parado</h2>
+<div class="warn"><strong>Erro real:</strong> <code>Error response from daemon: Container meu-site is not running</code></div>
+<p><strong>Causa:</strong> <code>docker exec</code> só funciona em container <strong>rodando</strong>. Se o container já saiu, ou você inicia de novo (<code>docker start</code>) ou lê os logs (<code>docker logs</code>) para ver o que aconteceu.</p>
+<pre class="term">$ docker ps -a                        « viu que está "Exited"?
+$ docker start meu-site               « inicia de novo
+$ docker exec -it meu-site sh         « agora vai
+# se ele sai de novo na hora, veja por quê:
+$ docker logs meu-site</pre>
+
+<hr>
+
+<h2>10. Container morre na hora (sai com código != 0)</h2>
+<div class="warn"><strong>Sintoma:</strong> <code>docker run -d …</code> imprime o ID, mas o <code>docker ps -a</code> mostra <code>Exited (1) 2 seconds ago</code>.</div>
+<p><strong>Causa:</strong> o processo principal do container terminou com erro. A pista está nos logs:</p>
+<pre class="term">$ docker run -d --name api api:latest
+a1b2c3d4e5f6…
+$ docker ps -a
+CONTAINER ID   IMAGE         STATUS                       NAMES
+a1b2c3d4e5f6   api:latest    Exited (1) 3 seconds ago     api
+$ docker logs api
+node:internal/modules/cjs/loader:1080
+  throw err;                     « erro real do Node: módulo não encontrado, porta errada, etc.
+…
+$ docker run --rm api:latest node -e "console.log('testando')"   « rode outro comando pra debugar</pre>
+<p>Erros clássicos que fazem isso: porta do app diferente da publicada, <code>listen</code> em <code>127.0.0.1</code> (app sobe mas não responde de fora), variável de ambiente obrigatória faltando, arquivo de configuração não encontrado dentro da imagem.</p>
+
+<hr>
+
+<h2>11. Disco cheio</h2>
+<div class="warn"><strong>Erro real:</strong> <code>docker: Error response from daemon: … write /var/lib/docker/overlay2/…: no space left on device.</code> (também aparece no pull: <code>failed to register layer: … no space left on device</code>)</div>
+<p><strong>Causa:</strong> imagens, containers parados, volumes e cache de build acumularam e encheram a partição do Docker (ou o disco todo).</p>
+<pre class="term">$ docker system df                    « veja quanto cada coisa ocupa
+TYPE            TOTAL     ACTIVE    SIZE      RECLAIMABLE
+Images          40        3         12GB      10GB (83%)
+Containers      15        2         2GB       1.8GB (90%)
+Local Volumes   8         1         30GB      25GB (83%)
+Build Cache     120       0         8GB       8GB
+$ docker system prune -a --volumes    « limpa containers parados, imagens soltas, redes, cache E volumes não usados
+$ df -h                               « se o próprio host estiver cheio, libere espaço fora do Docker</pre>
+<p>Para o cache de build especificamente: <code>docker builder prune</code>.</p>
+
+<hr>
+
+<h2>12. Healthcheck unhealthy</h2>
+<div class="warn"><strong>O sintoma:</strong> no <code>docker ps</code> o status aparece como <code>Up 2 minutes (unhealthy)</code>, e <code>docker inspect --format '{{.State.Health.Status}}' meu-site</code> devolve <code>unhealthy</code>.</div>
+<p><strong>Causa:</strong> o comando do <code>HEALTHCHECK</code> está falhando dentro do container — o app pode estar no ar mas o teste está errado (porta errada, ferramenta faltando na imagem — ex.: <code>curl</code> que não existe em Alpine, app ainda inicializando).</p>
+<pre class="term">$ docker inspect meu-site | grep -A8 '"Health"'   « histórico dos testes e o erro de cada um
+$ docker logs meu-site                              « o app está de pé?
+$ docker exec meu-site wget -qO- http://localhost:3000/saude   « teste o healthcheck na mão
+# imagem mínima sem curl/wget: use outra forma:
+# HEALTHCHECK CMD node -e "require('http').get('http://localhost:3000/saude', r => process.exit(r.statusCode===200?0:1))"</pre>
+<p>Corrija o <code>HEALTHCHECK</code> no Dockerfile (ou o <code>--health-cmd</code> no run) e <strong>recrie</strong> o container (healthcheck não muda em container existente: <code>docker stop</code> + <code>rm</code> + <code>run</code> de novo).</p>
+
+<hr>
+
+<h2>13. Containers não se acham pelo nome na rede</h2>
+<div class="warn"><strong>Erro real:</strong> <code>Error: getaddrinfo ENOTFOUND db</code> (Node) ou <code>psycopg2.OperationalError: could not translate host name "db"</code> (Python) ou <code>ping: bad address 'api'</code>.</div>
+<p><strong>Causa:</strong> o DNS interno do Docker só resolve nomes de containers que estão na <strong>mesma rede</strong> — e a rede padrão <code>bridge</code> não tem DNS automático (só redes criadas por usuário/Compose têm). Se um dos containers está na <code>bridge</code> padrão e o outro numa rede própria, eles não se enxergam por nome.</p>
+<pre class="term">$ docker network create appnet
+$ docker run -d --name db --network appnet postgres:16-alpine
+$ docker run -d --name api --network appnet -e DATABASE_URL=postgresql://postgres:segredo@db:5432/app api:latest
+$ docker exec api ping -c1 db
+PING db (172.18.0.2): 56 data bytes   « agora resolve!</pre>
+<p>Com Compose isso não acontece: todos os serviços do mesmo projeto entram na mesma rede automaticamente (a menos que você os separe de propósito).</p>
+
+<hr>
+
+<h2>14. Variável não definida no Compose</h2>
+<div class="warn"><strong>Aviso real:</strong> <code>WARN: The "POSTGRES_PASSWORD" variable is not set. Defaulting to a blank string.</code> — e o serviço sobe com a variável vazia e quebra depois.</div>
+<p><strong>Causa:</strong> o YAML usa <code>${VAR}</code> e ela não existe no arquivo <code>.env</code> nem no ambiente do shell.</p>
+<pre class="term">$ cat .env                            « confira o arquivo na pasta do projeto
+POSTGRES_PASSWORD=segredo
+$ docker compose config | grep -i password   « veja como ficou resolvido
+$ echo ".env" >> .gitignore           « e nunca commite o .env</pre>
+
+<hr>
+
+<h2>15. Rate limit no pull (Docker Hub)</h2>
+<div class="warn"><strong>Erro real:</strong> <code>toomanyrequests: You have reached your pull rate limit.</code> (ou <code>429 Too Many Requests</code>)</div>
+<p><strong>Causa:</strong> o Docker Hub limita pulls anônimos (100 a cada 6h por IP) e o limite estourou — comum em CI e em redes de empresa com NAT.</p>
+<pre class="term">$ docker login -u ana                « logado, o limite é maior (e ilimitado em planos pagos)
+$ docker pull nginx:alpine
+# em CI: use o login-action com secrets, ou um mirror/registry próprio</pre>
+
+<hr>
+
+<h2>16. COPY failed no build</h2>
+<div class="warn"><strong>Erro real:</strong> <code>#8 ERROR: failed to solve: failed to compute cache key: failed to calculate checksum of ref …: failed to walk /var/lib/docker/tmp/buildkit-mount…: lstat /app/arquivo.txt: no such file or directory</code> — e a variante mais comum: <code>COPY failed: file not found in build context or excluded by .dockerignore</code>.</div>
+<p><strong>Causa:</strong> o arquivo não está no <strong>contexto de build</strong> (a pasta do <code>.</code> no comando) ou foi excluído pelo <code>.dockerignore</code>.</p>
+<pre class="term">$ ls                       « rode na MESMA pasta do build e veja se o arquivo está lá
+$ cat .dockerignore        « o arquivo está nessa lista? tire de lá
+$ docker build -t app .    « o contexto é a pasta atual — não a pasta do Dockerfile, se forem diferentes</pre>
+
+<hr>
+
+<h2>17. docker: command not found</h2>
+<div class="warn"><strong>Erro real:</strong> <code>bash: docker: command not found</code></div>
+<p><strong>Causa:</strong> o Docker não está instalado ou não está no <code>PATH</code> dessa sessão (comum após instalar sem reiniciar o terminal, ou dentro de um shell estranho).</p>
+<pre class="term">$ which docker          « nada? não está no PATH
+$ sudo systemctl status docker   « instalado mas parado?
+$ echo $PATH              « a pasta /usr/bin está aí?
+# reinstale pela aula:
+# → instalar.html</pre>
+
+<hr>
+
+<h2>Tabela resumo: sintoma → causa provável → diagnóstico</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Sintoma / mensagem</th><th>Causa provável</th><th>Comando de diagnóstico</th></tr>
+<tr><td><code>Cannot connect to the Docker daemon</code></td><td>daemon parado</td><td><code>sudo systemctl status docker</code></td></tr>
+<tr><td><code>permission denied … docker.sock</code></td><td>usuário fora do grupo <code>docker</code></td><td><code>groups $USER</code></td></tr>
+<tr><td><code>port is already allocated</code></td><td>porta do host ocupada</td><td><code>docker ps</code>, <code>ss -ltnp</code></td></tr>
+<tr><td><code>Unable to find image … locally</code> + pull denied</td><td>nome/tag errada ou run antes do build</td><td><code>docker images</code></td></tr>
+<tr><td><code>name … is already in use</code></td><td>já existe container com esse nome</td><td><code>docker ps -a</code></td></tr>
+<tr><td><code>cannot remove container … is running</code></td><td>tentou <code>rm</code> sem parar</td><td><code>docker ps</code></td></tr>
+<tr><td><code>permission denied</code> ao montar</td><td>pasta não compartilhada (Desktop) ou UID sem permissão</td><td><code>ls -ld</code>, <code>docker inspect</code></td></tr>
+<tr><td><code>OCI runtime exec failed: "bash" not found</code></td><td>imagem mínima (Alpine/distroless) sem o executável</td><td><code>docker exec … sh</code></td></tr>
+<tr><td><code>Container … is not running</code> (no exec)</td><td>container parado</td><td><code>docker ps -a</code></td></tr>
+<tr><td><code>Exited (1)</code> logo depois do run</td><td>app morreu; veja o log</td><td><code>docker logs NOME</code></td></tr>
+<tr><td><code>no space left on device</code></td><td>disco cheio de imagens/volumes/cache</td><td><code>docker system df</code>, <code>df -h</code></td></tr>
+<tr><td><code>(unhealthy)</code> no ps</td><td>healthcheck falhando</td><td><code>docker inspect</code> (histórico Health)</td></tr>
+<tr><td><code>ENOTFOUND db</code> entre containers</td><td>containers em redes diferentes</td><td><code>docker network inspect</code></td></tr>
+<tr><td><code>WARN: The "X" variable is not set</code></td><td>variável faltando no .env/ambiente</td><td><code>docker compose config</code></td></tr>
+<tr><td><code>toomanyrequests</code> no pull</td><td>rate limit anônimo do Hub</td><td><code>docker login</code></td></tr>
+<tr><td><code>COPY failed: file not found in build context</code></td><td>arquivo fora do contexto ou no .dockerignore</td><td><code>ls</code>, <code>cat .dockerignore</code></td></tr>
+<tr><td><code>docker: command not found</code></td><td>não instalado ou fora do PATH</td><td><code>which docker</code></td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>Pratique o diagnóstico</h2>
+<div class="try" data-goal="Exited" data-solucao="docker ps -a">
+<p class="try-task"><strong>Missão:</strong> rode <code>docker run hello-world</code> (sem <code>--rm</code>) e depois <code>docker ps -a</code> — você vai ver o container parado com status <code>Exited (0)</code>, que é exatamente o que aparece quando um container terminou.</p>
+</div>
+
+<hr>
+
+<h2>Resumo</h2>
+<ul>
+  <li>Leia a mensagem até o fim: a última linha quase sempre diz a causa e, às vezes, a própria solução.</li>
+  <li>Diagnóstico padrão: <code>docker ps -a</code> → <code>docker logs NOME</code> → <code>docker inspect NOME</code> → <code>docker system df</code>.</li>
+  <li>Os clássicos: daemon parado, socket sem permissão, porta ocupada, run antes do build, nome repetido, rm em container rodando, Alpine sem bash, disco cheio, healthcheck errado.</li>
+  <li>Container que morre na hora = olhe os logs; containers que não se acham = cheque se estão na mesma rede.</li>
+  <li>Nunca apague volumes às cegas: <code>prune --volumes</code> e <code>compose down -v</code> são irreversíveis.</li>
+</ul>
+
+<div class="tip"><strong>Próxima aula:</strong> <a href="quiz.html">Quiz</a></div>
+
+</div>
+</main>
+</div>
+<script src="assets/site.js?v=4"></script>
+</body>
+</html>

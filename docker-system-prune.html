@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>docker system prune — limpar containers, imagens, volumes e cache | Guia Docker</title>
+<meta name="description" content="O docker system prune: o que ele remove por padrão (containers parados, redes não usadas, imagens dangling e cache de build), as flags -a (todas as imagens não usadas), --volumes (cuidado com os dados!), -f (sem confirmar), --filter until=24h e os prunes mirados (container/image/volume/network prune), conferindo o antes e o depois com docker system df (inclusive com --format) e tabela de alertas.">
+<link rel="stylesheet" href="assets/style.css?v=4">
+<script>try{var t=localStorage.getItem("tema");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<meta http-equiv="Cache-Control" content="no-store, must-revalidate">
+<script>try{history.scrollRestoration="manual"}catch(e){}(function(){var n=0;function t(){window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;if(++n<60)setTimeout(t,50)}t();window.addEventListener("pagehide",function(){window.scrollTo(0,0);document.documentElement.scrollTop=0;});window.addEventListener("pageshow",function(){window.scrollTo(0,0)});window.addEventListener("load",function(){window.scrollTo(0,0)});})();document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(a){var h=a.getAttribute("href")||"";if(/[.]html($|[?#])/.test(h)&&a.host===location.host){window.scrollTo(0,0);document.documentElement.scrollTop=0;}}});</script>
+</head>
+<body>
+<div class="layout">
+<nav class="sidebar" id="sidebar" aria-label="Tópicos"></nav>
+<main class="main">
+<div class="content">
+
+<div class="pager"></div>
+
+<h1><span class="hl">docker system prune</span> — limpar a máquina</h1>
+
+<p class="intro">Com o tempo, a máquina junta <strong>containers parados, imagens órfãs, redes sem uso e cache de build</strong> — a aula anterior (<a href="docker-system-df.html">docker system df</a>) mostrou como ver tudo isso na coluna <code>RECLAIMABLE</code>. O <code>docker system prune</code> varre esse entulho de uma vez e devolve o espaço: é o comando de faxina do Docker.</p>
+
+<div class="note">
+<strong>Você vai aprender</strong>
+<ul>
+  <li>O que o <code>docker system prune</code> remove por padrão (e o que ele <em>não</em> remove).</li>
+  <li><code>-a</code>: remover também as imagens não usadas (não só as dangling).</li>
+  <li><code>--volumes</code>: por que essa flag é perigosa.</li>
+  <li><code>-f</code>: rodar sem a pergunta de confirmação (scripts/CI) e <code>--filter until=24h</code>.</li>
+  <li>Os prunes mirados: <code>container/image/volume/network prune</code>.</li>
+  <li>Conferir o antes e o depois com <code>docker system df</code> — inclusive com <code>--format</code>.</li>
+</ul>
+</div>
+
+<hr>
+
+<h2>O básico (com confirmação)</h2>
+<p>Sem nenhuma flag, o prune remove apenas o que <strong>não está em uso</strong>:</p>
+<ul>
+  <li>todos os <strong>containers parados</strong> (rodando não entra);</li>
+  <li>todas as <strong>redes</strong> que nenhum container está usando;</li>
+  <li>todas as <strong>imagens dangling</strong> (as <code>&lt;none&gt;: &lt;none&gt;</code>, sem tag — aula <a href="docker-system-df.html">docker system df -v</a>);</li>
+  <li>todo o <strong>cache de build</strong> dangling.</li>
+</ul>
+<p>Ele sempre mostra o aviso e pede confirmação (<kbd>y</kbd> + <kbd>Enter</kbd>) — no Docker real, nada acontece sem o seu "sim":</p>
+<pre class="term">$ docker system prune
+WARNING! This will remove:
+  - all stopped containers
+  - all networks not used by at least one container
+  - all dangling images
+  - all dangling build cache
+
+Are you sure you want to continue? [y/N] y
+Deleted Containers:
+c3d4e5f6a1b2
+f6a1b2c3d4e5
+
+Deleted Images:
+untagged: hello-world:latest
+deleted: sha256:a1b2c3d4e5f6a1b2c3d4e5f6…
+
+Total reclaimed space: 1.24GB</pre>
+<p>Repare na última linha: <code>Total reclaimed space</code> diz quanto foi recuperado — é a mesma conta que apareceria na coluna <code>RECLAIMABLE</code> do <code>docker system df</code>.</p>
+
+<div class="try" data-goal="Total reclaimed space" data-solucao="docker system prune">
+<p class="try-task"><strong>Missão:</strong> rode <code>docker system prune</code> no terminal (no simulador ele não pergunta; no Docker real, confirme com <code>y</code>) e veja a linha <code>Total reclaimed space</code> no final.</p>
+</div>
+
+<div class="try" data-goal="Total reclaimed space" data-solucao="docker system prune -f">
+<p class="try-task"><strong>Missão:</strong> agora rode <code>docker system prune -f</code> — com <code>-f</code> a faxina acontece sem pedir confirmação.</p>
+</div>
+
+<hr>
+
+<h2>Anatomia das flags</h2>
+<dl class="anatomy">
+  <dt>docker system prune</dt><dd>limpa os objetos do Docker que não estão em uso.</dd>
+  <dt>-a</dt><dd>também remove <strong>todas</strong> as imagens sem container (não só as dangling).</dd>
+  <dt>--volumes</dt><dd>também remove os volumes locais sem uso — <strong>perigoso com dados</strong>.</dd>
+  <dt>-f</dt><dd>não mostra o aviso nem pede confirmação.</dd>
+  <dt>--filter until=24h</dt><dd>limita a limpeza ao que foi criado há mais de 24 horas.</dd>
+</dl>
+
+<hr>
+
+<h2>-f: sem perguntar (scripts e CI)</h2>
+<p>Com <code>-f</code> (ou <code>--force</code>), o comando não mostra o <code>WARNING</code> nem pergunta nada:</p>
+<pre class="term">$ docker system prune -f
+Deleted Containers:
+a1b2c3d4e5f6
+
+Total reclaimed space: 812MB</pre>
+<p>É o formato para scripts e pipelines de CI (aula <a href="docker-ci.html">Docker em pipelines de CI</a>): num servidor de build, ninguém vai digitar "y", então o agendamento usa <code>-f</code>. Só use quando tiver certeza do que está fazendo — em máquina de desenvolvimento, prefira rodar sem <code>-f</code> e ler o aviso antes.</p>
+
+<hr>
+
+<h2>-a / --all: imagens não usadas também</h2>
+<p>Sem <code>-a</code>, só as imagens <em>dangling</em> (sem tag) vão embora. Com <code>-a</code>, o prune remove <strong>todas as imagens que nenhum container está usando</strong> — inclusive imagens baixadas com <code>docker pull</code> e tags suas:</p>
+<pre class="term">$ docker system prune -a
+WARNING! This will remove:
+  - all stopped containers
+  - all networks not used by at least one container
+  - all images not used by at least one container
+  - all build cache
+
+Are you sure you want to continue? [y/N] y
+Deleted Images:
+untagged: node:22-alpine
+untagged: redis:7-alpine
+untagged: python:3.12-slim
+deleted: sha256:c3d4e5f6a1b2…
+…
+Total reclaimed space: 2.71GB</pre>
+<div class="warn"><strong>Cuidado:</strong> com <code>-a</code>, imagens que você baixou ou buildou e que não estão em uso por nenhum container são apagadas. Se precisar delas de novo, dá para fazer <code>docker pull</code> (imagens do Hub) — mas se a imagem era um <strong>build local</strong>, sem push para um registry (aula <a href="docker-tag-push.html">docker tag e push</a>), esse build se perde e precisa ser refeito do zero.</div>
+
+<hr>
+
+<h2>--volumes: a flag mais perigosa</h2>
+<p>Volumes guardam <strong>dados</strong> (banco de dados, uploads). O prune padrão <em>não</em> mexe em volumes. Com <code>--volumes</code>, ele apaga <strong>todos os volumes que nenhum container está usando</strong> — e volume apagado não tem lixeira:</p>
+<pre class="term">$ docker system prune --volumes
+WARNING! This will remove:
+  - all stopped containers
+  - all networks not used by at least one container
+  - all volumes not used by at least one container
+  - all dangling images
+  - all dangling build cache
+
+Are you sure you want to continue? [y/N] y
+Deleted Volumes:
+dados-antigos
+…
+Total reclaimed space: 1.9GB</pre>
+<div class="warn"><strong>Nunca rode <code>docker system prune --volumes</code> em produção sem backup.</strong> Se um volume guarda dados de um banco (Postgres, MySQL…), esses dados somem na hora. Prefira remover volumes um a um, com <code>docker volume rm NOME</code> (aula <a href="docker-volume.html">docker volume</a>), depois de confirmar com <code>docker volume ls</code> e <code>docker system df -v</code> que ninguém mais usa aquele volume.</div>
+
+<hr>
+
+<h2>--filter: limpar só o que é velho</h2>
+<p>Em vez de varrer tudo, dá para limitar o prune pelo tempo — <code>until=</code> aceita horas, minutos ou uma data:</p>
+<pre class="term">$ docker system prune --filter until=24h     « só o que foi criado há mais de 24 horas
+$ docker system prune --filter until=168h    « há mais de 1 semana
+$ docker system prune --filter label=dev     « só objetos com a label "dev" (ex.: label=dev na hora do build)</pre>
+<p>É a forma segura de faxina periódica: o que você criou hoje (e pode estar usando agora) fica intacto.</p>
+
+<hr>
+
+<h2>Os prunes mirados: um tipo por vez</h2>
+<p>Se você quer limpar só uma categoria, existe um comando para cada (todos com as mesmas flags <code>-f</code> e <code>--filter</code>):</p>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Comando</th><th>O que remove</th></tr>
+<tr><td><code>docker container prune</code></td><td>Só containers parados</td></tr>
+<tr><td><code>docker image prune</code></td><td>Só imagens dangling (<code>-a</code> = todas as não usadas)</td></tr>
+<tr><td><code>docker volume prune</code></td><td>Só volumes locais sem uso — <strong>mesmo cuidado do --volumes</strong></td></tr>
+<tr><td><code>docker network prune</code></td><td>Só redes que nenhum container usa</td></tr>
+<tr><td><code>docker builder prune</code></td><td>Só o cache de build (o <code>Build Cache</code> do df)</td></tr>
+</table>
+</div>
+<pre class="term">$ docker builder prune -f    « limpa só o cache de build (o vilão dos discos cheios)
+Total reclaimed space: 1.84GB
+$ docker container prune -f
+Deleted Containers:
+c3d4e5f6a1b2
+Total reclaimed space: 6.2MB</pre>
+
+<hr>
+
+<h2>Antes e depois: conferindo com docker system df</h2>
+<p>A forma correta de usar o prune é medir antes e depois — e dá para deixar a medida bonita com <code>--format</code> (templates Go, aula <a href="docker-inspect.html">docker inspect</a>):</p>
+<pre class="term">$ docker system df --format "table {{.Type}}\t{{.Size}}\t{{.Reclaimable}}"
+TYPE            SIZE      RECLAIMABLE
+Images          1.1GB     874MB (79%)
+Containers      18MB      12MB (66%)
+Local Volumes   245MB     0B (0%)
+Build Cache     1.84GB    1.84GB
+
+$ docker system prune -a -f
+…
+Total reclaimed space: 2.7GB
+
+$ docker system df
+TYPE            TOTAL     ACTIVE    SIZE      RECLAIMABLE
+Images          2         2         236MB     0B (0%)
+Containers      2         2         6MB       0B (0%)
+Local Volumes   1         1         245MB     0B (0%)
+Build Cache     0         0         0B        0B</pre>
+<p>Note que <code>Local Volumes</code> continua com 245MB e 0B recuperável: o prune sem <code>--volumes</code> <strong>preserva os dados</strong>. Esse é o comportamento que você quer 99% das vezes.</p>
+
+<hr>
+
+<h2>Faxina automática (cron / CI)</h2>
+<p>Muita gente agenda uma limpeza leve toda semana, para o cache de build não crescer sem freio. No <code>ana@notebook</code>, basta um <code>crontab</code>:</p>
+<pre class="term">$ crontab -e
+# todo domingo às 23h: limpa só o que não está em uso há mais de 7 dias, sem perguntar
+0 23 * * 0  docker system prune -f --filter until=168h >> /var/log/docker-prune.log 2>&1</pre>
+<p>E num pipeline de CI (aula <a href="docker-ci.html">Docker em pipelines de CI</a>), o passo final do job costuma ser <code>docker system prune -f</code> para não deixar o servidor de build entupido.</p>
+
+<hr>
+
+<h2>Tabela de alertas: o que cada sintoma significa</h2>
+<div class="table-wrap">
+<table class="ref">
+<tr><th>Sintoma</th><th>Causa provável</th><th>Comando para confirmar</th><th>Ação</th></tr>
+<tr><td>Disco cheio (<code>df -h</code> em 98%) e <code>Build Cache</code> enorme</td><td>Cache de build acumulado</td><td><code>docker system df -v</code></td><td><code>docker builder prune -f</code> ou <code>docker system prune -f</code></td></tr>
+<tr><td><code>Images</code> com RECLAIMABLE alto</td><td>Imagens dangling de builds antigos</td><td><code>docker images</code> (procure <code>&lt;none&gt;</code>)</td><td><code>docker image prune</code> (ou <code>-a</code> com cuidado)</td></tr>
+<tr><td><code>Containers</code> parados há dias</td><td>Containers esquecidos de testes</td><td><code>docker ps -a</code></td><td><code>docker container prune</code></td></tr>
+<tr><td>Erro <code>no space left on device</code> durante um build</td><td>Disco cheio, quase sempre por causa do Docker</td><td><code>docker system df</code></td><td>prune + (se preciso) <code>docker builder prune -a</code></td></tr>
+<tr><td>Volume grande e recuperável</td><td>Dados de projeto já apagado</td><td><code>docker volume ls</code> + <code>docker system df -v</code></td><td><code>docker volume rm NOME</code> (só um a um, com certeza!)</td></tr>
+<tr><td>Volume marcado como recuperável <strong>e você tem dados lá</strong></td><td>Container que usa o volume está parado</td><td><code>docker ps -a</code></td><td><strong>Não rode prune --volumes!</strong> Suba o container de novo ou faça backup antes</td></tr>
+</table>
+</div>
+
+<hr>
+
+<h2>Erros reais</h2>
+<div class="warn"><strong>Tentar remover recurso em uso:</strong>
+<pre class="term">$ docker volume rm dados-postgres
+Error response from daemon: remove dados-postgres: volume is in use - [a1b2c3d4e5f6]</pre>
+O volume está anexado a um container (mesmo parado). Pare/remova o container antes (<code>docker rm -f a1b2c3d4e5f6</code>) ou use <code>docker volume prune</code>, que só pega volumes sem uso.</div>
+<div class="warn"><strong>"WARNING" enganoso:</strong> o prune lista o que <em>pode</em> remover, mas se outro processo criar um container entre o aviso e o seu "y", o item simplesmente não é removido (o Docker revalida na hora). Não é erro — é proteção.</div>
+
+<hr>
+
+<h2>Quiz rápido</h2>
+<div class="mc" data-answer="2">
+<p class="mc-q">1. O que o <code>docker system prune</code> (sem flags) remove?</p>
+<label><input type="radio" name="q1"> Todas as imagens, volumes e containers, rodando ou não</label>
+<label><input type="radio" name="q1"> Só o que não está em uso: containers parados, redes sem uso, imagens dangling e cache dangling</label>
+<label><input type="radio" name="q1"> Só o cache de build</label>
+<label><input type="radio" name="q1"> Nada — só mostra o aviso</label>
+</div>
+
+<div class="mc" data-answer="4">
+<p class="mc-q">2. Qual flag faz o prune apagar também os volumes sem uso?</p>
+<label><input type="radio" name="q2"> <code>-v</code></label>
+<label><input type="radio" name="q2"> <code>-a</code></label>
+<label><input type="radio" name="q2"> <code>-f</code></label>
+<label><input type="radio" name="q2"> <code>--volumes</code> (perigoso: apaga dados!)</label>
+</div>
+
+<div class="mc" data-answer="1">
+<p class="mc-q">3. Para que serve o <code>-f</code> no prune?</p>
+<label><input type="radio" name="q3"> Rodar sem mostrar o WARNING nem pedir confirmação (bom para scripts/CI)</label>
+<label><input type="radio" name="q3"> Forçar a remoção de containers rodando</label>
+<label><input type="radio" name="q3"> Apagar também o arquivo de log do Docker</label>
+<label><input type="radio" name="q3"> Filtrar por data de criação</label>
+</div>
+
+<hr>
+
+<h2>Resumo</h2>
+<ul>
+  <li><code>docker system prune</code> remove só o que <strong>não está em uso</strong>: containers parados, redes sem uso, imagens dangling (<code>&lt;none&gt;</code>) e cache dangling. Sempre pede confirmação; a última linha diz <code>Total reclaimed space</code>.</li>
+  <li><code>-f</code> pula a confirmação (scripts/CI); <code>-a</code> inclui todas as imagens sem container; <code>--volumes</code> inclui volumes sem uso — <strong>perigoso, dados não têm lixeira</strong>; <code>--filter until=24h</code> limita por idade.</li>
+  <li>Prunes mirados: <code>docker container/image/volume/network/builder prune</code>.</li>
+  <li>Meça antes e depois com <code>docker system df</code> (ou <code>--format "table {{.Type}}\t{{.Reclaimable}}"</code> para saída de script).</li>
+  <li>Volumes em uso não são apagados — o Docker protege o que está anexado a um container, mesmo parado.</li>
+</ul>
+
+<div class="tip"><strong>Próxima aula:</strong> <a href="docker-inspect.html">docker inspect a fundo</a> — como ver todos os detalhes de um objeto antes (ou depois) de limpar.</div>
+
+</div>
+</main>
+</div>
+<script src="assets/site.js?v=4"></script>
+</body>
+</html>
